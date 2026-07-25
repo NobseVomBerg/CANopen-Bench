@@ -608,3 +608,671 @@ function ObjectsPage({ s, ui, setUi }) {
               onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
               style="border:1px solid var(--inp);background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:86px;outline:none;text-align:right" />
             <span class="hv" onClick=${() => send('obj_write', { idx, sub })} title="write the staged value to the device"
+              style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer">Write</span>`
+          : html`
+            <span style="font:600 12px ${MONO};color:${cur ? 'var(--acc)' : 'var(--tx)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:44px;text-align:right">${cur ?? '—'}</span>`}
+          ${plotIcon(idx, sub)}
+          <span class="hv" onClick=${() => send('fav_toggle', { idx, sub })} title="remove favorite" style="color:var(--faint);cursor:pointer">✕</span>
+        </div>`;
+      }) : html`<div style="padding:10px 12px;font-size:11px;color:var(--faint)">no favorites yet — click ☆ in the object table</div>`}
+    </div>`;
+
+  const favNote = selDevs[0]
+    ? `last known values · SN ${selDevs[0].sn} · from workspace db${s.favorites.lastDb ? ' (' + s.favorites.lastDb + ')' : ''}`
+    : 'select a device to restore last known values (matched via 0x1018:04 serial number)';
+
+  return html`
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:200px;flex:none;border-right:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column;padding:12px 10px;gap:4px">
+      ${!s.objects.groups.length && html`
+        <div style="font-size:11px;color:var(--faint);line-height:1.5;padding:4px">${s.objects.hint}</div>`}
+      ${s.objects.groups.map((g) => {
+        const on = ui.objGroup === g.key;
+        return html`
+        <div class=${on ? '' : 'hv'} onClick=${() => setUi({ ...ui, objGroup: g.key })}
+          style="padding:8px 10px;border-radius:6px;cursor:pointer;background:${on ? 'var(--acc-soft)' : 'transparent'}">
+          <div style="display:flex;justify-content:space-between;font-weight:600;font-size:12px;color:${on ? 'var(--acc)' : 'var(--tx)'}">${g.label}<span style="color:var(--faint);font-weight:400">${g.count}</span></div>
+          <div style="font:10px ${MONO};color:var(--faint);margin-top:1px">${g.range}</div>
+        </div>`;
+      })}
+      <div style="margin-top:auto;font-size:10.5px;color:var(--faint);line-height:1.5;padding:0 4px">EDS: <span style="font-family:${MONO}">${edsCur}</span></div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel2)">
+      <div style="display:grid;grid-template-columns:${cols};padding:7px 0 7px 14px;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel)">
+        <span>Index</span><span>Sub</span><span>Name</span><span>Type</span><span>Acc</span><span>Value</span><span></span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto">
+        ${!s.objects.groups.length && html`
+          <div style="padding:26px 18px;text-align:center;font-size:12px;color:var(--faint)">${s.objects.hint}</div>`}
+        ${(s.objects.catalog[ui.objGroup] || []).map(([idx, sub, name, type, acc, val, min, max]) => {
+          const key = idx + ':' + sub;
+          const cur = vals[key];
+          const shown = cur ?? val;
+          const oor = outOfRange(shown, min, max);
+          const rangeHint = (min != null || max != null) ? ` (EDS range ${min ?? '−∞'}…${max ?? '∞'})` : '';
+          return html`
+          <div style="display:grid;grid-template-columns:${cols};align-items:center;padding:5px 0 5px 14px;border-bottom:1px solid var(--bd2)">
+            <span style="font:11.5px ${MONO};color:var(--acc)">${idx}</span>
+            <span style="font:11.5px ${MONO};color:var(--faint)">${sub}</span>
+            <span style="color:var(--tx);min-width:0;overflow-wrap:anywhere;padding-right:8px">${name}</span>
+            <span style="font:10.5px ${MONO};color:var(--faint)">${type}</span>
+            <span style="font:10.5px ${MONO};color:${acc === 'ro' ? 'var(--faint)' : acc === 'wo' ? 'var(--amb)' : 'var(--grn)'}">${acc}</span>
+            ${acc !== 'ro' ? html`
+              <${SyncInput} value=${shown} title=${'staged value — Write sends it' + rangeHint}
+                onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
+                style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;margin-right:10px" />`
+            : html`
+              <span title=${shown + rangeHint} style="font:11.5px ${MONO};font-weight:${oor ? 600 : 400};color:${oor ? 'var(--amb)' : (cur ? 'var(--acc)' : 'var(--tx)')};padding-right:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`}
+            <span style="display:flex;gap:5px;align-items:center;padding-right:12px">
+              <span onClick=${() => send('fav_toggle', { idx, sub })} title="favorite"
+                style="cursor:pointer;color:${favKeys.has(key) ? 'var(--amb, #d97706)' : 'var(--faint)'};font-size:12px">${favKeys.has(key) ? '★' : '☆'}</span>
+              ${plotIcon(idx, sub)}
+              ${acc !== 'wo' && html`<span class="hv-b" onClick=${() => send('obj_read', { idx, sub })} style="${btn.acc}font-size:10.5px;padding:2px 9px;border-radius:4px;cursor:pointer">Read</span>`}
+              ${acc !== 'ro' && html`<span class="hv" onClick=${() => send('obj_write', { idx, sub })} style="${btn.ghost}font-size:10.5px;padding:2px 9px;border-radius:4px;cursor:pointer">Write</span>`}
+            </span>
+          </div>`;
+        })}
+      </div>
+      <div style="flex:none;border-top:1px solid var(--bd);background:var(--panel);padding:8px 14px 10px;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-weight:600;font-size:11px;color:var(--dim)">RAW SDO · PDO · NMT</span>
+          <span style="font:10px ${MONO};color:var(--faint)">autosaved · restored on next start</span>
+          <span style="margin-left:auto;font:10.5px ${MONO};color:var(--faint)" title="used when a row's NODE field is empty">default target: node ${mirrorNode}</span>
+          <span class="hv" onClick=${() => send('raw_remove')} style="width:20px;height:20px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:4px;color:var(--mid);cursor:pointer;font-weight:700">−</span>
+          <span style="font:600 11px ${MONO};color:var(--mid)">${raw.length}</span>
+          <span class="hv" onClick=${() => send('raw_add')} style="width:20px;height:20px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:4px;color:var(--mid);cursor:pointer;font-weight:700">+</span>
+        </div>
+        ${raw.map((r, ri) => {
+          const type = r.type || 'sdo';
+          const selStyle = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 5px;font:11px ${MONO};outline:none`;
+          const rawSel = (field, value, options, width) => html`
+            <select onChange=${(e) => send('raw_update', { row: ri, field, value: e.target.value })} style="${selStyle};width:${width}px">
+              ${options.map(([v, label]) => html`<option value=${v} selected=${v === value}>${label}</option>`)}
+            </select>`;
+          const sendBtn = html`<span class="hv-b" onClick=${() => send('raw_send', { row: ri })} style="${btn.acc}font-size:11px;padding:5px 12px;border-radius:5px;cursor:pointer">Send</span>`;
+          return html`
+          <div style="display:flex;align-items:center;gap:8px">
+            ${rawSel('type', type, [['sdo', 'SDO'], ['pdo', 'PDO'], ['nmt', 'NMT']], 58)}
+            <${SyncInput} value=${r.node || ''} title="node-id for this row — empty = selected device${type === 'nmt' ? ', 0/empty = all nodes' : ''}"
+              placeholder=${type === 'nmt' ? 'all' : mirrorNode}
+              onCommit=${(v) => send('raw_update', { row: ri, field: 'node', value: v })}
+              style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:36px;outline:none;text-align:center" />
+            ${type === 'sdo' && html`
+              ${rawInp(r, ri, 'i', 64)}${rawInp(r, ri, 's', 34)}${rawInp(r, ri, 'l', 28)}${rawInp(r, ri, 'v', 110)}
+              <span class="hv-b" onClick=${() => send('raw_read', { row: ri })} style="${btn.acc}font-size:11px;padding:5px 12px;border-radius:5px;cursor:pointer">Read</span>
+              <span class="hv" onClick=${() => send('raw_write', { row: ri })} style="${btn.ghost}font-size:11px;padding:5px 12px;border-radius:5px;cursor:pointer">Write</span>`}
+            ${type === 'pdo' && html`
+              ${rawSel('pdo', r.pdo || 'RxPDO1',
+                ['RxPDO1', 'RxPDO2', 'RxPDO3', 'RxPDO4', 'TxPDO1', 'TxPDO2', 'TxPDO3', 'TxPDO4'].map((x) => [x, x]), 86)}
+              <${SyncInput} value=${r.data || ''} placeholder="data bytes, e.g. 01 A0 00 FF" title="up to 8 hex bytes"
+                onCommit=${(v) => send('raw_update', { row: ri, field: 'data', value: v })}
+                style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:246px;outline:none" />
+              ${sendBtn}
+              <${SyncInput} value=${r.cyc || '100'} title="cycle time in ms for cyclic sending (⟳)"
+                onCommit=${(v) => send('raw_update', { row: ri, field: 'cyc', value: v })}
+                style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 6px;font:11.5px ${MONO};width:42px;outline:none;text-align:right" />
+              <span style="font:10px ${MONO};color:var(--faint)">ms</span>
+              <span class="hv" onClick=${() => send('raw_cycle', { row: ri })}
+                title="send this frame cyclically — e.g. to feed a device's RPDO like the machine's PLC would"
+                style="white-space:nowrap;border:1px solid ${r.run ? 'var(--acc)' : 'var(--inp)'};background:${r.run ? 'var(--acc-soft)' : 'transparent'};color:${r.run ? 'var(--acc)' : 'var(--mid)'};font:600 11px ${MONO};padding:5px 10px;border-radius:5px;cursor:pointer">${r.run ? '⟳ on' : '⟳ off'}</span>`}
+            ${type === 'nmt' && html`
+              ${rawSel('cmd', r.cmd || 'start',
+                [['start', 'Start (Operational)'], ['preop', 'Pre-Operational'], ['stop', 'Stop'],
+                 ['reset', 'Reset node'], ['resetcomm', 'Reset communication']], 176)}
+              ${sendBtn}`}
+          </div>`;
+        })}
+      </div>
+    </div>
+
+    <div class="vdrag" onMouseDown=${dragFav} title="drag to resize the favorites panel"
+      style="flex:none;width:5px;cursor:col-resize;background:var(--bd)"></div>
+    <div style="width:${favW}px;flex:none;background:var(--panel);overflow:auto;padding:14px 14px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:600;font-size:13px">Favorites</span><span style="font-size:10px;color:var(--faint)">auto-saved in the workspace</span></div>
+      <div style="font:10px ${MONO};color:var(--faint);line-height:1.5">${favNote}</div>
+      ${favPanel}
+      <span class="hv-b" onClick=${() => send('fav_read_all')} style="text-align:center;${btn.acc}font-size:11.5px;padding:7px 0;border-radius:6px;cursor:pointer">⟳ Read all favorites</span>
+    </div>
+  </div>`;
+}
+
+// ------------------------------------------------------------------ tests --
+function TestsPage({ s, ui, setUi }) {
+  const t = s.tests;
+  const filter = (ui.testFilter || '').toLowerCase();
+  const shown = t.catalog
+    .filter(([, , tools]) => t.toolFilter || tools === '—')
+    .filter(([id, name]) => !filter || id.includes(filter) || name.toLowerCase().includes(filter));
+  const selIds = shown.map((x) => x[0]).filter((id) => t.sel.includes(id));
+  const runningId = t.running ? t.runOrder[t.runIdx] : null;
+  const total = t.runOrder.length;
+  const runLog = t.runOrder
+    .slice(0, t.runIdx + (t.running ? 0 : 1))
+    .filter((id) => t.results[id])
+    .slice(-4)
+    .map((id) => ({
+      line: `${id} ${t.results[id]} · ${(t.catalog.find((x) => x[0] === id) || [])[3]}`,
+      fg: t.results[id] === 'FAIL' || t.results[id] === 'ERROR' ? 'var(--red)' : 'var(--dim)',
+    }));
+  if (t.running && runningId) runLog.push({ line: runningId + ' running…', fg: 'var(--acc)' });
+  const anyFail = Object.values(t.results).includes('FAIL');
+  const cols = '34px 64px 1fr 110px 90px 80px';
+  const repInp = (which, value) => html`
+    <${SyncInput} value=${String(value)} onCommit=${(v) => send('set_repeat', { which, n: parseInt(v, 10) || 1 })}
+      style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:4px 8px;font:12px ${MONO};text-align:right;outline:none" />`;
+
+  return html`
+  <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;padding:9px 18px">
+    <span class="hv" style="border:1px solid var(--inp);border-radius:6px;padding:5px 9px;color:var(--mid);cursor:pointer">Device: <b>DUT2_800</b> ▾</span>
+    <span class="hv" style="border:1px solid var(--inp);border-radius:6px;padding:5px 9px;color:var(--mid);cursor:pointer">Category: <b>Automated</b> ▾</span>
+    <span onClick=${() => send('tool_filter_toggle')}
+      style="border:1px solid ${t.toolFilter ? 'var(--acc)' : 'var(--inp)'};background:${t.toolFilter ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:5px 9px;color:${t.toolFilter ? 'var(--acc)' : 'var(--mid)'};font-weight:600;cursor:pointer">Tool: PSU ${t.toolFilter ? '✓' : '✕'}</span>
+    <span style="flex:1"></span>
+    <span onClick=${() => send('tests_all')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
+    <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
+    <input placeholder="⌕ Filter test cases…" value=${ui.testFilter || ''} onInput=${(e) => setUi({ ...ui, testFilter: e.target.value })}
+      style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:5px 10px;width:170px;outline:none;font:12px 'IBM Plex Sans'" />
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="display:grid;grid-template-columns:${cols};padding:7px 0;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel2)">
+        <span></span><span>ID</span><span>Test case</span><span>Tools</span><span>Result</span><span style="text-align:right;padding-right:16px">Ø time</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto">
+        ${!t.catalog.length && html`
+          <div style="padding:30px 24px;text-align:center;color:var(--faint);font-size:12px;line-height:1.8">
+            <div style="font-weight:600;color:var(--mid)">No test cases found</div>
+            <div>TestCases folder: <span style="font-family:${MONO}">${s.paths.tc}</span></div>
+            <div>Test cases are YAML files (<span style="font-family:${MONO}">${'TC<id>_<name>.yaml'}</span>) —
+              format spec: <span style="font-family:${MONO}">docs/ablaeufe/testfall-format.md</span> ·
+              ready-to-copy examples: <span style="font-family:${MONO}">examples/testcases/</span></div>
+          </div>`}
+        ${shown.map(([id, name, tools, time, err]) => {
+          const sel = t.sel.includes(id);
+          const res = t.results[id] || t.lastRes[id] || '—';
+          const isRun = id === runningId;
+          return html`
+          <div class=${err ? '' : 'hv'} onClick=${err ? null : () => send('test_toggle', { id })}
+            style="display:grid;grid-template-columns:${cols};align-items:center;padding:6px 0;border-bottom:1px solid var(--bd2);background:${isRun ? 'var(--acc-soft)' : sel ? 'var(--sel)' : 'transparent'};cursor:${err ? 'default' : 'pointer'};opacity:${err ? '.65' : '1'}">
+            <span style="display:grid;place-items:center">${err ? html`<span style="color:var(--red);font-weight:700">!</span>` : Cb(sel)}</span>
+            <span style="font:11.5px ${MONO};color:${err ? 'var(--red)' : 'var(--acc)'}">${id}</span>
+            <span style="color:${err ? 'var(--red)' : 'var(--tx)'}">${err ? name + ' — schema error, see file' : name}</span>
+            <span style="font:10.5px ${MONO};color:var(--faint)">${tools}</span>
+            <span style="font-weight:600;font-size:11px;color:${isRun ? 'var(--acc)' : res === 'PASS' ? 'var(--grn)' : res === 'FAIL' || res === 'ERROR' ? 'var(--red)' : 'var(--faint)'}">${isRun ? 'RUN…' : res}</span>
+            <span style="text-align:right;padding-right:16px;font:11px ${MONO};color:var(--faint)">${time}</span>
+          </div>`;
+        })}
+      </div>
+      <div style="flex:none;padding:8px 18px;border-top:1px solid var(--bd);background:var(--pan2, var(--panel2));display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--dim)">
+        <span><b style="color:var(--tx)">${shown.length}</b> shown</span><span><b style="color:var(--tx)">${selIds.length}</b> selected</span>
+        <span onClick=${() => { const name = prompt('Save suite as:', t.activeSuite || ''); if (name) send('suite_save', { name }); }}
+          style="margin-left:auto;color:var(--acc);font-weight:600;cursor:pointer">save suite</span>
+        ${t.suites.map((name) => {
+          const on = t.activeSuite === name;
+          return html`<span onClick=${() => send('suite_load', { name })}
+            style="border:1px solid ${on ? 'var(--acc)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px 'IBM Plex Sans';padding:2px 9px;border-radius:9px;cursor:pointer">${name}${on ? html`<b onClick=${(e) => { e.stopPropagation(); send('suite_delete', { name }); }} style="margin-left:5px;cursor:pointer">✕</b>` : ''}</span>`;
+        })}
+        ${!t.suites.length && html`<span style="color:var(--faint)">no suites saved</span>`}
+      </div>
+    </div>
+    <div style="width:300px;flex:none;border-left:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column;padding:14px 16px;gap:12px;overflow:auto">
+      <div style="font-weight:600;font-size:13px">Run configuration</div>
+      <div style="display:grid;grid-template-columns:1fr 64px;gap:8px;align-items:center;font-size:12px;color:var(--mid)">
+        <span>Repeat test case</span>${repInp('case', t.repeatCase)}
+        <span>Repeat run</span>${repInp('run', t.repeatRun)}
+      </div>
+      <label onClick=${() => send('stop_err_toggle')} style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mid);cursor:pointer">${Cb(t.stopOnErr)}Stop on error</label>
+      <div style="display:flex;gap:8px">
+        <span class="hv-b" onClick=${() => send('run_start')}
+          style="flex:1;text-align:center;background:${t.running || !selIds.length ? 'var(--faint)' : 'var(--grn)'};color:#fff;font-weight:600;padding:8px 0;border-radius:7px;cursor:pointer">${t.running ? 'Running…' : `▶ Start ${selIds.length} tests`}</span>
+        <span class="hv" onClick=${() => send('run_stop')} style="border:1px solid var(--inp);color:${t.running ? 'var(--red)' : 'var(--faint)'};font-weight:600;padding:8px 12px;border-radius:7px;cursor:pointer">■</span>
+      </div>
+      ${t.manual && html`
+      <div style="border:1px solid var(--acc-bd);border-radius:8px;padding:10px 12px;background:var(--acc-soft)">
+        <div style="font-size:10.5px;color:var(--acc);font-weight:700;letter-spacing:.05em;margin-bottom:4px">OPERATOR ACTION · TEST ${t.manual.tid}</div>
+        <div style="font-size:12.5px;color:var(--tx);margin-bottom:8px">${t.manual.text}</div>
+        <div style="display:flex;gap:8px">
+          <span class="hv-b" onClick=${() => send('manual_confirm')} style="flex:1;text-align:center;background:var(--grn);color:#fff;font-weight:600;padding:6px 0;border-radius:6px;cursor:pointer">Done ✓</span>
+          <span class="hv" onClick=${() => send('manual_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Abort</span>
+        </div>
+      </div>`}
+      <div style="border:1px solid var(--bd);border-radius:8px;padding:10px 12px;background:var(--panel2)">
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mid);margin-bottom:6px">
+          <span>${t.running ? 'Running ' + runningId : total ? 'Idle — last run' : 'Idle'}</span>
+          <span>${total ? Math.min(t.runIdx, total) + ' / ' + total : '—'}</span>
+        </div>
+        <div style="height:6px;border-radius:3px;background:var(--bd);overflow:hidden"><span style="display:block;width:${total ? Math.round(100 * t.runIdx / total) : 0}%;height:100%;background:${anyFail ? 'var(--red)' : 'var(--acc)'};transition:width .4s"></span></div>
+        <div style="margin-top:8px;font:10.5px ${MONO};color:var(--dim);line-height:1.7;min-height:56px">
+          ${(runLog.length ? runLog : [{ line: 'no run yet — select tests and press Start', fg: 'var(--faint)' }]).map((r) => html`<div style="color:${r.fg}">${r.line}</div>`)}
+          ${t.runProg && html`<div style="color:var(--acc)">TEST ${t.runProg.tid} step ${t.runProg.step}/${t.runProg.of}  ${t.runProg.text}</div>`}
+        </div>
+      </div>
+      <div style="font-weight:600;font-size:13px;margin-top:2px;display:flex;justify-content:space-between;align-items:baseline">Recent reports<span style="font-size:10.5px;color:var(--acc);font-weight:600;cursor:pointer">overview →</span></div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px">
+        ${t.reports.map((rp) => html`
+          <span style="display:flex;justify-content:space-between;color:var(--mid)"><span style="color:var(--acc);text-decoration:underline;cursor:pointer">${rp.name}</span><span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ------------------------------------------------------------------- swdl --
+function SwdlPage({ s }) {
+  const selDevs = s.devices.filter((d) => d.sel);
+  const w = s.swdl;
+  if (s.adapter !== 'demo' && !w.vendor) {
+    return html`
+    <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;align-content:start">
+      <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:16px 18px;max-width:640px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-weight:600;font-size:13px">Firmware download — vendor-specific</div>
+        <div style="font-size:12px;color:var(--mid);line-height:1.7">
+          CANopen has no complete firmware-update standard. CiA 302-3 only defines a generic
+          program-download framework (objects <span style="font-family:${MONO}">0x1F50</span>/<span style="font-family:${MONO}">0x1F51</span>) —
+          the actual bootloader protocol, image format, erase/verify sequence and timing are
+          manufacturer-specific.
+        </div>
+        <div style="font-size:12px;color:var(--mid);line-height:1.7">
+          Device support therefore ships as a <b>vendor extension package</b> for this tool.
+          No download protocol is installed for the current setup — contact the developer
+          (see the <b>About</b> page, bottom left) to get one built for your devices.
+        </div>
+      </div>
+    </div>`;
+  }
+  const status = w.run ? `transfer via ${w.mode.toUpperCase()} running…`
+    : w.done ? 'all targets verified ✓' : `${selDevs.length} target(s) · v${w.sel}`;
+  return html`
+  <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-content:start;min-height:0">
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+      <div style="font-weight:600;font-size:13px">Firmware library</div>
+      <div class="hv-drop" style="border:1.5px dashed var(--inp);border-radius:8px;padding:18px;text-align:center;color:var(--faint);font-size:12px">Drop firmware file (.bin / .hex) here to add a version</div>
+      <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
+        ${w.fw.map((f) => {
+          const on = w.sel === f.ver;
+          return html`
+          <div class="hv" onClick=${() => send('swdl_fw', { ver: f.ver })}
+            style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--bd2);background:${on ? 'var(--sel)' : 'transparent'};cursor:pointer">
+            <span style="width:12px;height:12px;border-radius:50%;border:1.5px solid ${on ? 'var(--acc)' : 'var(--inp)'};display:grid;place-items:center;flex:none"><span style="width:6px;height:6px;border-radius:50%;background:${on ? 'var(--acc)' : 'transparent'}"></span></span>
+            <span style="font:11.5px ${MONO};flex:1;color:var(--tx)">${f.file}</span>
+            <span style="font:600 10.5px ${MONO};color:${f.tag === 'latest' ? 'var(--grn)' : 'var(--dim)'};background:${f.tag === 'latest' ? 'var(--grn-soft)' : 'var(--chip)'};padding:1px 7px;border-radius:4px">${f.tag}</span>
+            <span style="font:10.5px ${MONO};color:var(--faint)">${f.meta}</span>
+          </div>`;
+        })}
+      </div>
+      <div style="font-size:10.5px;color:var(--faint)">Versions are managed by the tool — checksum, device type and version are read from the file header.</div>
+    </div>
+
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+      <div style="font-weight:600;font-size:13px">Download</div>
+      <div style="font-size:11px;color:var(--dim);font-weight:600">TARGETS <span style="font-weight:400;color:var(--faint)">· selection from Devices box</span></div>
+      ${!selDevs.length && html`<div style="border:1px solid var(--bd2);border-radius:7px;padding:14px;color:var(--faint);font-size:12px">No devices selected — tick target devices in the Devices box on the left.</div>`}
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${selDevs.map((d) => {
+          const p = Math.round(w.prog[String(d.node)] || 0);
+          const done = p >= 100;
+          return html`
+          <div style="border:1px solid var(--bd2);border-radius:7px;padding:9px 12px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font:600 12px ${MONO};color:var(--acc)">${String(d.node).padStart(2, '0')}</span>
+              <span style="font-weight:600;flex:1">${d.name}</span>
+              <span style="font:11px ${MONO};color:var(--faint)">v${d.fw} → v${w.sel}</span>
+              <span style="font-weight:600;font-size:11px;color:${done ? 'var(--grn)' : p > 0 ? 'var(--acc)' : 'var(--faint)'}">${done ? 'DONE ✓' : p > 0 ? p + '%' : w.run ? 'queued' : 'ready'}</span>
+            </div>
+            <div style="height:5px;border-radius:3px;background:var(--bd);overflow:hidden;margin-top:7px"><span style="display:block;width:${p}%;height:100%;background:${done ? 'var(--grn)' : 'var(--acc)'};transition:width .4s"></span></div>
+          </div>`;
+        })}
+      </div>
+      <div style="display:flex;gap:8px">
+        <div onClick=${() => send('swdl_mode', { mode: 'sdo' })} style="flex:1;border:1px solid ${w.mode === 'sdo' ? 'var(--acc)' : 'var(--bd)'};background:${w.mode === 'sdo' ? 'var(--acc-soft)' : 'transparent'};border-radius:7px;padding:9px 11px;cursor:pointer">
+          <div style="font-weight:600;font-size:12px">SDO · serial</div><div style="font-size:10.5px;color:var(--dim);margin-top:2px">One device after another. Safe, works in any NMT state.</div>
+        </div>
+        <div onClick=${() => send('swdl_mode', { mode: 'pdo' })} style="flex:1;border:1px solid ${w.mode === 'pdo' ? 'var(--acc)' : 'var(--bd)'};background:${w.mode === 'pdo' ? 'var(--acc-soft)' : 'transparent'};border-radius:7px;padding:9px 11px;cursor:pointer">
+          <div style="font-weight:600;font-size:12px">PDO · parallel</div><div style="font-size:10.5px;color:var(--dim);margin-top:2px">Block transfer to all targets simultaneously. Fast.</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="hv-b" onClick=${() => send('swdl_start')} style="background:${w.run || !selDevs.length ? 'var(--faint)' : 'var(--acc)'};color:#fff;font-weight:600;padding:8px 22px;border-radius:7px;cursor:pointer">${w.run ? 'Downloading…' : '⇩ Start download'}</span>
+        <span style="font:11px ${MONO};color:var(--dim)">${status}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ------------------------------------------------------------------ trace --
+function fmtSize(bytes) {
+  return bytes < 1048576 ? `${Math.round(bytes / 1024)} kB` : `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+function fmtSpan(sec) {
+  const m = Math.floor(sec / 60);
+  return m ? `${m}m ${Math.round(sec % 60)}s` : `${Math.round(sec)}s`;
+}
+
+function Sparkline({ vals, w = 220, h = 40 }) {
+  const max = Math.max(0.1, ...vals);
+  const pts = vals.map((v, i) => `${((i / Math.max(1, vals.length - 1)) * w).toFixed(1)},${(h - 2 - (v / max) * (h - 6)).toFixed(1)}`).join(' ');
+  return html`
+  <svg width=${w} height=${h} style="display:block">
+    <polyline points=${pts} fill="none" stroke="var(--acc)" stroke-width="1.5" />
+  </svg>`;
+}
+
+// -------------------------------------------------------------- signal plot --
+const PLOT_COLORS = ['var(--acc)', 'var(--grn)', 'var(--amb)', 'var(--red)'];
+
+function TracePlot({ plot, connected }) {
+  const sel = plot.sel || [];
+  const series = plot.series || {};
+  if (!connected) return html`<div style="flex:1;display:grid;place-items:center;color:var(--faint);font-size:12.5px">offline — connect to plot signals</div>`;
+  if (!sel.length) return html`
+    <div style="flex:1;display:grid;place-items:center;text-align:center;color:var(--faint);font-size:12.5px;line-height:1.7">
+      no signals selected<br/>click the <span style="font-family:${MONO}">∿</span> icon next to an object in Objects or Favorites to plot it
+    </div>`;
+  const lines = sel.map((r, i) => {
+    const key = `${r.idx}:${r.sub}`;
+    return { key, label: r.label || key, color: PLOT_COLORS[i % PLOT_COLORS.length], pts: series[key] || [] };
+  });
+  const allT = lines.flatMap((l) => l.pts.map((p) => p[0]));
+  const tMax = allT.length ? Math.max(...allT) : 0;
+  const tMin = allT.length ? Math.min(...allT) : 0;
+  const span = Math.max(0.001, tMax - tMin);
+  const W = 900, H = 280;
+  return html`
+  <div style="flex:1;min-height:0;overflow:auto;background:var(--panel2);padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px 14px">
+      ${allT.length
+        ? html`
+          <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:${H}px">
+            <line x1="0" y1=${H - 0.5} x2=${W} y2=${H - 0.5} stroke="var(--bd)" stroke-width="1" />
+            ${lines.map((l) => {
+              if (l.pts.length < 2) return '';
+              const vals = l.pts.map((p) => p[1]);
+              const vMin = Math.min(...vals), vMax = Math.max(...vals);
+              const vSpan = Math.max(1e-9, vMax - vMin);
+              const pts = l.pts.map((p) => {
+                const x = ((p[0] - tMin) / span) * W;
+                const y = H - 6 - ((p[1] - vMin) / vSpan) * (H - 12);
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+              }).join(' ');
+              return html`<polyline points=${pts} fill="none" stroke=${l.color} stroke-width="1.75" />`;
+            })}
+          </svg>`
+        : html`<div style="height:${H}px;display:grid;place-items:center;color:var(--faint);font-size:12px">waiting for the first sample…</div>`}
+      ${allT.length > 0 && html`<div style="text-align:right;font:10.5px ${MONO};color:var(--faint);margin-top:4px">span ${fmtSpan(span)}</div>`}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${lines.map((l) => {
+        const last = l.pts.length ? l.pts[l.pts.length - 1][1] : null;
+        const vals = l.pts.map((p) => p[1]);
+        const range = vals.length ? `${Math.min(...vals)} … ${Math.max(...vals)}` : '—';
+        return html`
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel);border:1px solid var(--bd);border-radius:7px">
+          <span style="width:10px;height:10px;border-radius:50%;background:${l.color};flex:none"></span>
+          <span style="font:10.5px ${MONO};color:var(--acc);flex:none">${l.key}</span>
+          <span style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.label}</span>
+          <span style="font:600 12px ${MONO};color:var(--tx)">${last ?? '—'}</span>
+          <span style="font:10.5px ${MONO};color:var(--faint);min-width:120px;text-align:right">${range}</span>
+          <span class="hv" onClick=${() => send('plot_toggle', { idx: l.key.split(':')[0], sub: l.key.split(':')[1] })} title="remove from plot"
+            style="color:var(--faint);cursor:pointer">✕</span>
+        </div>`;
+      })}
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:10.5px;color:var(--faint)">Each line auto-scaled to its own min/max — shapes, not absolute heights, are comparable across signals. Pausing the trace freezes sampling.</span>
+      <span class="hv" onClick=${() => send('plot_clear')} style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">Clear all</span>
+    </div>
+  </div>`;
+}
+
+function TraceStats({ st, connected }) {
+  if (!connected) return html`<div style="flex:1;display:grid;place-items:center;color:var(--faint);font-size:12.5px">offline — connect to collect statistics</div>`;
+  if (!st || !st.total) return html`<div style="flex:1;display:grid;place-items:center;color:var(--faint);font-size:12.5px">no frames observed yet</div>`;
+  const card = 'background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 14px;display:flex;flex-direction:column;gap:4px';
+  const lbl = 'font:600 10px ' + MONO + ';color:var(--faint);letter-spacing:.08em';
+  const big = 'font:600 20px ' + MONO + ';color:var(--tx)';
+  const load = st.loadHist.length ? st.loadHist[st.loadHist.length - 1] : 0;
+  const peak = st.loadHist.length ? Math.max(...st.loadHist) : 0;
+  const clsOrder = ['NMT', 'SDO', 'PDO', 'EMCY', 'HB', 'other'];
+  const cols = '70px minmax(200px,1fr) 56px 90px 80px minmax(140px,300px)';
+  return html`
+  <div style="flex:1;min-height:0;overflow:auto;background:var(--panel2);padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:12px">
+      <div style="${card}">
+        <span style="${lbl}">BUS LOAD · last 60 s</span>
+        <div style="display:flex;align-items:flex-end;gap:12px">
+          <span style="${big}">${load.toFixed(1)}%</span>
+          <span style="font:10.5px ${MONO};color:var(--faint);padding-bottom:3px">peak ${peak.toFixed(1)}%</span>
+        </div>
+        <${Sparkline} vals=${st.loadHist.length ? st.loadHist : [0]} />
+      </div>
+      <div style="${card}">
+        <span style="${lbl}">FRAMES</span>
+        <span style="${big}">${st.total.toLocaleString('en')}</span>
+        <span style="font:10.5px ${MONO};color:var(--dim)">${st.rate}/s · observed ${fmtSpan(st.span)}</span>
+      </div>
+      <div style="${card}">
+        <span style="${lbl}">ERROR FRAMES</span>
+        <span style="${big};color:${st.err ? 'var(--red)' : 'var(--grn)'}">${st.err}</span>
+        <span style="font:10.5px ${MONO};color:var(--faint)">since connect</span>
+      </div>
+      <div style="${card}">
+        <span style="${lbl}">COB-IDS</span>
+        <span style="${big}">${st.cobs.length + st.restCobs}</span>
+        <span style="font:10.5px ${MONO};color:var(--faint)">distinct identifiers</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span style="${lbl}">BY CLASS</span>
+      ${clsOrder.filter((c) => st.classes[c]).map((c) => html`
+        <span style="border:1px solid var(--bd);background:var(--panel);color:var(--mid);font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px">${c} <b style="color:var(--tx)">${st.classes[c].toLocaleString('en')}</b></span>`)}
+    </div>
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:${cols};gap:0 12px;padding:7px 14px;border-bottom:1px solid var(--bd);font:600 10px ${MONO};color:var(--faint);letter-spacing:.08em">
+        <span>COB-ID</span><span>DECODED</span><span>CLASS</span><span style="text-align:right">COUNT</span><span style="text-align:right">FRAMES/S</span><span>SHARE</span>
+      </div>
+      ${st.cobs.map((r) => { const share = st.total ? 100 * r.n / st.total : 0; return html`
+      <div style="display:grid;grid-template-columns:${cols};gap:0 12px;padding:4px 14px;border-bottom:1px solid var(--bd2);font:11px ${MONO};color:var(--mid);align-items:center">
+        <span style="color:var(--acc)">${r.cob}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.dec}</span>
+        <span style="color:${r.cls === 'EMCY' ? 'var(--red)' : 'var(--dim)'}">${r.cls || '—'}</span>
+        <span style="text-align:right;color:var(--tx)">${r.n.toLocaleString('en')}</span>
+        <span style="text-align:right">${r.rate ? r.rate.toFixed(1) : '—'}</span>
+        <span style="display:flex;align-items:center;gap:8px">
+          <span style="flex:1;height:5px;border-radius:3px;background:var(--bd);overflow:hidden"><span style="display:block;width:${share.toFixed(1)}%;height:100%;background:${r.cls === 'EMCY' ? 'var(--red)' : 'var(--acc)'}"></span></span>
+          <span style="width:44px;text-align:right;color:var(--dim)">${share < 0.1 && share > 0 ? '<0.1' : share.toFixed(1)}%</span>
+        </span>
+      </div>`; })}
+      ${st.restCobs > 0 && html`
+      <div style="padding:6px 14px;font:10.5px ${MONO};color:var(--faint)">… + ${st.restCobs} more COB-IDs (${st.restN.toLocaleString('en')} frames)</div>`}
+    </div>
+    <div style="font-size:10.5px;color:var(--faint)">Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace freezes the statistics.</div>
+  </div>`;
+}
+
+function TracePage({ s }) {
+  const [usTime, setUsTime] = useState(localStorage.getItem('cb-us-time') === '1');
+  const [view, setView] = useState(localStorage.getItem('cb-trace-view') || 'trace');
+  const setViewMode = (v) => { setView(v); localStorage.setItem('cb-trace-view', v); };
+  const toggleUs = () => { const n = !usTime; setUsTime(n); localStorage.setItem('cb-us-time', n ? '1' : '0'); };
+  // rows carry 6 decimals ("HH:MM:SS.ffffff"); ms mode cuts the last three.
+  // Older captures may hold ms-only stamps — those render as-is either way.
+  const fmtTime = (t) => (!usTime && t && t.length === 15) ? t.slice(0, 12) : t;
+  const cols = `${usTime ? '124px' : '96px'} 38px 60px 32px 200px 200px minmax(260px,420px) 92px`;
+  const hide = s.trace.hide || [];
+  const toggle = (f) => send('trace_filter', { hide: hide.includes(f) ? hide.filter((x) => x !== f) : [...hide, f] });
+  const rows = s.trace.rows;
+  const saved = s.trace.saved || [];
+  const handleImportFile = (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = (reader.result.split(',')[1]) || '';
+      send('trace_import', { filename: file.name, fmt: 'candump', data: b64 });
+    };
+    reader.readAsDataURL(file);
+    ev.target.value = '';
+  };
+  return html`
+  <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;padding:9px 18px">
+    <span onClick=${() => send('trace_toggle')} style="${btn.acc}font-size:11.5px;padding:5px 14px;border-radius:6px;cursor:pointer">${s.trace.paused ? '▶ Resume' : '❚❚ Pause'}</span>
+    <span class="hv" onClick=${() => send('trace_clear')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">Clear</span>
+    <span class="hv" onClick=${() => send('trace_save')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤓ Save</span>
+    ${saved.length > 0 && html`
+      <select onChange=${(e) => { if (e.target.value) send('trace_load', { file: e.target.value }); e.target.value = ''; }}
+        style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 6px;font:11px ${MONO};outline:none;max-width:240px">
+        <option value="">⤒ Load capture…</option>
+        ${saved.map((f) => html`<option value=${f.file}>${f.file} · ${fmtSize(f.size)}</option>`)}
+      </select>`}
+    ${s.trace.loaded && html`
+      <span style="font:11px ${MONO};color:var(--acc)">📼 ${s.trace.loaded}</span>
+      <span class="hv" onClick=${() => send('trace_del_saved', { file: s.trace.loaded })} title="delete this capture file"
+        style="${btn.ghost}font-size:11.5px;padding:5px 8px;border-radius:6px;cursor:pointer">✕</span>`}
+    <span style="width:1px;height:18px;background:var(--bd)"></span>
+    <a class="hv" href="/api/trace/export.csv" title="export the filtered trace as CSV"
+      style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;text-decoration:none">⤓ CSV</a>
+    <a class="hv" href="/api/trace/export/candump" title="export the filtered trace as a SocketCAN candump -l log"
+      style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;text-decoration:none">⤓ candump</a>
+    <input type="file" id="trace-import-input" accept=".log,.txt,.asc" style="display:none" onChange=${handleImportFile} />
+    <span class="hv" onClick=${() => document.getElementById('trace-import-input').click()} title="import a SocketCAN candump -l log file"
+      style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤒ Import…</span>
+    <span style="width:1px;height:18px;background:var(--bd)"></span>
+    <span style="font-size:11px;color:var(--dim);font-weight:600">SHOW</span>
+    ${['NMT', 'SDO', 'PDO', 'EMCY', 'HB'].map((f) => { const off = hide.includes(f); return html`
+      <span onClick=${() => toggle(f)}
+        style="border:1px solid ${off ? 'var(--inp)' : 'var(--acc-bd)'};background:${off ? 'transparent' : 'var(--acc-soft)'};color:${off ? 'var(--faint)' : 'var(--acc)'};font:600 10.5px ${MONO};padding:3px 9px;border-radius:9px;cursor:pointer">${f}</span>`; })}
+    <span onClick=${() => send('trace_devfilter')} title="Show frames from all devices or only from the devices selected in the Devices box — broadcast frames (NMT, SYNC) are always shown"
+      style="border:1px solid ${s.trace.devSel ? 'var(--acc-bd)' : 'var(--inp)'};background:${s.trace.devSel ? 'var(--acc-soft)' : 'transparent'};color:${s.trace.devSel ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px;cursor:pointer">dev: ${s.trace.devSel ? 'selected' : 'all'}</span>
+    <span style="width:1px;height:18px;background:var(--bd)"></span>
+    <span onClick=${toggleUs} title="Timestamp resolution: milliseconds / microseconds"
+      style="border:1px solid ${usTime ? 'var(--acc-bd)' : 'var(--inp)'};background:${usTime ? 'var(--acc-soft)' : 'transparent'};color:${usTime ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px;cursor:pointer">${usTime ? 'µs' : 'ms'}</span>
+    <span style="width:1px;height:18px;background:var(--bd)"></span>
+    ${[['trace', 'Trace'], ['stats', 'Stats'], ['plot', 'Plot']].map(([v, label]) => { const on = view === v; return html`
+      <span onClick=${() => setViewMode(v)}
+        style="border:1px solid ${on ? 'var(--acc-bd)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px;cursor:pointer">${label}${v === 'plot' && (s.trace.plot.sel || []).length ? ` (${s.trace.plot.sel.length})` : ''}</span>`; })}
+    <span style="margin-left:auto;font:11px ${MONO};color:var(--faint)">${s.connected ? `${s.trace.match} / ${s.trace.total} frames` : 'offline'}</span>
+  </div>
+  ${view === 'stats' && html`<${TraceStats} st=${s.trace.stats} connected=${s.connected} />`}
+  ${view === 'plot' && html`<${TracePlot} plot=${s.trace.plot} connected=${s.connected} />`}
+  ${view === 'trace' && html`
+  <div style="flex:1;min-height:0;overflow:auto;background:var(--panel2)">
+    <div style="display:grid;grid-template-columns:${cols};padding:6px 0 6px 18px;border-bottom:1px solid var(--bd);font:600 10px ${MONO};color:var(--faint);letter-spacing:.08em;position:sticky;top:0;background:var(--panel)">
+      <span>TIME</span><span>DIR</span><span>COB-ID</span><span>LEN</span><span>DATA</span><span>DECODED</span><span>OBJECT</span><span>DEC</span>
+    </div>
+    ${rows.map((r) => { const pdoN = r.cls === 'PDO' ? (r.dec.match(/PDO([1-4])/) || [])[1] : null;
+      const bg = r.cls === 'EMCY' ? 'var(--red-soft)' : pdoN ? `var(--pdo${pdoN})` : 'transparent'; return html`
+      <div style="display:grid;grid-template-columns:${cols};padding:3.5px 0 3.5px 18px;border-bottom:1px solid var(--bd2);font:11px ${MONO};background:${bg};color:${r.flag === 'red' ? 'var(--red)' : 'var(--mid)'}">
+        <span style="color:var(--faint)">${fmtTime(r.time)}</span><span>${r.dir}</span><span style="color:var(--acc)">${r.cob}</span><span>${r.len}</span>${r.cls === 'SDO' && r.flag !== 'red' && r.data.length > 12
+          ? html`<span>${r.data.slice(0, 12)}<span style="color:var(--hl);font-weight:600">${r.data.slice(12)}</span></span>`
+          : html`<span>${r.data}</span>`}<span>${r.dec}</span><span style="color:var(--hl);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.obj || ''}</span><span style="color:${(r.val || '').startsWith('abort') ? 'var(--red)' : 'var(--acc)'}">${r.val || ''}</span>
+      </div>`; })}
+  </div>`}`;
+}
+
+// server-side directory picker behind the Browse… buttons: the browser can't
+// open a native dialog for paths on the server, so the tool renders its own
+function BrowseDialog({ b }) {
+  return html`
+  <div onClick=${() => send('browse_close')} style="position:fixed;inset:0;background:rgba(10,14,20,.4);z-index:80;display:grid;place-items:center">
+    <div onClick=${(e) => e.stopPropagation()} style="width:440px;max-height:72vh;background:var(--panel);border:1px solid var(--bd);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+      <div style="padding:11px 14px;border-bottom:1px solid var(--bd);font-weight:600;font-size:12.5px;color:var(--tx)">Select ${({ tc: 'TestCases', res: 'Results', eds: 'EDS' })[b.which] || b.which} folder</div>
+      <div style="padding:8px 14px;font:11px ${MONO};color:var(--mid);border-bottom:1px solid var(--bd2);overflow-wrap:anywhere">${b.path}</div>
+      <div style="flex:1;min-height:140px;overflow:auto;padding:4px 0">
+        ${b.hasParent && html`<div class="hv" onClick=${() => send('browse_nav', { dir: '..' })} style="padding:6px 14px;cursor:pointer;font:11.5px ${MONO};color:var(--faint)">↰ ..</div>`}
+        ${b.error && html`<div style="padding:10px 14px;color:var(--red);font-size:11.5px">${b.error}</div>`}
+        ${b.dirs.map((d) => html`<div class="hv" onClick=${() => send('browse_nav', { dir: d })} style="padding:6px 14px;cursor:pointer;font:11.5px ${MONO};color:var(--tx)">▸ ${d}</div>`)}
+        ${!b.error && !b.dirs.length && html`<div style="padding:10px 14px;color:var(--faint);font-size:11.5px">no subfolders</div>`}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--bd)">
+        <span class="hv" onClick=${() => send('browse_close')} style="${btn.ghost}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">Cancel</span>
+        <span class="hv-b" onClick=${() => send('browse_select')} style="background:var(--acc);color:#fff;font-weight:600;font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">Select this folder</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// -------------------------------------------------------------------- app --
+function App() {
+  const s = useServerState();
+  const [ui, setUi] = useState({
+    page: 'setup',
+    theme: localStorage.getItem('cb-theme') || 'light',
+    menuNode: null,
+    logOpen: true,
+    objGroup: 'manu',
+    testFilter: '',
+  });
+  useEffect(() => { localStorage.setItem('cb-theme', ui.theme); }, [ui.theme]);
+
+  if (!s) {
+    return html`<div style="height:100vh;display:grid;place-items:center;background:#f5f6f8;color:#7a8494;font:13px 'IBM Plex Sans',system-ui,sans-serif">Connecting to CANopen Bench server…</div>`;
+  }
+
+  const dark = ui.theme === 'dark';
+  const selDevs = s.devices.filter((d) => d.sel);
+  const edsCur = selDevs[0] ? selDevs[0].eds : 'no device selected';
+  const adapterInfo = s.adapters.find((a) => a.key === s.adapter);
+  const titles = {
+    setup: ['Setup', 'workspace · interface · machine control'],
+    objects: ['Object Access', 'EDS: ' + edsCur],
+    tests: ['System Tests', s.tests.activeSuite ? 'suite: ' + s.tests.activeSuite : 'no suite loaded'],
+    swdl: ['Software Download', 'SDO serial · PDO parallel'],
+    trace: ['CAN Trace', s.connected ? 'live' : 'offline'],
+    about: ['About', 'project · docs · license'],
+  };
+  const logFg = { emcy: 'var(--red)', emcy0: 'var(--red)', nmt: 'var(--acc)', test: 'var(--amb)' };
+  const logs = s.logs.slice(-30).reverse();
+
+  return html`
+  <div data-theme=${ui.theme} style="display:flex;height:100vh;min-height:780px;min-width:1400px;background:var(--bg);color:var(--tx);font-size:12.5px">
+    <${Sidebar} s=${s} ui=${ui} setUi=${setUi} />
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;min-height:0">
+      <div style="height:52px;flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:14px;padding:0 18px">
+        <span style="font-weight:600;font-size:14px">${titles[ui.page][0]}</span>
+        <span style="font:11px ${MONO};color:var(--dim);background:var(--chip);padding:3px 8px;border-radius:5px">${titles[ui.page][1]}</span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+          ${(() => {
+            const cycRows = (s.raw || []).filter((r) => r.run).length;
+            const parts = [];
+            if (cycRows) parts.push(`${cycRows} cyclic row${cycRows > 1 ? 's' : ''}`);
+            if (s.sync.run) parts.push(`SYNC every ${s.sync.ms} ms`);
+            if (!parts.length) return '';
+            return html`<span class="hv" onClick=${() => setUi({ ...ui, page: cycRows ? 'objects' : 'setup' })}
+              title="Cyclic transmit active: ${parts.join(' · ')} — runs server-side until stopped or the bus disconnects. Click to open the controls."
+              style="white-space:nowrap;border:1px solid var(--acc-bd);background:var(--acc-soft);color:var(--acc);font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer">⟳ TX ${parts.join(' · ')}</span>`;
+          })()}
+          <span class="hv" onClick=${() => setUi({ ...ui, theme: dark ? 'light' : 'dark' })} title="Toggle theme"
+            style="width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:6px;cursor:pointer;color:var(--mid);font-size:13px">${dark ? '☀' : '☾'}</span>
+          <span style="width:8px;height:8px;border-radius:50%;background:${s.connected ? 'var(--grn)' : 'var(--faint)'}"></span>
+          <span style="font-size:12px;color:var(--mid)">${s.connected ? adapterInfo.conn : 'not connected'}</span>
+          <span class="hv-b" onClick=${() => send('connect_toggle')}
+            style="font-weight:600;font-size:12px;color:${s.connected ? 'var(--acc)' : '#fff'};border:1px solid ${s.connected ? 'var(--acc-bd)' : 'var(--grn)'};padding:5px 14px;border-radius:6px;background:${s.connected ? 'var(--acc-soft)' : 'var(--grn)'};cursor:pointer">${s.connected ? 'Disconnect' : 'Connect'}</span>
+        </div>
+      </div>
+
+      ${ui.page === 'setup' && html`<${SetupPage} s=${s} />`}
+      ${ui.page === 'objects' && html`<${ObjectsPage} s=${s} ui=${ui} setUi=${setUi} />`}
+      ${ui.page === 'tests' && html`<${TestsPage} s=${s} ui=${ui} setUi=${setUi} />`}
+      ${ui.page === 'swdl' && html`<${SwdlPage} s=${s} />`}
+      ${ui.page === 'trace' && html`<${TracePage} s=${s} />`}
+      ${ui.page === 'about' && html`<${AboutPage} />`}
+      ${s.browse && html`<${BrowseDialog} b=${s.browse} />`}
+
+      <div style="flex:none;border-top:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column">
+        <div class="hv" onClick=${() => setUi({ ...ui, logOpen: !ui.logOpen })} style="display:flex;align-items:center;gap:10px;padding:6px 18px;cursor:pointer">
+          <span style="font-weight:600;font-size:11.5px">State log</span>
+          ${s.emcyNew > 0 && html`<span onClick=${(e) => { e.stopPropagation(); send('emcy_ack'); }}
+            style="font-weight:600;font-size:10.5px;background:var(--red-soft);color:var(--red);padding:2px 8px;border-radius:9px">EMCY ${s.emcyNew} new · ack</span>`}
+          <span style="margin-left:auto;color:var(--faint);font-size:11px">${ui.logOpen ? 'collapse ▾' : 'expand ▴'}</span>
+        </div>
+        ${ui.logOpen && html`
+          <div style="height:96px;overflow:auto;padding:2px 18px 8px;font:11px ${MONO};line-height:1.75;border-top:1px solid var(--bd2)">
+            ${logs.map((l) => html`<div style="color:${logFg[l.type] || 'var(--mid)'}">${l.t}  ${l.msg}</div>`)}
+          </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+render(html`<${App} />`, document.getElementById('app'));
