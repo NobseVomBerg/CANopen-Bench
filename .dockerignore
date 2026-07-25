@@ -1,0 +1,14 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+data/
+canopen-bench.db
+tests/
+docs/
+.github/
