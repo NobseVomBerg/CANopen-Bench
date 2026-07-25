@@ -1,0 +1,49 @@
+/* CANopen Bench — theme variables + hover states ported from the design prototype. */
+body { margin: 0; font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+a { color: var(--acc, #2f7dd1); }
+a:hover { color: #1b5eae; }
+
+:root, [data-theme="light"] {
+  --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --bd:#e2e5ea; --bd2:#eef0f3;
+  --tx:#1c2430; --hl:#04070c; --mid:#4a5568; --dim:#7a8494; --faint:#98a1af;
+  --acc:#2f7dd1; --acc-soft:#eef5fc; --acc-bd:#bcd3ee;
+  --grn:#2f9e5b; --grn-soft:#e9f7ee; --red:#c74848; --red-soft:#fdecec; --amb:#b9891d;
+  --inp:#d5dae2; --hov:#f0f4f9; --sel:#f2f7fd; --chip:#f0f2f5;
+  --pdo1:#eef9f1; --pdo2:#ddf3e4; --pdo3:#cbecd6; --pdo4:#b9e5c8;
+  --sb-bg:#ffffff; --sb-box:#fafbfc; --sb-bd:#e2e5ea; --sb-sel:#eef5fc;
+  --sb-menu:#ffffff; --sb-hov:rgba(28,36,48,.05); --sb-mrow:#f0f4f9;
+  --su:#6a48c9; --su-soft:#efeafc;
+}
+[data-theme="dark"] {
+  --bg:#12161d; --panel:#1a2029; --panel2:#161c24; --bd:#2a3341; --bd2:#232a35;
+  --tx:#dde4ee; --hl:#ffffff; --mid:#b6c1d2; --dim:#95a2b6; --faint:#7d89a0;
+  --acc:#4f9be3; --acc-soft:#1c2a3d; --acc-bd:#2f4a6b;
+  --grn:#4ecb71; --grn-soft:#16281c; --red:#e06c6c; --red-soft:#2a1518; --amb:#e0b34e;
+  --inp:#3a4453; --hov:#202836; --sel:#1c2637; --chip:#242d3a;
+  --pdo1:#16241b; --pdo2:#1a2e20; --pdo3:#1e3826; --pdo4:#22422c;
+  --sb-bg:#1e2836; --sb-box:#243043; --sb-bd:#33415a; --sb-sel:#2c3b54;
+  --sb-menu:#2c3b54; --sb-hov:rgba(255,255,255,.06); --sb-mrow:#374a68;
+  --su:#b9a4f2; --su-soft:#3d2f63;
+}
+
+@keyframes coSpin { to { transform: rotate(360deg); } }
+@keyframes coPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* hover states (the design used style-hover attributes) */
+.hv:hover        { background: var(--hov) !important; }
+.hv-b:hover      { filter: brightness(1.06); }
+.hv-bd:hover     { border-color: var(--acc) !important; }
+.hv-dk:hover     { background: var(--sb-sel) !important; }
+.hv-nav:hover    { background: var(--sb-hov) !important; }
+.hv-scan:hover   { background: #3d8be0 !important; }
+.hv-chip:hover   { border-color: var(--acc) !important; color: var(--tx) !important; }
+.hv-su:hover     { background: var(--su-soft) !important; }
+.hv-mrow:hover   { background: var(--sb-mrow) !important; }
+.hv-white:hover  { color: var(--tx) !important; }
+.hv-acc:hover    { color: var(--acc) !important; }
+.hv-drop:hover   { border-color: var(--acc) !important; color: var(--acc) !important; }
+
+input:focus { border-color: var(--acc) !important; }
+input::placeholder { color: var(--faint); }
+
+.vdrag:hover { background: var(--acc-bd) !important; }
