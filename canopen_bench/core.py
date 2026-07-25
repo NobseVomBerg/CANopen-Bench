@@ -59,7 +59,7 @@ VERSION = _read_version()
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
-TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈ 1 h at 55 frames/s
+TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈1 h at 55 frames/s
 TRACE_VIEW = 400     # rows per snapshot to the browser — enough scrollback to
                      # follow a multi-step sequence (e.g. addressing) end to end
 PLOT_SEL_MAX = 4     # concurrently plotted signals — keeps the chart legible
