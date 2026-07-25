@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bench-cpcusb"
+version = "1.0.0"
+description = "CPC-USB/ARM7 support for canopen-bench: python-can backend (pyusb/WinUSB port of the Linux kernel driver ems_usb.c) plus its adapter card"
+# GPL-2.0-only is inherited from ems_usb.c (the wire-protocol reference this
+# driver is ported from) and is the reason this package lives outside the
+# MIT-licensed canopen-bench core. Distributing it to a customer triggers
+# the GPL source obligation for THIS package only, not for the core or for
+# proprietary bench plugins.
+license = {text = "GPL-2.0-only"}
+requires-python = ">=3.10"
+dependencies = [
+    "python-can>=4.4",
+    "pyusb>=1.2",
+    # only the bench-plugin half (plugin.py: the adapter card) needs this —
+    # the driver half (bus.py) is plain python-can and works standalone
+    "canopen-bench>=1,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+# python-can's own plugin discovery: makes interface="cpcusb" available to
+# any python-can user, including canopen-bench's CanopenBus.
+[project.entry-points."can.interface"]
+cpcusb = "bench_cpcusb.bus:CpcUsbBus"
+
+# canopen-bench's plugin discovery: the adapter card + key mapping.
+[project.entry-points."canopen_bench.plugins"]
+cpcusb = "bench_cpcusb.plugin:CpcUsbPlugin"
+
+[tool.setuptools.packages.find]
+include = ["bench_cpcusb*"]
