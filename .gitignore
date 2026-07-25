@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+canopen-bench.db
+data/
+.pytest_cache/
+node_modules/
+.venv/
+.coverage
+htmlcov/
