@@ -9,10 +9,9 @@ the ``canopen_bench.plugins`` entry-point group::
 Installing the package activates it — there is no configuration step. The
 core stays vendor-neutral; everything a specific device family or machine
 builder needs (adapter cards, EDS registry seeds, addressing flows,
-firmware catalogs) arrives through these hooks. See
-docs/erweiterungs-konzept.md for the full concept and the roadmap of
-hooks planned for later phases (addressing provider, SWDL strategies,
-custom step types, trace decoders).
+firmware catalogs) arrives through these hooks. See docs/extending.md
+for the guide; the docstrings below are the authoritative reference for
+each hook's contract.
 """
 from __future__ import annotations
 

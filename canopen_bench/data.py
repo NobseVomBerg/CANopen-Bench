@@ -5,7 +5,7 @@ what remains here are UI seeds and the catalogs for features whose real
 implementation is still pending (test runner, SWDL, static objects
 fallback). Everything device-family- or vendor-specific (EDS registry
 seeds, vendor adapter cards, vendor firmware) lives in extension packages
-— see canopen_bench/plugin.py and docs/erweiterungs-konzept.md.
+— see canopen_bench/plugin.py and docs/extending.md.
 """
 
 # One-time seed for the (real, sqlite-backed) EDS registry — see Db.eds_add.

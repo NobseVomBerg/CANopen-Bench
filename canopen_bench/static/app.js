@@ -212,7 +212,7 @@ function AboutPage() {
         <li><span style="font-family:${MONO}">README.md</span> — what the tool does</li>
         <li><span style="font-family:${MONO}">IMPLEMENTATION.md</span> — architecture</li>
         <li><span style="font-family:${MONO}">docs/ablaeufe/</span> — operational sequences + test-case format</li>
-        <li><span style="font-family:${MONO}">docs/erweiterungs-konzept.md</span> — vendor extension packages</li>
+        <li><span style="font-family:${MONO}">docs/extending.md</span> — writing plugin packages</li>
         <li><span style="font-family:${MONO}">examples/</span> — EDS + test-case examples</li>
       </ul>
       ${h('Author')}

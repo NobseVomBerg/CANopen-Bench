@@ -107,7 +107,7 @@ und `steps` sind getrennte Programme) und werden beim Parsen geprüft.
 ## Plugin-Schritte
 
 Erweiterungspakete können eigene Schritt-Primitive registrieren
-(`BenchPlugin.step_types()`, siehe `docs/erweiterungs-konzept.md`). Sie
+(`BenchPlugin.step_types()`, siehe `docs/extending.md`). Sie
 werden in YAML als `<plugin>.<key>` referenziert (z. B.
 `- acme.block_download: {...}`), zur Parse-Zeit vom Plugin validiert und
 in derselben VM ausgeführt. Eine Datei, die Plugin-Schritte nutzt, ist

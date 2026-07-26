@@ -15,7 +15,8 @@ to a cheaper model/effort than the default, since they don't need it:
 - **testcase-agent** — creating/editing format-v2 YAML sequence files:
   system test cases (`TC<id>_<name>.yaml`, format in
   `docs/ablaeufe/testfall-format.md`) and vendor procedure flows
-  (button-teach etc. under `vendor/.../flows/`, workspace `flows/`).
+  (button-teach etc. — a plugin package's own `flows/` directory,
+  workspace `data/flows/`).
 - **implementer-agent** — executing a plan the main thread already fully
   specified (files, changes, decisions all made). Only once nothing
   ambiguous is left to decide.

@@ -11,8 +11,9 @@ Sendelisten).
 Empfohlene Reihenfolge (Aufwand/Nutzen):
 EMCY-Klartext → Trace-Statistik → PDO-Dekodierung → SYNC + Sendelisten
 → CSV/candump → Signal-Plot → CiA-301-Smoke-Suite.
-Kategorie B erst nach dem Repo-Split, wenn klar ist, ob die Nutzer
-eher testen (→ Plot/Replay) oder in Betrieb nehmen (→ Mapping/DCF).
+Kategorie A ist damit abgearbeitet. Kategorie B bleibt zurückgestellt,
+bis klar ist, ob die Nutzer eher testen (→ Plot/Replay) oder in Betrieb
+nehmen (→ Mapping/DCF).
 
 ## Kategorie A — fehlt wirklich, passt exakt zum Werkzeugcharakter
 
@@ -56,7 +57,7 @@ eher testen (→ Plot/Replay) oder in Betrieb nehmen (→ Mapping/DCF).
   SDO-/PDO-Dekodierung, die der Trace ohnehin schon berechnet (kein
   separates Polling). Je Signal 600 Punkte, unabhängig Y-skaliert.
 
-## Kategorie B — Commissioning (nach dem Repo-Split bewerten)
+## Kategorie B — Commissioning (zurückgestellt, s. o.)
 
 - [ ] **PDO-Mapping-Editor** — 0x1400–0x1BFF lesen, Transmission-Type /
   COB-ID / Mapping ändern.

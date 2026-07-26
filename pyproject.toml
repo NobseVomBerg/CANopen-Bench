@@ -49,7 +49,7 @@ canopen-bench = "canopen_bench.__main__:main"
 # Extension packages register bench plugins under the entry-point group
 # "canopen_bench.plugins" (see canopen_bench/plugin.py) and python-can
 # drivers under python-can's own "can.interface" group — the neutral core
-# itself registers neither; see docs/erweiterungs-konzept.md.
+# itself registers neither; see docs/extending.md.
 
 [tool.setuptools.packages.find]
 include = ["canopen_bench*"]

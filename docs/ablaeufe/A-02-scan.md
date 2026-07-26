@@ -136,7 +136,7 @@ Formaten**:
 - Hardware-Scan (`canopen_bus.py` via `_bytes_to_hex` einer 4-Byte-Antwort): immer 8 Hex-Stellen → `0x000000AF·00002600`
 - historische Seed-Daten (früher in `data.py`, minimale Breite →
   `0xAF·2600`; `SEED_EDS_FILES` in `data.py` ist mittlerweile leer,
-  Identity-Seeds kommen aus Plugin-`seed_eds()`, z. B. `bench-vendor`)
+  Identity-Seeds kommen aus dem `seed_eds()`-Hook eines Plugins)
 
 Folge wäre gewesen: **Am echten Adapter matcht nie ein EDS**. Im
 Demo-Modus fiel das nicht auf, weil `EdsDemoBus` die Identity direkt aus

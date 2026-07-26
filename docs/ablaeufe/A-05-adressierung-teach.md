@@ -7,9 +7,9 @@ ist **kein LSS**, sondern ein proprietäres Broadcast-Protokoll, von dem es
 am Markt viele herstellerspezifische Varianten gibt; deshalb ist der
 Ablauf eine **austauschbare Datei** und das aktive Verfahren in den
 Machine-Control-Optionen **wählbar**. Seit der Plugin-Aufteilung
-(docs/erweiterungs-konzept.md) liefert das Vendor-Plugin diese Datei
-(`bench_vendor/flows/teach_addressing.yaml`), die Session-Identität
-(`AddressingProvider`) und die Demo-Bus-Simulation (`TeachDemoHook`);
+(docs/extending.md) liefert ein Vendor-Plugin diese Datei über
+`flow_dirs()`, dazu die Session-Identität (`AddressingProvider`) und
+die Demo-Bus-Simulation (`DemoHook`);
 der neutrale Core bringt als Alternative die Standard-Adressierung
 nach CiA 305 mit (`flows/lss_standard.yaml` über die Step-Primitive
 `lss_assign`, siehe A-03 — die alte Bus-Primitive `lss_readdress`
