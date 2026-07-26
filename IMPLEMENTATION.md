@@ -169,7 +169,7 @@ canopen_bench/
 ├── data.py           neutral seed/demo catalogs (tests fallback, demo firmware)
 ├── plugin.py         BenchPlugin API + entry-point discovery — vendor/device
 │                     extensions ship as separate packages (see
-│                     docs/erweiterungs-konzept.md and vendor/)
+│                     docs/extending.md)
 ├── bus/
 │   ├── interface.py    BusInterface ABC — the hardware seam
 │   ├── canopen_bus.py  CanopenBus — real hardware via canopen/python-can
@@ -199,7 +199,7 @@ the adapter selected on the Setup page:
   separately installed package registering two entry points: a
   python-can driver (`can.interface`) plus a bench plugin contributing
   the adapter card and key mapping (`canopen_bench.plugins`) — e.g.
-  the public [`bench-cpcusb`](https://github.com/NobseVomBerg/bench-cpcusb)
+  the public [`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
   package (GPL-2.0) carries both for the CPC-USB/ARM7. Device-family
   plugins are a separate concern (EDS/firmware seeds, addressing flow)
   and contribute no adapter card of their own.
@@ -234,10 +234,12 @@ flows, session-identity providers, demo-bus protocol simulations, trace
 decoders, namespaced extra actions, custom step primitives for the flow
 VM, SWDL download strategies) lives in separate pip packages registered
 under the `canopen_bench.plugins` entry-point group. Installing such a package activates it — no
-configuration. The concept, licensing constraints (the CPC-USB driver is
-GPL-2.0-only) and the phased roadmap are documented in German in
-`docs/erweiterungs-konzept.md`; the packages under `vendor/` are the
-first incarnation and the seed of a future private extensions monorepo.
+configuration. The concept and full hook reference are in
+`docs/extending.md`. Licensing is per package, not blanket: most vendor
+plugins are proprietary, while a plugin that ports existing GPL code
+inherits that license instead — e.g. the CPC-USB driver,
+[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb),
+is GPL-2.0-only for exactly that reason.
 
 Simulation still lives in two service-level spots: the SWDL progress
 generator (real download protocols replace it via a plugin's
