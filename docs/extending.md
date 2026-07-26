@@ -6,9 +6,7 @@ cards, EDS seeds, addressing protocols, firmware download, custom test
 steps — arrives through plugins. A plugin is an ordinary pip package;
 installing it activates it, there is no configuration step.
 
-(This is the English summary of the full German concept in
-[`erweiterungs-konzept.md`](erweiterungs-konzept.md); the authoritative
-API reference is the docstrings in
+(The authoritative API reference is the docstrings in
 [`canopen_bench/plugin.py`](../canopen_bench/plugin.py).)
 
 ## Mechanics
@@ -105,4 +103,4 @@ Pair your protocol code with a `DemoHook` that simulates the device
 side on the demo bus (`on_raw_frame`, `press_button`). For a public,
 worked example of a plugin package — python-can driver plus adapter
 card, entry points, tests — see
-[`bench-cpcusb`](https://github.com/NobseVomBerg/bench-cpcusb) (GPL-2.0).
+[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb) (GPL-2.0).
