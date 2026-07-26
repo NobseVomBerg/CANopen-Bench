@@ -81,7 +81,7 @@ installs a plugin package (`.whl`) straight from the browser, active
 immediately. Guide with hook table and a minimal example:
 `docs/extending.md`; API: `canopen_bench/plugin.py`; a worked public
 example (python-can driver + adapter card, GPL-2.0):
-[`bench-cpcusb`](https://github.com/NobseVomBerg/bench-cpcusb).
+[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb).
 
 ## Documentation
 
