@@ -236,10 +236,11 @@ VM, SWDL download strategies) lives in separate pip packages registered
 under the `canopen_bench.plugins` entry-point group. Installing such a package activates it — no
 configuration. The concept and full hook reference are in
 `docs/extending.md`. Licensing is per package, not blanket: most vendor
-plugins are proprietary, while a plugin that ports existing GPL code
-inherits that license instead — e.g. the CPC-USB driver,
-[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb),
-is GPL-2.0-only for exactly that reason.
+plugins are proprietary, while others are copyleft — the CPC-USB driver
+[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
+is GPL-2.0-only, which is why it lives in its own repository rather than
+here. Check a package's own `LICENSE` before redistributing an
+environment that contains it.
 
 Simulation still lives in two service-level spots: the SWDL progress
 generator (real download protocols replace it via a plugin's
