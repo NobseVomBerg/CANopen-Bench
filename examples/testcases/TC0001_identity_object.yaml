@@ -1,0 +1,19 @@
+# CiA-301 §7.1 Identity Object (0x1018) — prüft, dass alle fünf Pflicht-
+# Sub-Indizes (highest-sub-index, Vendor-ID, Product code, Revision number,
+# Serial number) lesbar sind. Werte sind herstellerspezifisch, daher keine
+# `expect`-Vergleiche — ein unbeantworteter Abort lässt den Schritt schon
+# per Default scheitern. Format: docs/ablaeufe/testfall-format.md
+id: "0001"
+name: "Identity object mandatory sub-indices"
+tools: []
+est: "0.3 s"
+
+preconditions:
+  - sdo_read: {index: "0x1000", sub: "0x00"}          # DUT erreichbar, sonst SKIP
+
+steps:
+  - sdo_read: {index: "0x1018", sub: "0x00"}          # Highest sub-index supported
+  - sdo_read: {index: "0x1018", sub: "0x01"}          # Vendor-ID
+  - sdo_read: {index: "0x1018", sub: "0x02"}          # Product code
+  - sdo_read: {index: "0x1018", sub: "0x03"}          # Revision number
+  - sdo_read: {index: "0x1018", sub: "0x04"}          # Serial number

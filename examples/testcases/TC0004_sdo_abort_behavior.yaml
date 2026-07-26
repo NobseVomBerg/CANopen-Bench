@@ -1,0 +1,18 @@
+# CiA-301 SDO-Abort-Verhalten: unbekannter Index, bekannter Index mit
+# unbekanntem Sub-Index und Schreiben auf ein Pflicht-ro-Objekt liefern
+# jeweils den erwarteten Abort-Code. Format: docs/ablaeufe/testfall-format.md
+id: "0004"
+name: "SDO abort behavior"
+tools: []
+est: "0.3 s"
+
+preconditions:
+  - sdo_read: {index: "0x1018", sub: "0x01"}          # DUT erreichbar, sonst SKIP
+
+steps:
+  - sdo_read: {index: "0xFFFF", sub: "0x00", expect_abort: "0x06020000"}
+      # unbekannter Index -> Object does not exist
+  - sdo_read: {index: "0x1018", sub: "0x0F", expect_abort: "0x06090011"}
+      # Identity definiert nur Sub 0-4 -> Sub-index does not exist
+  - sdo_write: {index: "0x1000", sub: "0x00", value: "0x00", expect_abort: "0x06010002"}
+      # Device type ist Pflicht-ro -> Write to a read-only object

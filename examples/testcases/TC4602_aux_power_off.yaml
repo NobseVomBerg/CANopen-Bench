@@ -1,0 +1,30 @@
+# Das Beispiel aus dem Design-Mockup ("step 3/9 power off aux supply,
+# expect UV flag") als vollständige Sequenz. Die 0x21xx-Objekte sind
+# PLATZHALTER — die realen Indizes kommen aus dem EDS des DUT und werden
+# beim ersten Hardware-Test eingetragen. Format: docs/ablaeufe/testfall-format.md
+id: "4602"
+name: "Aux power off handling, under-voltage"
+tools: [PSU]
+est: "8.4 s"
+dut: selected
+
+preconditions:
+  - sdo_read: {index: "0x1000", sub: "0x00"}          # DUT erreichbar, sonst SKIP
+
+steps:
+  - nmt: start
+  - wait_for: {heartbeat: operational, timeout: 2.0}
+  - sdo_read: {index: "0x2100", sub: "0x03", mask: "0x0004", expect: "0x0000"}
+      # Statusregister: UV-Flag (Bit 2) darf anfangs nicht gesetzt sein
+  - manual: "Aux-Versorgung (PSU Kanal 2) abschalten"
+  - wait: 1.0
+  - sdo_read: {index: "0x2100", sub: "0x03", mask: "0x0004", expect: "0x0004"}
+      # UV-Flag muss jetzt gesetzt sein
+  - sdo_read: {index: "0x1001", sub: "0x00", mask: "0x01", expect: "0x01"}
+      # Error Register: generic error gesetzt
+  - manual: "Aux-Versorgung wieder einschalten"
+  - wait: 1.0
+  - sdo_write: {index: "0x2100", sub: "0x04", value: "0x01"}
+      # Fehler quittieren
+  - sdo_read: {index: "0x2100", sub: "0x03", mask: "0x0004", expect: "0x0000"}
+      # UV-Flag wieder gelöscht

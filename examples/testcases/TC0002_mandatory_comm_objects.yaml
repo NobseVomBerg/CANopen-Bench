@@ -1,0 +1,15 @@
+# CiA-301 Pflichtobjekte der Kommunikation: Device Type (0x1000) und Error
+# Register (0x1001) müssen auf jedem konformen Gerät lesbar sein. Werte sind
+# geräteabhängig, daher keine `expect`-Vergleiche — Lesbarkeit ist der Test.
+# Format: docs/ablaeufe/testfall-format.md
+id: "0002"
+name: "Mandatory communication objects"
+tools: []
+est: "0.2 s"
+
+preconditions:
+  - sdo_read: {index: "0x1018", sub: "0x01"}          # DUT erreichbar, sonst SKIP
+
+steps:
+  - sdo_read: {index: "0x1000", sub: "0x00"}          # Device type
+  - sdo_read: {index: "0x1001", sub: "0x00"}          # Error register

@@ -1,0 +1,16 @@
+# Minimaler Rundlauf über alle Basis-Primitive — der "Test der Tests":
+# prüft, dass DUT, Bus und Executor grundsätzlich funktionieren, bevor
+# echte Testfälle laufen. Format: docs/ablaeufe/testfall-format.md
+id: "0000"
+name: "Test the Tests"
+tools: []
+est: "0.4 s"
+
+steps:
+  - log: "Rundlauf: NMT, Heartbeat, SDO"
+  - nmt: start
+  - wait_for: {heartbeat: operational, timeout: 2.0}
+  - sdo_read: {index: "0x1000", sub: "0x00"}          # Device Type erreichbar
+  - sdo_read: {index: "0x1018", sub: "0x01"}          # Identity: Vendor-ID lesbar
+  - nmt: preop
+  - wait_for: {heartbeat: pre-operational, timeout: 2.0}
