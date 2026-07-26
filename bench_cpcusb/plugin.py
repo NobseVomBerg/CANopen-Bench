@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: MIT
 """Bench-plugin half of the CPC-USB/ARM7 adapter: the UI card and its
 python-can key mapping. The driver half (``bus.py``) registers with
 python-can's own ``can.interface`` entry-point group, independently of

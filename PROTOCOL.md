@@ -5,10 +5,10 @@ Reference for the USB protocol implemented in `bench_cpcusb/protocol.py`
 transfers, `can.BusABC`). Everything here is interface information —
 endpoint numbers, message identifiers, byte layouts, register semantics
 and the required call order. None of it is invented by this project; it
-is what the device firmware dictates, cross-checked against the mainline
-Linux driver `drivers/net/can/usb/ems_usb.c` (Copyright (C) 2004-2009 EMS
-Dr. Thomas Wuensche), which is the only public verified description of
-this protocol.
+is what the device firmware dictates, established from the mainline Linux
+driver `drivers/net/can/usb/ems_usb.c` (Copyright (C) 2004-2009 EMS Dr.
+Thomas Wuensche), which is the only public verified description of this
+protocol. See "Provenance and licensing" at the end.
 
 The adapter carries an SJA1000-compatible CAN controller behind an ARM7
 USB bridge, so most configuration is really SJA1000 register writes
@@ -204,3 +204,41 @@ own status line rather than through synthesized error frames.
 
 A read timeout is not an error: it means no traffic arrived within the
 window, which is the normal state of an idle bus.
+
+## Provenance and licensing
+
+This package is MIT-licensed. It was GPL-2.0-only until the protocol was
+written up in this document, and the reason is worth recording.
+
+The protocol data above — identifiers, endpoints, type numbers, layouts,
+register semantics, the initialization order, the adapter's prescaler
+range — was established from `drivers/net/can/usb/ems_usb.c` in the
+mainline Linux kernel (`SPDX-License-Identifier: GPL-2.0-only`, Copyright
+(C) 2004-2009 EMS Dr. Thomas Wuensche, author Sebastian Haas). Those are
+facts about how the device behaves: the firmware fixes every one of them,
+a wrong value simply means the adapter does not answer, and interface
+information of this kind is not what copyright in a program protects
+(§ 69a(2) UrhG; Directive 2009/24/EC Art. 1(2); CJEU C-406/10 *SAS
+Institute*).
+
+What that driver contains beyond the facts — URB lifecycle management,
+sk_buff and netdev integration, the Linux CAN error-frame state machine,
+TX queue and echo handling — has no counterpart here. This is a userspace
+driver on pyusb and python-can and shares none of it.
+
+One function did carry more than facts: `decode_bulk_packet` was
+originally written following `ems_usb_read_bulk_callback`'s control flow,
+bounds check and variable naming. It has since been reimplemented against
+this document, with the transfer walk split from the per-record decoders
+and dispatch driven by a table rather than a switch. Its observable
+behaviour is unchanged and covered by the existing tests.
+
+Some constant *names* still match the kernel driver's (`CPC_OVR_HW`,
+`CONTR_CAN_MESSAGE`, `SJA1000_DEFAULT_OUTPUT_CONTROL` and similar). They
+are functional labels for protocol elements this document defines
+independently, and short functional identifiers of that kind carry no
+protectable expression on their own.
+
+The kernel driver stays credited here because it is the honest answer to
+"where did these numbers come from", and because that question deserves
+an answer regardless of which license this package carries.

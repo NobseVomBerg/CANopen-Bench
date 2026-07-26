@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: MIT
 """``can.BusABC`` implementation for the CPC-USB/ARM7, driven directly over
 native USB bulk transfers via pyusb — no vendor DLL, no COM-port framing.
 

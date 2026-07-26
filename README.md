@@ -20,15 +20,15 @@ kernel driver's own machinery (URB handling, sk_buff/netdev integration,
 the Linux CAN error-frame state machine, TX queue and echo handling) has
 a counterpart in it.
 
-One exception, flagged in the source: `decode_bulk_packet` keeps the
-control flow, bounds check and variable naming of that driver's
-`ems_usb_read_bulk_callback`. It is derived code, not an independent
-implementation.
-
 ## License
 
-**GPL-2.0-only**, see `LICENSE` — the reason this package sits outside
-canopen-bench's MIT core.
+**MIT**, see `LICENSE` — same as the canopen-bench core.
+
+This package was GPL-2.0-only until `decode_bulk_packet` was
+reimplemented against `PROTOCOL.md`; that one function had followed the
+kernel driver's control flow rather than just its protocol facts. The
+reasoning, and what remains in common, is written up in
+[`PROTOCOL.md`](PROTOCOL.md#provenance-and-licensing).
 
 ## Install
 

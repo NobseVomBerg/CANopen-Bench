@@ -1,22 +1,25 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: MIT
 """CPC-USB/ARM7 wire protocol — pure encode/decode, no USB I/O.
 
 What this module holds is interface information: USB identifiers, endpoint
 numbers, message and command type values, byte layouts, and SJA1000
 register semantics. Those values are fixed by the device firmware — there
 is no freedom in choosing them, and getting one wrong means the adapter
-does not answer. They were read off the mainline Linux driver
+does not answer. They were established from the mainline Linux driver
 ``drivers/net/can/usb/ems_usb.c`` (Copyright (C) 2004-2009 EMS Dr. Thomas
-Wuensche), the only public verified description of this protocol.
+Wuensche), the only public verified description of this protocol, and are
+written up in ``PROTOCOL.md`` — which is the reference this module
+implements against. See that file's "Provenance and licensing" section.
 
-``PROTOCOL.md`` in this package documents the whole protocol and is the
-reference this module implements. Keeping the module free of USB calls
-means it can be unit-tested byte-for-byte without the adapter attached.
+Keeping the module free of USB calls means it can be unit-tested
+byte-for-byte without the adapter attached.
 """
 from __future__ import annotations
 
 import struct
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from functools import partial
 
 import can
 
@@ -32,6 +35,7 @@ CPC_HEADER_SIZE = 4  # outer framing on the bulk pipe: [count, 0, 0, 0]
 CPC_MSG_HEADER_LEN = 11  # type(1) + length(1) + msgid(1) + ts_sec(4) + ts_nsec(4)
 CPC_CAN_MSG_MIN_SIZE = 5  # envelope length of an RTR frame (id-only, no data)
 CPC_OVR_HW = 0x80  # high bit of the RX message-count byte: hw overrun happened
+RECORD_COUNT_MASK = 0x7F  # the remaining bits of that byte are the record count
 
 # -- messages device -> host --------------------------------------------------
 MSG_CAN_FRAME = 1
@@ -94,7 +98,7 @@ def bitrate_to_btr(bitrate: int, sample_point: float = 87.5) -> tuple[int, int]:
         raise ValueError(f"sample_point (={sample_point}) must not be below 50%.")
 
     candidates: list[can.BitTiming] = []
-    for brp in range(1, 65):  # ems_usb_bittiming_const: brp_min=1, brp_max=64
+    for brp in range(1, 65):  # this adapter's prescaler range (PROTOCOL.md, "Bit timing")
         nbt = int(EMS_USB_ARM7_CLOCK / (bitrate * brp))
         if nbt < 8:
             break
@@ -136,7 +140,7 @@ def encode_can_frame(
 ) -> bytes:
     """Build the fixed 28-byte bulk-OUT transfer for one CAN frame.
 
-    Layout: CPC_HEADER_SIZE(4, zero) + ems_cpc_msg header(11) + cpc_can_msg(13).
+    Layout: outer header (4, zero) + record header (11) + CAN body (13).
     ``dlc`` is passed separately from ``data`` since a remote frame carries a
     requested length but no data bytes.
     """
@@ -216,63 +220,100 @@ class RxOverrun:
 RxMessage = RxCanFrame | RxCanState | RxBusError | RxOverrun
 
 
+def _iter_records(view: memoryview) -> Iterator[tuple[int, memoryview]]:
+    """Walk one bulk-IN transfer, yielding ``(record type, body)`` per record.
+
+    PROTOCOL.md, "Transfer framing": a 4-byte outer header whose first byte
+    counts the records, then that many records, each an 11-byte header
+    followed by as many body bytes as its length field declares. Slicing
+    past the end of a short transfer yields a short slice rather than
+    raising, so a header that does not arrive whole simply ends the walk —
+    the device fills only as much of the 64-byte buffer as it has to.
+    """
+    declared = view[0] & RECORD_COUNT_MASK
+    cursor = CPC_HEADER_SIZE
+    for _ in range(declared):
+        header = view[cursor:cursor + CPC_MSG_HEADER_LEN]
+        if len(header) < CPC_MSG_HEADER_LEN:
+            return
+        record_type, body_len = header[0], header[1]
+        cursor += CPC_MSG_HEADER_LEN
+        yield record_type, view[cursor:cursor + body_len]
+        cursor += body_len
+
+
+def _decode_frame(body: memoryview, *, extended: bool, remote: bool) -> RxCanFrame | None:
+    if len(body) < CPC_CAN_MSG_MIN_SIZE:
+        return None
+    arbitration_id, dlc = struct.unpack_from("<IB", body)
+    payload = b"" if remote else bytes(body[CPC_CAN_MSG_MIN_SIZE:CPC_CAN_MSG_MIN_SIZE + dlc])
+    return RxCanFrame(
+        arbitration_id=arbitration_id,
+        data=payload,
+        dlc=dlc,
+        is_extended=extended,
+        is_remote=remote,
+    )
+
+
+def _decode_controller_state(body: memoryview) -> RxCanState | None:
+    if not body:
+        return None
+    status = body[0]
+    return RxCanState(
+        bus_off=bool(status & SJA1000_SR_BUS_OFF),
+        error_warning=bool(status & SJA1000_SR_ERROR_STATUS),
+    )
+
+
+def _decode_bus_error(body: memoryview) -> RxBusError | None:
+    if len(body) < 5:
+        return None
+    _ecode, _controller, ecc, rx_err, tx_err = struct.unpack_from("<5B", body)
+    return RxBusError(ecc=ecc, rx_err=rx_err, tx_err=tx_err)
+
+
+def _decode_queue_overrun(body: memoryview) -> RxOverrun:
+    return RxOverrun(hardware=False)
+
+
+# Record type -> body decoder. Types absent from this table (confirmations,
+# error counters, echoed CAN parameters) are walked over and dropped: nothing
+# in this driver acts on them.
+_BODY_DECODERS: dict[int, Callable[[memoryview], RxMessage | None]] = {
+    MSG_CAN_FRAME: partial(_decode_frame, extended=False, remote=False),
+    MSG_EXT_CAN_FRAME: partial(_decode_frame, extended=True, remote=False),
+    MSG_RTR_FRAME: partial(_decode_frame, extended=False, remote=True),
+    MSG_EXT_RTR_FRAME: partial(_decode_frame, extended=True, remote=True),
+    MSG_CAN_STATE: _decode_controller_state,
+    MSG_CAN_FRAME_ERROR: _decode_bus_error,
+    MSG_OVERRUN: _decode_queue_overrun,
+}
+
+
 def decode_bulk_packet(buf: bytes) -> list[RxMessage]:
     """Parse one bulk-IN transfer into zero or more decoded messages.
 
-    Transfer layout: byte 0 is a message count whose top bit flags that the
-    device's hardware FIFO already overran, then that many back-to-back
-    message structures. See PROTOCOL.md, "Transfer framing".
-
-    Unlike the rest of this module, this loop is a direct port of
-    ``ems_usb_read_bulk_callback`` in ``drivers/net/can/usb/ems_usb.c``
-    (GPL-2.0-only, Copyright (C) 2004-2009 EMS Dr. Thomas Wuensche): it
-    keeps that function's control flow, its bounds check and its variable
-    names. Much of that is dictated by the wire format, but not the
-    expression — treat this function as GPL-2.0-only derived code, and
-    rewrite it against PROTOCOL.md before relicensing the package.
+    The high bit of the count byte is the device reporting that its own
+    hardware FIFO already dropped frames; that is surfaced as the first
+    message, ahead of whatever the transfer still carries. Everything else
+    comes from walking the records and running each body through its
+    decoder. See PROTOCOL.md, "Transfer framing" and "Receive path".
     """
     if len(buf) <= CPC_HEADER_SIZE:
         return []
 
-    out: list[RxMessage] = []
-    msg_count = buf[0] & ~CPC_OVR_HW
-    hw_overrun = bool(buf[0] & CPC_OVR_HW)
-    if hw_overrun:
-        out.append(RxOverrun(hardware=True))
+    view = memoryview(buf)
+    decoded: list[RxMessage] = []
+    if view[0] & CPC_OVR_HW:
+        decoded.append(RxOverrun(hardware=True))
 
-    start = CPC_HEADER_SIZE
-    while msg_count:
-        if start + CPC_MSG_HEADER_LEN > len(buf):
-            break
-        msg_type, length, _msgid, _ts_sec, _ts_nsec = struct.unpack_from(
-            "<BBBII", buf, start
-        )
-        union_off = start + CPC_MSG_HEADER_LEN
+    for record_type, body in _iter_records(view):
+        decoder = _BODY_DECODERS.get(record_type)
+        if decoder is None:
+            continue
+        message = decoder(body)
+        if message is not None:
+            decoded.append(message)
 
-        if msg_type in (MSG_CAN_FRAME, MSG_EXT_CAN_FRAME, MSG_RTR_FRAME, MSG_EXT_RTR_FRAME):
-            arb_id, dlc = struct.unpack_from("<IB", buf, union_off)
-            is_remote = msg_type in (MSG_RTR_FRAME, MSG_EXT_RTR_FRAME)
-            data = b"" if is_remote else bytes(buf[union_off + 5: union_off + 5 + dlc])
-            out.append(RxCanFrame(
-                arbitration_id=arb_id, data=data, dlc=dlc,
-                is_extended=msg_type in (MSG_EXT_CAN_FRAME, MSG_EXT_RTR_FRAME),
-                is_remote=is_remote,
-            ))
-        elif msg_type == MSG_CAN_STATE:
-            state = buf[union_off]
-            out.append(RxCanState(
-                bus_off=bool(state & SJA1000_SR_BUS_OFF),
-                error_warning=bool(state & SJA1000_SR_ERROR_STATUS),
-            ))
-        elif msg_type == MSG_CAN_FRAME_ERROR:
-            _ecode, _cc_type, ecc, rxerr, txerr = struct.unpack_from("<BBBBB", buf, union_off)
-            out.append(RxBusError(ecc=ecc, rx_err=rxerr, tx_err=txerr))
-        elif msg_type == MSG_OVERRUN:
-            out.append(RxOverrun(hardware=False))
-
-        start += CPC_MSG_HEADER_LEN + length
-        msg_count -= 1
-        if start > len(buf):
-            break
-
-    return out
+    return decoded

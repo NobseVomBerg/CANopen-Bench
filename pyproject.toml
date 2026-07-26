@@ -6,12 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "bench-cpcusb"
 version = "1.0.0"
 description = "CPC-USB/ARM7 support for canopen-bench: a pyusb/WinUSB python-can backend plus its adapter card"
-# GPL-2.0-only is the reason this package lives outside the MIT-licensed
-# canopen-bench core. Distributing it to a customer triggers the GPL source
-# obligation for THIS package only, not for the core or for proprietary
-# bench plugins. Protocol reference and where its data came from:
-# PROTOCOL.md.
-license = {text = "GPL-2.0-only"}
+# MIT, matching the canopen-bench core. This package was GPL-2.0-only while
+# one function was carried over from the mainline Linux ems_usb.c driver;
+# that function has been reimplemented against PROTOCOL.md, leaving only
+# protocol facts in common. See PROTOCOL.md, "Provenance and licensing".
+license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
     "python-can>=4.4",

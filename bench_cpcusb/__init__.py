@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: MIT
 """CPC-USB/ARM7 support for canopen-bench: python-can backend plus its
 adapter card (``canopen_bench.plugins`` entry point).
 

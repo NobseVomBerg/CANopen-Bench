@@ -85,12 +85,11 @@ def test_decode_bulk_packet_round_trips_a_data_frame():
 
 
 def _tight_rx_can_msg(arb_id: int, data: bytes, *, msg_type: int = p.MSG_CAN_FRAME) -> bytes:
-    """Build one RX message the way the device packs a *multi*-message bulk
-    transfer: header(11) + only ``envelope_len`` union bytes, not padded out
-    to the fixed 13-byte cpc_can_msg slot. This is what
-    ``start += CPC_MSG_HEADER_LEN + msg->length`` in ems_usb.c actually
-    walks over — distinct from encode_can_frame(), which always emits a
-    fixed-size *single*-message USB transfer for TX.
+    """Build one RX record the way the device packs a *multi*-record bulk
+    transfer: an 11-byte header plus only ``envelope_len`` body bytes, not
+    padded out to the fixed 13-byte CAN slot. That is what the record walk
+    advances over — distinct from encode_can_frame(), which always emits a
+    fixed-size *single*-record USB transfer for TX.
     """
     envelope_len = p.CPC_CAN_MSG_MIN_SIZE + len(data)
     header = struct.pack("<BBBII", msg_type, envelope_len, 0, 0, 0)
