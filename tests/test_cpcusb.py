@@ -53,7 +53,7 @@ def test_encode_control_cmd_length_quirk_and_zero_fill():
     cmd = p.encode_control_cmd(0x05)
     assert len(cmd) == p.CPC_HEADER_SIZE + p.CPC_MSG_HEADER_LEN + 12
     assert cmd[4] == p.CMD_CONTROL
-    assert cmd[5] == p.CPC_MSG_HEADER_LEN + 1  # envelope-size quirk, verbatim from ems_usb.c
+    assert cmd[5] == p.CPC_MSG_HEADER_LEN + 1  # envelope-size quirk the firmware requires
     assert cmd[15] == 0x05
     assert cmd[16:] == b"\x00" * 11
 

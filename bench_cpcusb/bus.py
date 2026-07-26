@@ -71,7 +71,8 @@ class CpcUsbBus(can.BusABC):
         self._rx_queue: list[p.RxMessage] = []
 
         # Bring the SJA1000 controller up: reset -> configure bit-timing -> enable
-        # RX notifications -> normal mode. Mirrors ems_usb_open()/ems_usb_start().
+        # RX notifications -> normal mode. The order is the controller's, not a
+        # choice — bit timing only latches while in reset (PROTOCOL.md).
         self._write_mode(p.SJA1000_MOD_RESET)
         btr0, btr1 = p.bitrate_to_btr(bitrate)
         self._write_mode(p.SJA1000_MOD_RESET, btr0=btr0, btr1=btr1)

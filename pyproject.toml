@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bench-cpcusb"
 version = "1.0.0"
-description = "CPC-USB/ARM7 support for canopen-bench: python-can backend (pyusb/WinUSB port of the Linux kernel driver ems_usb.c) plus its adapter card"
-# GPL-2.0-only is inherited from ems_usb.c (the wire-protocol reference this
-# driver is ported from) and is the reason this package lives outside the
-# MIT-licensed canopen-bench core. Distributing it to a customer triggers
-# the GPL source obligation for THIS package only, not for the core or for
-# proprietary bench plugins.
+description = "CPC-USB/ARM7 support for canopen-bench: a pyusb/WinUSB python-can backend plus its adapter card"
+# GPL-2.0-only is the reason this package lives outside the MIT-licensed
+# canopen-bench core. Distributing it to a customer triggers the GPL source
+# obligation for THIS package only, not for the core or for proprietary
+# bench plugins. Protocol reference and where its data came from:
+# PROTOCOL.md.
 license = {text = "GPL-2.0-only"}
 requires-python = ">=3.10"
 dependencies = [

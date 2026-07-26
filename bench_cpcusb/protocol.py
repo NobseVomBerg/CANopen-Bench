@@ -1,12 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """CPC-USB/ARM7 wire protocol — pure encode/decode, no USB I/O.
 
-Byte layouts are a 1:1 port of the struct/constant definitions in the Linux
-mainline kernel driver ``drivers/net/can/usb/ems_usb.c`` (GPL-2.0-only,
-Copyright (C) 2004-2009 EMS Dr. Thomas Wuensche), which is the only public,
-verified reference for this vendor protocol. Keeping this module free of any
-USB calls means it can be unit-tested byte-for-byte without the adapter
-attached.
+What this module holds is interface information: USB identifiers, endpoint
+numbers, message and command type values, byte layouts, and SJA1000
+register semantics. Those values are fixed by the device firmware — there
+is no freedom in choosing them, and getting one wrong means the adapter
+does not answer. They were read off the mainline Linux driver
+``drivers/net/can/usb/ems_usb.c`` (Copyright (C) 2004-2009 EMS Dr. Thomas
+Wuensche), the only public verified description of this protocol.
+
+``PROTOCOL.md`` in this package documents the whole protocol and is the
+reference this module implements. Keeping the module free of USB calls
+means it can be unit-tested byte-for-byte without the adapter attached.
 """
 from __future__ import annotations
 
@@ -72,14 +77,18 @@ EMS_USB_ARM7_CLOCK = 8_000_000  # SJA1000 register clock as seen by the device
 def bitrate_to_btr(bitrate: int, sample_point: float = 87.5) -> tuple[int, int]:
     """Bitrate (bit/s) -> SJA1000 BTR0/BTR1 register pair.
 
-    The quantum search below is the same algorithm as python-can's own
-    ``BitTiming.iterate_from_sample_point`` (reused verbatim, not
-    re-derived) but widened to brp up to 64 and validated against
-    ``ems_usb_bittiming_const`` (tseg1 1..16, tseg2 1..8, sjw_max 4,
-    brp 1..64) instead of python-can's own stricter ISO-11898-minimum
-    range (brp capped at 32), which is too narrow for this controller's
-    documented low-bitrate range (e.g. 10 kbit/s needs brp up to 64 at an
-    8 MHz clock).
+    A quantum search: walk the prescaler range, keep the combinations whose
+    effective bitrate is within 1/256 of the request, prefer the smallest
+    prescaler and then the sample point closest to the one asked for. This
+    is the textbook way to solve for CAN bit timing; every implementation
+    that does it ends up with the same shape.
+
+    What is specific here is the search range. This adapter's limits are
+    tseg1 1..16, tseg2 1..8, sjw 1..4, brp **1..64** — python-can's own
+    search caps brp at 32 (the ISO 11898 minimum requirement), which cannot
+    reach the low end of the adapter's range: 10 kbit/s at an 8 MHz clock
+    needs a prescaler above 32. Candidates are handed to ``can.BitTiming``
+    so python-can still validates the final combination. See PROTOCOL.md.
     """
     if sample_point < 50.0:
         raise ValueError(f"sample_point (={sample_point}) must not be below 50%.")
@@ -144,13 +153,14 @@ def encode_can_frame(
 
 
 def encode_control_cmd(value: int) -> bytes:
-    """27-byte control command (subject|action in the first union byte).
+    """27-byte control command (subject|action in the first body byte).
 
-    ``ems_usb_control_cmd`` sets ``cmd.length = CPC_MSG_HEADER_LEN + 1`` (an
-    envelope-size, not a payload-size, unlike every other command) and never
-    zero-initializes the rest of the union — we zero-fill it here instead of
-    copying uninitialized stack memory, which is a strictly safer superset of
-    the original behaviour since the firmware only reads the first byte.
+    The firmware wants ``length = CPC_MSG_HEADER_LEN + 1`` for this one
+    command — an envelope size, where every other command carries a body
+    size. That inconsistency is the device's, and it has to be reproduced
+    or the command is rejected. The remaining bytes are zero-filled here;
+    the firmware reads only the first one. See PROTOCOL.md, "Control
+    command".
     """
     length = CPC_MSG_HEADER_LEN + 1
     payload = bytes([value]) + b"\x00" * (length - 1)
@@ -160,7 +170,9 @@ def encode_control_cmd(value: int) -> bytes:
 def encode_can_params(*, mode: int, btr0: int = 0, btr1: int = 0) -> bytes:
     """28-byte CAN-parameters command (controller init / mode / bit-timing).
 
-    Acceptance filter is left wide open (mirrors ``init_params_sja1000``).
+    The hardware acceptance filter is left wide open (code 0, mask 0xFF..) —
+    filtering happens in software, where it can change without a controller
+    reset.
     """
     sja1000 = struct.pack(
         "<BBBBBBBBBBBB",
@@ -207,9 +219,9 @@ RxMessage = RxCanFrame | RxCanState | RxBusError | RxOverrun
 def decode_bulk_packet(buf: bytes) -> list[RxMessage]:
     """Parse one bulk-IN transfer into zero or more decoded messages.
 
-    Mirrors ``ems_usb_read_bulk_callback``: byte 0 is a message count (top
-    bit = hardware overrun already occurred), followed by that many
-    back-to-back ``ems_cpc_msg`` structures.
+    Transfer layout: byte 0 is a message count whose top bit flags that the
+    device's hardware FIFO already overran, then that many back-to-back
+    message structures. See PROTOCOL.md, "Transfer framing".
     """
     if len(buf) <= CPC_HEADER_SIZE:
         return []

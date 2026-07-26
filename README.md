@@ -7,14 +7,22 @@ registers two entry points — a `can.interface` driver for any
 python-can user, and a `canopen_bench.plugins` adapter card for the
 bench specifically.
 
+## Protocol
+
+The adapter's USB protocol — identifiers, endpoints, transfer framing,
+message types, SJA1000 register semantics, bit timing and the required
+initialization order — is documented in [`PROTOCOL.md`](PROTOCOL.md).
+That interface data was read off the mainline Linux driver
+`drivers/net/can/usb/ems_usb.c` (© 2004–2009 EMS Dr. Thomas Wuensche),
+which is its only public verified description. The implementation here
+is a pyusb/libusb userspace driver against that protocol; none of the
+kernel driver's own machinery (URB handling, sk_buff/netdev integration,
+the Linux CAN error-frame state machine) has a counterpart in it.
+
 ## License
 
-**GPL-2.0-only.** The driver (`bench_cpcusb/bus.py`) is a pyusb/WinUSB
-port of the mainline Linux kernel driver
-`drivers/net/can/usb/ems_usb.c` (GPL-2.0-only, © 2004–2009 EMS Dr.
-Thomas Wuensche) — that inheritance is why this package is
-GPL-licensed and lives outside canopen-bench's MIT core. See
-`LICENSE`.
+**GPL-2.0-only**, see `LICENSE` — the reason this package sits outside
+canopen-bench's MIT core.
 
 ## Install
 
