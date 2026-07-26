@@ -25,7 +25,10 @@ ruff check .
 pytest tests/
 ```
 
-Both must be clean. If you touch the plugin API
+Both must be clean. CI runs the suite on Python 3.10, 3.11 and 3.12 —
+3.10 is the one that catches you, since it predates `tomllib` and other
+recent standard-library additions. Worth a local run on the oldest
+version before pushing anything that touches imports. If you touch the plugin API
 (`canopen_bench/plugin.py`), check it against the real plugin package in
 [`plugins/bench-cpcusb/`](plugins/bench-cpcusb/) — CI installs it and
 runs its tests, and also re-runs the core suite with it installed to

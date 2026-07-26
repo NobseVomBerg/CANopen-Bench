@@ -2519,17 +2519,21 @@ def test_version_has_one_source_of_truth():
     drifted to 2.0.0 while pyproject said 1.0.0 — and since nothing read
     it, nothing noticed. This project bumps the version on every commit,
     so a second hand-maintained copy would drift again immediately.
+
+    Checked against the file as text: ``tomllib`` is 3.11+, this project
+    supports 3.10, and the version has to hold on every version we claim
+    to run on.
     """
     from pathlib import Path
-
-    import tomllib
 
     import canopen_bench
 
     pp = Path(canopen_bench.__file__).resolve().parent.parent / "pyproject.toml"
-    declared = tomllib.loads(pp.read_text(encoding="utf-8"))["project"]["version"]
-    assert canopen_bench.__version__ == declared
-    assert core_mod.VERSION == declared
+    declared = pp.read_text(encoding="utf-8")
+
+    assert canopen_bench.__version__ != "dev", "version not resolved from pyproject.toml"
+    assert f'version = "{canopen_bench.__version__}"' in declared
+    assert core_mod.VERSION == canopen_bench.__version__
 
 
 def test_snapshot_version_and_workspace(bench):
