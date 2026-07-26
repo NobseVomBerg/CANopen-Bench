@@ -35,6 +35,32 @@ New behavior needs a test next to it in `tests/`. The suite runs entirely
 against the demo bus; look at `tests/conftest.py` for the fixtures
 (`connect_and_scan`, seed EDS files).
 
+## Versioning
+
+There are no tagged releases: `main` is the current state. Instead the
+version in `pyproject.toml` moves with every commit, so a version number
+always identifies a specific state of the tool — which is what makes a
+bug report answerable. Bump it as part of the change, not afterwards:
+
+| Position | When | Example |
+|---|---|---|
+| third | every commit — the default | 1.0.1 → 1.0.2 |
+| second | a larger change, or anything that makes an existing workspace database or capture file need migrating | 1.0.7 → 1.1.0 |
+| first | a redesign, or a break that needs a manual step from the user | 1.4.2 → 2.0.0 |
+
+Bumping the second or first position resets the ones after it. The
+`pyproject.toml` entry is the only place to change — `canopen_bench.__version__`,
+`core.VERSION` and the version in the UI all read from it, and a test
+enforces that (`test_version_has_one_source_of_truth`).
+
+`CHANGELOG.md` is not a log of every bump. It gets a dated section per
+second-position change, summarising what happened since the last one.
+
+Plugin packages version themselves independently — `plugins/bench-cpcusb/`
+has its own `pyproject.toml`, and most changes over time are expected to
+land in plugins rather than in the core. A plugin bump never touches the
+core version, and vice versa.
+
 ## What goes where
 
 - **Neutral core** (`canopen_bench/`): CiA-301 behavior, UI, test

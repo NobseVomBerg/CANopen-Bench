@@ -20,8 +20,6 @@ import zipfile
 from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +27,7 @@ from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ODVariable
 from canopen.objectdictionary.eds import import_eds
 
-from . import data
+from . import __version__, data
 from . import testcases as tclib
 from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
@@ -38,24 +36,7 @@ from .db import Db
 from .eds_od import OdCache, find_var, pdo_mapping
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 
-
-def _read_version() -> str:
-    """pyproject.toml first — the installed package metadata of an editable
-    install goes stale until the next `pip install -e`, and would happily
-    report an old version. Wheel installs have no pyproject and use the
-    (then correct) metadata."""
-    try:
-        import tomllib
-        pp = Path(__file__).resolve().parent.parent / "pyproject.toml"
-        return tomllib.loads(pp.read_text(encoding="utf-8"))["project"]["version"]
-    except Exception:
-        try:
-            return _pkg_version("canopen-bench")
-        except PackageNotFoundError:  # bare checkout without install
-            return "dev"
-
-
-VERSION = _read_version()
+VERSION = __version__  # single source: canopen_bench/__init__.py
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1

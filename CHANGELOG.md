@@ -5,12 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **There are no tagged releases.** `main` is the current state and the
 version to use — install from the repository, not from a release
-artifact. The number in `pyproject.toml` still means what
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) says it
-means, and moves when something notable changes; it just is not a tag
-you can pin to. Sections here are dated when that number moves.
+artifact. The version in `pyproject.toml` moves with every commit, so it
+always identifies one specific state of the tool; the rules for which
+position moves are in [`CONTRIBUTING.md`](CONTRIBUTING.md#versioning).
 
-## 1.0.0 — 2026-07-26
+This file is therefore not a log of every bump. It gets one dated
+section per second-position change, covering everything since the
+previous one. Plugin packages such as `plugins/bench-cpcusb/` version
+and document themselves separately.
+
+## 1.0.x — from 2026-07-26
 
 The day the repository went public. Everything before it was internal
 development; the version counts from here.

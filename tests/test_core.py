@@ -2512,6 +2512,26 @@ def test_real_testcases_win_regardless_of_adapter(bench, tmp_path):
 
 # -- live bus statistics + version/workspace snapshot fields ------------------
 
+def test_version_has_one_source_of_truth():
+    """The version lives in pyproject.toml and nowhere else.
+
+    It used to be duplicated into ``canopen_bench.__version__``, which
+    drifted to 2.0.0 while pyproject said 1.0.0 — and since nothing read
+    it, nothing noticed. This project bumps the version on every commit,
+    so a second hand-maintained copy would drift again immediately.
+    """
+    from pathlib import Path
+
+    import tomllib
+
+    import canopen_bench
+
+    pp = Path(canopen_bench.__file__).resolve().parent.parent / "pyproject.toml"
+    declared = tomllib.loads(pp.read_text(encoding="utf-8"))["project"]["version"]
+    assert canopen_bench.__version__ == declared
+    assert core_mod.VERSION == declared
+
+
 def test_snapshot_version_and_workspace(bench):
     snap = bench.snapshot()
     assert snap["version"] == core_mod.VERSION
