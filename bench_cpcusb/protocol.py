@@ -222,6 +222,14 @@ def decode_bulk_packet(buf: bytes) -> list[RxMessage]:
     Transfer layout: byte 0 is a message count whose top bit flags that the
     device's hardware FIFO already overran, then that many back-to-back
     message structures. See PROTOCOL.md, "Transfer framing".
+
+    Unlike the rest of this module, this loop is a direct port of
+    ``ems_usb_read_bulk_callback`` in ``drivers/net/can/usb/ems_usb.c``
+    (GPL-2.0-only, Copyright (C) 2004-2009 EMS Dr. Thomas Wuensche): it
+    keeps that function's control flow, its bounds check and its variable
+    names. Much of that is dictated by the wire format, but not the
+    expression — treat this function as GPL-2.0-only derived code, and
+    rewrite it against PROTOCOL.md before relicensing the package.
     """
     if len(buf) <= CPC_HEADER_SIZE:
         return []

@@ -17,7 +17,13 @@ That interface data was read off the mainline Linux driver
 which is its only public verified description. The implementation here
 is a pyusb/libusb userspace driver against that protocol; none of the
 kernel driver's own machinery (URB handling, sk_buff/netdev integration,
-the Linux CAN error-frame state machine) has a counterpart in it.
+the Linux CAN error-frame state machine, TX queue and echo handling) has
+a counterpart in it.
+
+One exception, flagged in the source: `decode_bulk_packet` keeps the
+control flow, bounds check and variable naming of that driver's
+`ems_usb_read_bulk_callback`. It is derived code, not an independent
+implementation.
 
 ## License
 
