@@ -199,7 +199,7 @@ the adapter selected on the Setup page:
   separately installed package registering two entry points: a
   python-can driver (`can.interface`) plus a bench plugin contributing
   the adapter card and key mapping (`canopen_bench.plugins`) — e.g.
-  the public [`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
+  the public [`bench-cpcusb`](plugins/bench-cpcusb/)
   package carries both for the CPC-USB/ARM7. Device-family
   plugins are a separate concern (EDS/firmware seeds, addressing flow)
   and contribute no adapter card of their own.
@@ -235,13 +235,14 @@ decoders, namespaced extra actions, custom step primitives for the flow
 VM, SWDL download strategies) lives in separate pip packages registered
 under the `canopen_bench.plugins` entry-point group. Installing such a package activates it — no
 configuration. The concept and full hook reference are in
-`docs/extending.md`. Licensing is per package, not blanket: most vendor
-plugins are proprietary, while the public ones carry their own terms —
-the CPC-USB driver
-[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
-is MIT. Check a package's own `LICENSE` before redistributing an
-environment that contains it; a copyleft plugin would put obligations on
-the whole environment that the core alone does not.
+`docs/extending.md`. Licensing is per package, not blanket: vendor
+plugins are proprietary, while [`plugins/bench-cpcusb/`](plugins/bench-cpcusb/)
+— the one that lives in this repo — is MIT like the core. Sharing a
+repository does not merge the distributions: it is built, versioned,
+installed and licensed on its own, and `pip install canopen-bench` does
+not bring it along. Check a package's own `LICENSE` before redistributing
+an environment that contains it; a copyleft plugin would put obligations
+on the whole environment that the core alone does not.
 
 Simulation still lives in two service-level spots: the SWDL progress
 generator (real download protocols replace it via a plugin's

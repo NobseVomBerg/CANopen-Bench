@@ -14,9 +14,10 @@ development; the version counts from here.
 
 - Web UI (FastAPI + Preact) with live state snapshots over WebSocket:
   Setup, Objects, Trace, Tests, Machine Control pages
-- Hardware backends: IXXAT VCI4, PCAN, CPC-USB (separate package) —
-  plus a hardware-free demo mode that simulates devices from real EDS
-  files
+- Hardware backends via python-can: IXXAT VCI4 (the adapter this was
+  built on), PCAN (wired up, never run against a device here) and
+  CPC-USB — plus a hardware-free demo mode that simulates devices from
+  real EDS files
 - Object browser from EDS catalogs with identity matching (0x1018),
   favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id)
 - Trace monitor: 200k-frame ring buffer, server-side class/node filters,
@@ -54,3 +55,17 @@ development; the version counts from here.
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed
+- `plugins/bench-cpcusb/` — CPC-USB/ARM7 support as a worked reference
+  for what a plugin package looks like: a python-can driver over pyusb
+  plus the bench adapter card, its own tests, its own `PROTOCOL.md`,
+  MIT. A separate distribution that happens to share this repository —
+  `pip install canopen-bench` does not bring it. CI installs it and
+  re-runs the core suite with it present, so the core stays provably
+  usable plugin-free
+- `THIRD-PARTY-NOTICES.md`, declared as a license file so it travels
+  with every wheel, sdist and Docker image: attribution for the bundled
+  Preact (MIT) and htm (Apache-2.0), the LGPL-3.0 note for python-can
+  that matters when redistributing an image, and the trademark position
+  — CANopen® and CiA® belong to CAN in Automation e.V., this is an
+  independent project and not a CiA conformance test tool
+- `Dockerfile` for the container workflow the README describes

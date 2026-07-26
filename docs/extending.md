@@ -103,4 +103,5 @@ Pair your protocol code with a `DemoHook` that simulates the device
 side on the demo bus (`on_raw_frame`, `press_button`). For a public,
 worked example of a plugin package — python-can driver plus adapter
 card, entry points, tests — see
-[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb) (MIT).
+[`plugins/bench-cpcusb/`](../plugins/bench-cpcusb/) (MIT) in this
+repository.

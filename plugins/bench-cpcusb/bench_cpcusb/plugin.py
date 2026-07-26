@@ -2,9 +2,9 @@
 """Bench-plugin half of the CPC-USB/ARM7 adapter: the UI card and its
 python-can key mapping. The driver half (``bus.py``) registers with
 python-can's own ``can.interface`` entry-point group, independently of
-this — see the module docstring in ``bus.py`` and docs/extending.md
-("Adapter = Treiberpaket + Bench-Plugin" pattern) in the canopen-bench
-core repo. Both halves live in this one package: the adapter card is
+this — see the module docstring in ``bus.py`` and the repository's
+``docs/extending.md`` ("Adapter = Treiberpaket + Bench-Plugin"
+pattern). Both halves live in this one package: the adapter card is
 meaningless without the driver it points at, and vice versa, so
 splitting them across two packages (as an earlier revision did, into
 this package plus an unrelated device-family plugin) only made the

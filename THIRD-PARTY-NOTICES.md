@@ -78,7 +78,7 @@ reinstalled.
 
 Plugins are separate distributions with their own licensing; installing
 one does not change the license of this package. The public
-[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
+[`bench-cpcusb`](plugins/bench-cpcusb/)
 is MIT. Check each plugin's own `LICENSE` before redistributing an
 environment that contains it — a copyleft or proprietary plugin puts its
 own obligations on that environment.

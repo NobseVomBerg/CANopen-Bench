@@ -26,10 +26,10 @@ pytest tests/
 ```
 
 Both must be clean. If you touch the plugin API
-(`canopen_bench/plugin.py`), sanity-check the change against a real
-plugin package too — e.g.
-[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb), a
-CPC-USB adapter plugin (MIT).
+(`canopen_bench/plugin.py`), check it against the real plugin package in
+[`plugins/bench-cpcusb/`](plugins/bench-cpcusb/) — CI installs it and
+runs its tests, and also re-runs the core suite with it installed to
+prove the core still works plugin-free.
 
 New behavior needs a test next to it in `tests/`. The suite runs entirely
 against the demo bus; look at `tests/conftest.py` for the fixtures

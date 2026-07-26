@@ -88,9 +88,12 @@ registered under the
 In multi-workspace mode this needs no shell at all: Setup > Extensions
 installs a plugin package (`.whl`) straight from the browser, active
 immediately. Guide with hook table and a minimal example:
-`docs/extending.md`; API: `canopen_bench/plugin.py`; a worked public
-example (python-can driver + adapter card, MIT):
-[`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb).
+`docs/extending.md`; API: `canopen_bench/plugin.py`. A complete worked
+example ships in this repo under
+[`plugins/bench-cpcusb/`](plugins/bench-cpcusb/) — python-can driver plus
+adapter card, its own tests, MIT. It is a separate distribution, not part
+of the `canopen-bench` package: install it only if you have that
+adapter.
 
 ## Documentation
 

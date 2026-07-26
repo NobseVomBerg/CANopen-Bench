@@ -12,3 +12,6 @@ canopen-bench.db
 tests/
 docs/
 .github/
+# separate distribution, not part of the image — install it in the container
+# yourself if you pass a CPC-USB through
+plugins/

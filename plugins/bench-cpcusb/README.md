@@ -1,11 +1,15 @@
 # bench-cpcusb
 
-CPC-USB/ARM7 adapter support for
-[canopen-bench](https://github.com/NobseVomBerg/CANopen-Bench): a
-python-can backend plus the bench's adapter-card UI, in one package. It
-registers two entry points — a `can.interface` driver for any
-python-can user, and a `canopen_bench.plugins` adapter card for the
-bench specifically.
+CPC-USB/ARM7 adapter support for [canopen-bench](../../): a python-can
+backend plus the bench's adapter-card UI, in one package. It registers
+two entry points — a `can.interface` driver for any python-can user, and
+a `canopen_bench.plugins` adapter card for the bench specifically.
+
+**This is a separate distribution.** It shares the canopen-bench
+repository but not its package: own `pyproject.toml`, own version, own
+tests, installed on its own. `pip install canopen-bench` does not bring
+it — install it only if you have this adapter. It is here as the worked
+reference for what a plugin package looks like.
 
 ## Protocol
 
@@ -33,7 +37,7 @@ reasoning, and what remains in common, is written up in
 ## Install
 
 ```bash
-pip install -e .
+pip install -e ./plugins/bench-cpcusb     # from the repository root
 ```
 
 Requires `canopen-bench>=1,<2`. On Windows, the device must be bound
