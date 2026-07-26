@@ -167,7 +167,10 @@ ohnehin im Notifier-Thread erledigt; `Db` ist mit
   abschließend `SCAN done — N devices found, EDS auto-assigned`.
 - `state.scanBusy` während des Laufs (Button zeigt `…`).
 
-## Abnahme-Checkliste IXXAT (F-1/F-2 sind umgesetzt — Checkliste ist bereit)
+## Abnahme-Checkliste IXXAT (F-1/F-2 sind umgesetzt)
+
+Der Scan läuft am IXXAT im Alltagsbetrieb; wie in A-01 ist die Liste eine
+Vorlage für eine dokumentierte Abnahme, kein offener Restposten.
 
 - [ ] 1 DUT, korrekte Bitrate: Scan findet das Gerät, Identity entspricht
       dem EDS (`⇒ <datei>` im Log), Variante wird gelesen.

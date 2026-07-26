@@ -289,7 +289,8 @@ a `.whl`, and it's active immediately, no server restart. Mechanism
 The operational sequences — connect, scan, scan & verify/LSS, test-case
 execution, teach addressing — are specified in German under
 `docs/ablaeufe/` (template and index in its README). These documents
-define the behaviour against real hardware (first target: IXXAT/VCI4),
+define the behaviour against real hardware (IXXAT/VCI4, the adapter this
+was built and validated on),
 record findings F-1…F-6 (all resolved) and specify the YAML test-case
 format (`docs/ablaeufe/testfall-format.md`) with examples under
 `examples/testcases/` that the step executor runs for real.

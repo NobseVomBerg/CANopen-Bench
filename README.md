@@ -48,8 +48,8 @@ has been exercised, not what is warranted.
 
 | Adapter | Driver | State |
 |---|---|---|
-| IXXAT USB-to-CAN | VCI4 (Windows) | in use on the author's bench |
-| PCAN-USB | PCANBasic | backend wired up, not yet run against a device |
+| IXXAT USB-to-CAN | VCI4 (Windows) | in regular use on the author's bench |
+| PCAN-USB | PCANBasic | wired up, never run — no such adapter here |
 | Demo mode | — | no hardware, EDS-driven simulation |
 | other adapters (e.g. CPC-USB) | via plugin packages | separate install |
 

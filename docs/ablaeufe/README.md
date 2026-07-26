@@ -78,9 +78,11 @@ umgesetzt werden soll:
 1. **Scan-Härtung nach A-02** — ✅ Code-Teil umgesetzt: F-1
    (Identity-Format), F-2 (Event-Loop-Blockade), F-3 (Connect-Fehler)
    behoben, Busstatus-Hinweis bei 0 Treffern ergänzt, IXXAT-Kanal als
-   int. **Offen:** Validierung am echten IXXAT auf dem Bench-PC
-   (Windows, VCI4) mit den Abnahme-Checklisten aus A-01 und A-02 als
-   Protokoll.
+   int. Der IXXAT (Windows, VCI4) ist seither im regulären Einsatz am
+   Bench-PC und das Tool ist daran breit erprobt. Die Abnahme-Checklisten
+   in A-01 und A-02 sind damit inhaltlich abgedeckt, aber nie Punkt für
+   Punkt als Protokoll abgehakt worden — sie stehen dort weiter als
+   Vorlage für eine formale Abnahme oder einen neuen Adapter.
 2. **Step-Executor nach A-04 / testfall-format.md** — ✅ umgesetzt
    (`Bench._run_task`, `canopen_bench/testcases.py`); ersetzt die
    simulierte `_run_step`-Logik für echte Testfall-Dateien und ist ohne

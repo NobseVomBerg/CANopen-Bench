@@ -111,9 +111,12 @@ ADAPTERS = [
     {"key": "ixxat", "label": "IXXAT USB-to-CAN", "sub": "HMS · V2 compact",
      "conn": "IXXAT connected", "foot": "IXXAT USB-to-CAN", "iface": "IXXAT",
      "driver": "driver: VCI4 · 4.1.2", "full": "IXXAT USB-to-CAN"},
-    {"key": "pcan", "label": "PCAN-USB", "sub": "Peak · FD ready",
+    # No PCAN hardware here — the backend is python-can's, wired up but never
+    # run against a device. Don't advertise capabilities we can't stand behind
+    # (the adapter family does CAN-FD; this tool does not — see _CANDUMP_RE).
+    {"key": "pcan", "label": "PCAN-USB", "sub": "PEAK-System · untested",
      "conn": "PCAN connected", "foot": "PCAN-USB", "iface": "PCAN",
-     "driver": "driver: PCANBasic 4.7", "full": "PCAN-USB"},
+     "driver": "driver: PCANBasic via python-can", "full": "PCAN-USB"},
     {"key": "demo", "label": "Demo mode", "sub": "virtual DUTs from EDS",
      "conn": "Demo connected", "foot": "Demo mode", "iface": "DEMO",
      "driver": "no hardware · devices generated from active EDS files", "full": "Demo mode"},

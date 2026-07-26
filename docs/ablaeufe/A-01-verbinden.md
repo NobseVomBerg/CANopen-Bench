@@ -139,7 +139,11 @@ Adapter am PC.
 - `state.connected` im Snapshot, Button-Zustand in der UI.
 - Logzeilen wie oben; bei aktivem Bus füllt sich die Trace-Seite.
 
-## Abnahme-Checkliste IXXAT (erste Inbetriebnahme)
+## Abnahme-Checkliste IXXAT
+
+Der IXXAT ist am Bench-PC im regulären Einsatz; diese Liste ist nie
+förmlich abgehakt worden und dient als Vorlage für eine dokumentierte
+Abnahme oder die Inbetriebnahme eines weiteren Adapters.
 
 - [ ] VCI4 installiert, Adapter im Windows-Geräte-Manager sichtbar.
 - [ ] `python -m canopen_bench`, Adapter „IXXAT" wählen, 500 kbit/s,
