@@ -200,7 +200,7 @@ the adapter selected on the Setup page:
   python-can driver (`can.interface`) plus a bench plugin contributing
   the adapter card and key mapping (`canopen_bench.plugins`) — e.g.
   the public [`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
-  package (GPL-2.0) carries both for the CPC-USB/ARM7. Device-family
+  package carries both for the CPC-USB/ARM7. Device-family
   plugins are a separate concern (EDS/firmware seeds, addressing flow)
   and contribute no adapter card of their own.
 - **Demo mode** → `EdsDemoBus` (`bus/demo.py`), no hardware: virtual DUTs
@@ -236,11 +236,12 @@ VM, SWDL download strategies) lives in separate pip packages registered
 under the `canopen_bench.plugins` entry-point group. Installing such a package activates it — no
 configuration. The concept and full hook reference are in
 `docs/extending.md`. Licensing is per package, not blanket: most vendor
-plugins are proprietary, while others are copyleft — the CPC-USB driver
+plugins are proprietary, while the public ones carry their own terms —
+the CPC-USB driver
 [`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb)
-is GPL-2.0-only, which is why it lives in its own repository rather than
-here. Check a package's own `LICENSE` before redistributing an
-environment that contains it.
+is MIT. Check a package's own `LICENSE` before redistributing an
+environment that contains it; a copyleft plugin would put obligations on
+the whole environment that the core alone does not.
 
 Simulation still lives in two service-level spots: the SWDL progress
 generator (real download protocols replace it via a plugin's

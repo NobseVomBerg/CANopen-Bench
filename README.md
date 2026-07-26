@@ -89,7 +89,7 @@ In multi-workspace mode this needs no shell at all: Setup > Extensions
 installs a plugin package (`.whl`) straight from the browser, active
 immediately. Guide with hook table and a minimal example:
 `docs/extending.md`; API: `canopen_bench/plugin.py`; a worked public
-example (python-can driver + adapter card, GPL-2.0):
+example (python-can driver + adapter card, MIT):
 [`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb).
 
 ## Documentation
@@ -110,7 +110,7 @@ pytest                          # core suite
 ## License & author
 
 Core application: MIT (`LICENSE`). Plugin packages are licensed
-independently — vendor plugins proprietary, `bench-cpcusb` GPL-2.0-only.
+independently — vendor plugins proprietary, `bench-cpcusb` MIT.
 Bundled and depended-on third-party components, and the trademark note
 (CANopen® and CiA® belong to CAN in Automation e.V.; this is not a
 CiA-certified or CiA-affiliated tool), are listed in

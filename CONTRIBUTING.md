@@ -29,7 +29,7 @@ Both must be clean. If you touch the plugin API
 (`canopen_bench/plugin.py`), sanity-check the change against a real
 plugin package too — e.g.
 [`bench-cpcusb`](https://github.com/NobseVomBerg/CANopen-Bench-GPL-Plugins/tree/main/bench-cpcusb), a
-GPL-licensed CPC-USB adapter plugin.
+CPC-USB adapter plugin (MIT).
 
 New behavior needs a test next to it in `tests/`. The suite runs entirely
 against the demo bus; look at `tests/conftest.py` for the fixtures
