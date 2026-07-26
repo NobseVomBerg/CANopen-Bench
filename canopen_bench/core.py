@@ -980,7 +980,7 @@ class Bench:
         Assumes the predefined connection set (function code -> PDO
         number) and the EDS *default* mapping —
         a live remapped device may pack differently; reading the actual
-        mapping from the device is commissioning territory (todo.md B)."""
+        mapping from the device is commissioning territory."""
         if row["cls"] != "PDO" or row["node"] is None:
             return
         try:

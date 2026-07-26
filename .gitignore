@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 *.egg-info/
+build/
+dist/
 canopen-bench.db
 data/
 .pytest_cache/

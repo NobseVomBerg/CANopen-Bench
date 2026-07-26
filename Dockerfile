@@ -4,7 +4,10 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+# LICENSE + THIRD-PARTY-NOTICES.md are declared as license-files in
+# pyproject.toml — they must be present at build time so the attribution
+# for the bundled Preact/htm and for LGPL python-can travels with the image.
+COPY pyproject.toml README.md LICENSE THIRD-PARTY-NOTICES.md ./
 COPY canopen_bench ./canopen_bench
 RUN pip install --no-cache-dir .
 

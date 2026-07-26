@@ -51,6 +51,12 @@ canopen-bench = "canopen_bench.__main__:main"
 # drivers under python-can's own "can.interface" group — the neutral core
 # itself registers neither; see docs/extending.md.
 
+[tool.setuptools]
+# THIRD-PARTY-NOTICES.md carries the attribution required by the bundled
+# Preact (MIT) and htm (Apache-2.0) in static/vendor/, plus the LGPL note
+# for python-can — it has to travel with every wheel and sdist.
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
+
 [tool.setuptools.packages.find]
 include = ["canopen_bench*"]
 

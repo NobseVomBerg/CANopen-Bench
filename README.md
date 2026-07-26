@@ -39,14 +39,23 @@ and every access shows up in the Trace like real bus traffic.
 - **Trace** — live monitor with class + device filters over a 200k-frame
   ring buffer, ms/µs timestamps, capture save/load.
 
-## Hardware support
+## Hardware
 
-| Adapter | Driver | Status |
+Which adapters the tool talks to, via python-can. Names are the
+manufacturers' — see the trademark note in `THIRD-PARTY-NOTICES.md`;
+this project is not affiliated with any of them, and the table says what
+has been exercised, not what is warranted.
+
+| Adapter | Driver | State |
 |---|---|---|
-| IXXAT USB-to-CAN | VCI4 (Windows) | supported |
-| PCAN-USB | PCANBasic | supported |
+| IXXAT USB-to-CAN | VCI4 (Windows) | in use on the author's bench |
+| PCAN-USB | PCANBasic | backend wired up, not yet run against a device |
 | Demo mode | — | no hardware, EDS-driven simulation |
-| vendor adapters (e.g. CPC-USB) | via plugin packages | separate install |
+| other adapters (e.g. CPC-USB) | via plugin packages | separate install |
+
+Everything above demo mode goes through python-can's own backends, so
+adapter support tracks python-can. Bring-up checklists live in
+`docs/ablaeufe/A-01-verbinden.md` and `A-02-scan.md`.
 
 ## Workspaces
 
@@ -100,6 +109,12 @@ pytest                          # core suite
 
 ## License & author
 
-Core application: MIT. Vendor extension packages: proprietary.
+Core application: MIT (`LICENSE`). Plugin packages are licensed
+independently — vendor plugins proprietary, `bench-cpcusb` GPL-2.0-only.
+Bundled and depended-on third-party components, and the trademark note
+(CANopen® and CiA® belong to CAN in Automation e.V.; this is not a
+CiA-certified or CiA-affiliated tool), are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
 Created by NobseVomBerg · [unsix.de](https://unsix.de) ·
 [GitHub](https://github.com/NobseVomBerg/CANopen-Bench)

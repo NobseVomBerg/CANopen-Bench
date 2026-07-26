@@ -125,8 +125,8 @@ light + dark theme (toggle in the header, persisted per browser):
   (0x1600-/0x1A00-series) in the EDS assigned to the node — bit-exact
   LSB-first unpacking, INTEGER types sign-extended; this assumes the
   predefined connection set and the EDS *default* mapping (reading the
-  live mapping off the device is the mapping editor's job, todo.md
-  Kategorie B). Demo devices publish TPDO1 per their EDS mapping
+  live mapping off the device would be a mapping editor's job, and no
+  such editor exists yet). Demo devices publish TPDO1 per their EDS mapping
   (`EdsDemoBus._tpdo1_frame`), values consistent with SDO reads.
   EMCY frames are decoded to
   plain text (`core._annotate_emcy`): error code against the CiA-301
