@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
 from canopen_bench.app import create_app
 

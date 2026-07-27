@@ -59,10 +59,9 @@ repository contains them, and distributing that image distributes them:
 |---|---|
 | [python-can](https://github.com/hardbyte/python-can) | **LGPL-3.0-only** |
 | [canopen](https://github.com/christiansandberg/canopen) | MIT |
-| [FastAPI](https://github.com/fastapi/fastapi) | MIT |
 | [Starlette](https://github.com/encode/starlette) | BSD-3-Clause |
 | [Uvicorn](https://github.com/encode/uvicorn) | BSD-3-Clause |
-| [Pydantic](https://github.com/pydantic/pydantic) | MIT |
+| [websockets](https://github.com/python-websockets/websockets) | BSD-3-Clause |
 | [PyYAML](https://github.com/yaml/pyyaml) | MIT |
 
 **python-can is LGPL-3.0.** CANopen Bench imports it as an unmodified

@@ -22,7 +22,7 @@ development; the version counts from here.
 
 ### Added
 
-- Web UI (FastAPI + Preact) with live state snapshots over WebSocket:
+- Web UI (Starlette + Preact) with live state snapshots over WebSocket:
   Setup, Objects, Trace, Tests, Machine Control pages
 - Hardware backends via python-can: IXXAT VCI4 (the adapter this was
   built on), PCAN (wired up, never run against a device here) and

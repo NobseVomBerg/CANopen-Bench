@@ -2,7 +2,7 @@
 
 Web tool to test and control CANopen devices on a hardware bench — scan,
 object access, system tests, firmware download and a live CAN trace,
-driven by the devices' EDS files. Python backend (FastAPI +
+driven by the devices' EDS files. Python backend (Starlette +
 canopen/python-can), no-build frontend (Preact/HTM), one self-contained
 workspace folder per bench.
 

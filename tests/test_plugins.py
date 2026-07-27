@@ -454,7 +454,7 @@ def test_first_plugins_swdl_strategy_wins(tmp_path):
 # -- GUI plugin install (Setup > Extensions) ---------------------------------
 # Bench(plugin_dir=..., _install_plugin_wheel, act_plugin_install/remove) —
 # see canopen_bench/core.py "GUI plugin install" section. Never touches
-# app.py's async reload wiring: that's FastAPI infrastructure without an
+# app.py's async reload wiring: that's Starlette infrastructure without an
 # existing test pattern in this repo, so coverage stops at the Bench layer
 # (on_plugin_reload is a plain callable seam, injected as a spy below).
 

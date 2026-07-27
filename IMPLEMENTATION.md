@@ -6,7 +6,7 @@ is in `README.md`.
 ## Quick start
 
 ```bash
-pip install -e .          # or: pip install fastapi 'uvicorn[standard]'
+pip install -e .          # or: pip install starlette uvicorn websockets
 python -m canopen_bench   # → http://127.0.0.1:8000
 ```
 
@@ -154,7 +154,7 @@ mirror, and the dockable state log with EMCY badge.
 
 ```
 canopen_bench/
-├── app.py            FastAPI: serves the frontend, POST /api/action, WS /ws;
+├── app.py            Starlette: serves the frontend, POST /api/action, WS /ws;
 │                     multi-workspace mode — every subfolder of ./data (or
 │                     $CANOPEN_BENCH_DATA) is one workspace (db + eds/traces/
 │                     flows), switchable at runtime from the Setup page, the

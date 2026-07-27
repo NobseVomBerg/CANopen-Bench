@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.4"
+version = "1.0.5"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
 license = {text = "MIT"}
@@ -23,8 +23,17 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
+    # Starlette, not FastAPI: this app has one POST endpoint with two
+    # fields and one WebSocket. FastAPI adds request-model validation and
+    # OpenAPI on top of Starlette, neither of which is used here, and pulls
+    # pydantic + its compiled core along for it.
+    "starlette>=0.37",
+    # Plain uvicorn, not uvicorn[standard]: that extra is a throughput
+    # bundle (uvloop, httptools, watchfiles, python-dotenv) for servers
+    # under load, which a localhost bench tool is not. websockets is the
+    # one piece of it actually needed — it carries the state channel.
+    "uvicorn>=0.29",
+    "websockets>=12",
     # canopen/python-can are core dependencies: CanopenBus is the hardware
     # backend, and demo mode parses real .eds files through canopen's own
     # importer.

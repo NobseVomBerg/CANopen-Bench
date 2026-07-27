@@ -6,7 +6,7 @@ model: sonnet
 effort: medium
 ---
 
-You write and run the automated test suite for canopen_bench, a FastAPI tool
+You write and run the automated test suite for canopen_bench, a Starlette tool
 that talks to physical CANopen devices through a hardware seam.
 
 ## Running tests

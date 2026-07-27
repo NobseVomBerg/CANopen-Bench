@@ -1,4 +1,4 @@
-"""FastAPI application: serves the frontend, one command endpoint, one state WebSocket.
+"""Starlette application: serves the frontend, one command endpoint, one state WebSocket.
 
 Workspaces: without an explicit db path the app runs in multi-workspace
 mode — every subfolder of the data root (``./data`` or
@@ -17,10 +17,12 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.routing import Mount, Route, WebSocketRoute
+from starlette.staticfiles import StaticFiles
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .bus.interface import BusInterface
 from .core import Bench
@@ -29,11 +31,6 @@ from .plugin import BenchPlugin
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_WORKSPACE = "default"
-
-
-class Action(BaseModel):
-    action: str
-    params: dict = {}
 
 
 def _active_workspace(root: Path) -> str:
@@ -45,7 +42,7 @@ def _active_workspace(root: Path) -> str:
 
 
 def create_app(db_path: str | None = None, bus: BusInterface | None = None,
-               plugins: list[BenchPlugin] | None = None) -> FastAPI:
+               plugins: list[BenchPlugin] | None = None) -> Starlette:
     explicit = db_path or os.environ.get("CANOPEN_BENCH_DB")
     if explicit:
         root: Path | None = None
@@ -113,7 +110,7 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
     holder["bench"] = _build_bench(Db(path))
 
     @contextlib.asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: Starlette):
         holder["bench"].startup()
         holder["ticker"] = asyncio.create_task(holder["bench"].tick_loop())
         yield
@@ -123,21 +120,28 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         holder["bench"].shutdown()
         holder["bench"].db.close()
 
-    app = FastAPI(title="CANopen Bench", lifespan=lifespan)
-    app.state.bench = holder["bench"]
-
-    @app.get("/")
-    async def index() -> FileResponse:
+    async def index(request: Request) -> FileResponse:
         return FileResponse(STATIC / "index.html")
 
-    @app.get("/api/state")
-    async def state() -> JSONResponse:
+    async def state(request: Request) -> JSONResponse:
         return JSONResponse(holder["bench"].snapshot())
 
-    @app.post("/api/action")
-    async def action(a: Action) -> JSONResponse:
+    async def action(request: Request) -> JSONResponse:
+        """Parsed by hand rather than through a validation library: one
+        endpoint, two fields. `dispatch` validates the action name and its
+        params anyway, and raises ValueError with a message for the UI."""
         try:
-            holder["bench"].dispatch(a.action, a.params)
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "body must be JSON"}, status_code=400)
+        if not isinstance(body, dict) or not isinstance(body.get("action"), str):
+            return JSONResponse({"ok": False, "error": "missing 'action'"}, status_code=400)
+        params = body.get("params") or {}
+        if not isinstance(params, dict):
+            return JSONResponse({"ok": False, "error": "'params' must be an object"},
+                                status_code=400)
+        try:
+            holder["bench"].dispatch(body["action"], params)
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True})
@@ -145,21 +149,17 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
     # Plain GET downloads, deliberately outside the action/WebSocket state
     # machine: a browser download is a different concern (Content-Disposition,
     # not JSON) and doesn't mutate any state, so it doesn't need dispatch().
-    @app.get("/api/trace/export.csv")
-    async def export_csv() -> Response:
+    def _download(body: str, media_type: str, suffix: str) -> Response:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        content = holder["bench"]._trace_csv()
-        return Response(content=content, media_type="text/csv", headers={
-            "Content-Disposition": f'attachment; filename="trace_{stamp}.csv"'})
+        return Response(content=body, media_type=media_type, headers={
+            "Content-Disposition": f'attachment; filename="trace_{stamp}.{suffix}"'})
 
-    @app.get("/api/trace/export/candump")
-    async def export_candump() -> Response:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        content = holder["bench"]._trace_candump()
-        return Response(content=content, media_type="text/plain", headers={
-            "Content-Disposition": f'attachment; filename="trace_{stamp}.candump.log"'})
+    async def export_csv(request: Request) -> Response:
+        return _download(holder["bench"]._trace_csv(), "text/csv", "csv")
 
-    @app.websocket("/ws")
+    async def export_candump(request: Request) -> Response:
+        return _download(holder["bench"]._trace_candump(), "text/plain", "candump.log")
+
     async def ws(websocket: WebSocket) -> None:
         await websocket.accept()
         clients.add(websocket)
@@ -172,5 +172,14 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         finally:
             clients.discard(websocket)
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    app = Starlette(lifespan=lifespan, routes=[
+        Route("/", index),
+        Route("/api/state", state),
+        Route("/api/action", action, methods=["POST"]),
+        Route("/api/trace/export.csv", export_csv),
+        Route("/api/trace/export/candump", export_candump),
+        WebSocketRoute("/ws", ws),
+        Mount("/static", StaticFiles(directory=STATIC), name="static"),
+    ])
+    app.state.bench = holder["bench"]
     return app
