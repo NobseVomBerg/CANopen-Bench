@@ -94,7 +94,7 @@ installs a plugin package (`.whl`) straight from the browser, active
 immediately. Guide with hook table and a minimal example:
 `docs/extending.md`; API: `canopen_bench/plugin.py`. A complete worked
 example ships in this repo under
-[`plugins/bench-cpcusb/`](plugins/bench-cpcusb/) — python-can driver plus
+[`plugins/cob-cpcusb/`](plugins/cob-cpcusb/) — python-can driver plus
 adapter card, its own tests, MIT. It is a separate distribution, not part
 of the `canopen-bench` package: install it only if you have that
 adapter.
@@ -131,7 +131,7 @@ verification stays on.
 ## License & author
 
 Core application: MIT (`LICENSE`). Plugin packages are licensed
-independently — vendor plugins proprietary, `bench-cpcusb` MIT.
+independently — vendor plugins proprietary, `cob-cpcusb` MIT.
 Bundled and depended-on third-party components, and the trademark note
 (CANopen® and CiA® belong to CAN in Automation e.V.; this is not a
 CiA-certified or CiA-affiliated tool), are listed in

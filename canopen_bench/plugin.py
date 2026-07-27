@@ -4,7 +4,7 @@ A plugin is a pip package that registers a ``BenchPlugin`` subclass under
 the ``canopen_bench.plugins`` entry-point group::
 
     [project.entry-points."canopen_bench.plugins"]
-    myvendor = "bench_myvendor.plugin:MyVendorPlugin"
+    myvendor = "cob_myvendor.plugin:MyVendorPlugin"
 
 Installing the package activates it — there is no configuration step. The
 core stays vendor-neutral; everything a specific device family or machine

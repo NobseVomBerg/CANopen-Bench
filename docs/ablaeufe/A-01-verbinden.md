@@ -42,7 +42,7 @@ UI → `Bench.act_connect_toggle` → `CanopenBus.connect`
    `pcan → ("pcan", "PCAN_USBBUS1")` (`_ADAPTER_BACKENDS`,
    `canopen_bus.py`); Plugin-Adapter steuern ihr Mapping über
    `BenchPlugin.adapter_backends()` bei (z. B. `cpc → ("cpcusb", None)`
-   aus dem Paket `bench-cpcusb`, das Karte und Treiber gemeinsam
+   aus dem Paket `cob-cpcusb`, das Karte und Treiber gemeinsam
    trägt). Besteht bereits eine Verbindung, wird sie zuerst getrennt.
 3. **[Ist]** `canopen.Network()` wird erzeugt, der `_TraceListener`
    **vor** `connect()` registriert (sonst verpasst der Notifier-Thread ihn),

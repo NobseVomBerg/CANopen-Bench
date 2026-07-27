@@ -1,7 +1,7 @@
 # CPC-USB/ARM7 wire protocol
 
-Reference for the USB protocol implemented in `bench_cpcusb/protocol.py`
-(encode/decode, no I/O) and driven in `bench_cpcusb/bus.py` (pyusb bulk
+Reference for the USB protocol implemented in `cob_cpcusb/protocol.py`
+(encode/decode, no I/O) and driven in `cob_cpcusb/bus.py` (pyusb bulk
 transfers, `can.BusABC`). Everything here is interface information —
 endpoint numbers, message identifiers, byte layouts, register semantics
 and the required call order. None of it is invented by this project; it

@@ -17,11 +17,11 @@ Register a `BenchPlugin` subclass under the entry-point group
 ```toml
 # pyproject.toml of your plugin package
 [project]
-name = "bench-acme"
+name = "cob-acme"
 dependencies = ["canopen-bench>=1,<2"]
 
 [project.entry-points."canopen_bench.plugins"]
-acme = "bench_acme.plugin:AcmePlugin"
+acme = "cob_acme.plugin:AcmePlugin"
 ```
 
 At startup the bench discovers all installed plugins (sorted by
@@ -59,7 +59,7 @@ covering the exact contract.
 A plugin that adds one trace decoder and one custom step type:
 
 ```python
-# bench_acme/plugin.py
+# cob_acme/plugin.py
 from canopen_bench.plugin import BenchPlugin, StepType, TraceDecoder
 
 
@@ -103,5 +103,5 @@ Pair your protocol code with a `DemoHook` that simulates the device
 side on the demo bus (`on_raw_frame`, `press_button`). For a public,
 worked example of a plugin package — python-can driver plus adapter
 card, entry points, tests — see
-[`plugins/bench-cpcusb/`](../plugins/bench-cpcusb/) (MIT) in this
+[`plugins/cob-cpcusb/`](../plugins/cob-cpcusb/) (MIT) in this
 repository.

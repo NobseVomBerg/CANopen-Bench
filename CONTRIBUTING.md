@@ -30,7 +30,7 @@ Both must be clean. CI runs the suite on Python 3.10, 3.11 and 3.12 —
 recent standard-library additions. Worth a local run on the oldest
 version before pushing anything that touches imports. If you touch the plugin API
 (`canopen_bench/plugin.py`), check it against the real plugin package in
-[`plugins/bench-cpcusb/`](plugins/bench-cpcusb/) — CI installs it and
+[`plugins/cob-cpcusb/`](plugins/cob-cpcusb/) — CI installs it and
 runs its tests, and also re-runs the core suite with it installed to
 prove the core still works plugin-free.
 
@@ -69,7 +69,7 @@ enforces that (`test_version_has_one_source_of_truth`).
 `CHANGELOG.md` is not a log of every bump. It gets a dated section per
 second-position change, summarising what happened since the last one.
 
-Plugin packages version themselves independently — `plugins/bench-cpcusb/`
+Plugin packages version themselves independently — `plugins/cob-cpcusb/`
 has its own `pyproject.toml`, and most changes over time are expected to
 land in plugins rather than in the core. A plugin bump never touches the
 core version, and vice versa.
