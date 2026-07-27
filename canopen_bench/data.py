@@ -119,5 +119,7 @@ ADAPTERS = [
      "driver": "driver: PCANBasic via python-can", "full": "PCAN-USB"},
     {"key": "demo", "label": "Demo mode", "sub": "virtual DUTs from EDS",
      "conn": "Demo connected", "foot": "Demo mode", "iface": "DEMO",
-     "driver": "no hardware · devices generated from active EDS files", "full": "Demo mode"},
+     # keep this as short as the other driver lines — the adapter cards are
+     # equal-width columns and clip what doesn't fit (see SetupPage in app.js)
+     "driver": "no hardware · no driver", "full": "Demo mode"},
 ]
