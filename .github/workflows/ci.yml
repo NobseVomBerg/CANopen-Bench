@@ -1,8 +1,14 @@
 name: CI
 
 on:
+  # Every branch, not just main: work happens on branches (see CLAUDE.md)
+  # and "merge once CI is green" needs CI to have run before the merge.
+  # Restricting this to main meant a branch push produced no run at all
+  # unless someone opened a pull request for it.
   push:
-    branches: [main]
+  # Forks cannot trigger the above, so keep this for outside contributions.
+  # A pull request from a branch in this repo runs twice; that is the
+  # cheaper problem.
   pull_request:
 
 jobs:

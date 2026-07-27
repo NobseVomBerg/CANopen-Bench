@@ -20,6 +20,9 @@ git push -u origin <topic>
 # CI green on 3.10/3.11/3.12 → merge into main, delete the branch
 ```
 
+CI runs on a push to any branch, so no pull request is needed to get a
+run — check the branch's own run before merging.
+
 Bump the version in `pyproject.toml` as part of the change — the rules
 are in `CONTRIBUTING.md` under "Versioning". Delete merged branches
 promptly; stale ones only raise the question of whether something is
