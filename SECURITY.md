@@ -8,10 +8,16 @@ access control.
 
 ## Reporting a vulnerability
 
-Please report vulnerabilities privately to **[redacted]**
-instead of opening a public issue. Include steps to reproduce and, if
-possible, an assessment of impact. You will get a response within a few
-days; a fix or an agreed disclosure plan follows as soon as realistic.
+Please report vulnerabilities privately instead of opening a public
+issue: use **[Report a
+vulnerability](https://github.com/NobseVomBerg/CANopen-Bench/security/advisories/new)**
+under this repository's Security tab, which opens an advisory only you
+and the maintainer can see. If you would rather not go through GitHub,
+[unsix.de](https://unsix.de) lists a way to get in touch.
+
+Include steps to reproduce and, if possible, an assessment of impact.
+You will get a response within a few days; a fix or an agreed
+disclosure plan follows as soon as realistic.
 
 ## Supported versions
 

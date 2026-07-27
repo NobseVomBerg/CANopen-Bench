@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.9"
+version = "1.0.10"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
 license = {text = "MIT"}
-authors = [{name = "NobseVomBerg", email = "[redacted]"}]
+authors = [{name = "NobseVomBerg"}]
 keywords = ["canopen", "can", "cia301", "eds", "test-bench", "sdo", "pdo", "nmt", "lss"]
 classifiers = [
     "Development Status :: 4 - Beta",

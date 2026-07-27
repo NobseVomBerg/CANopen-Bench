@@ -52,7 +52,9 @@ public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may
-be reported to the maintainer at **[redacted]**. All complaints
+be reported to the maintainer, **[@NobseVomBerg](https://github.com/NobseVomBerg)**
+on GitHub; [unsix.de](https://unsix.de) lists a way to get in touch off
+GitHub. All complaints
 will be reviewed and investigated promptly and fairly. All community
 leaders are obligated to respect the privacy and security of the
 reporter of any incident.
