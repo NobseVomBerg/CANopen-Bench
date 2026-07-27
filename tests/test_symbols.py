@@ -71,8 +71,8 @@ def test_two_enums_in_one_file_do_not_bleed_into_each_other():
 # -- expressions ------------------------------------------------------------
 
 def test_value_may_be_an_expression_over_earlier_symbols():
-    """lamp.h composes its states as (eLamp_Off << 8) — a literal-only reader
-    would reject the file outright."""
+    """A composed state written as (eLamp_Off << 8) makes a literal-only
+    reader throw out the whole file."""
     table, errors = syms("""
         typedef enum eLamp { eLamp_Off = 1, eLamp_Blinking = 3 } eLamp;
         typedef enum eLampState {
