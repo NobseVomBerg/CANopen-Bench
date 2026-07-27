@@ -129,6 +129,11 @@ class DevicePanel:
                     ``on`` is True (lit), False (dark) or None (**not
                     readable**, rendered as a neutral ring, never as
                     dark). ``blink`` is "slow" or "fast".
+        ``caption`` one line under the canvas — a mode, a screen name,
+                    whatever the device says about itself that is not part
+                    of the picture. Keep it out of the canvas: that one
+                    mirrors the device, and text the device is not showing
+                    has no business in it.
         ``refresh`` action name for the box's refresh control; omitted
                     means no refresh control.
         """

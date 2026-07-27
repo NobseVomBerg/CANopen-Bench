@@ -142,6 +142,8 @@ function panelBox(p) {
         </svg>`}
       ${column(PANEL_SLOTS[1])}
     </div>
+    ${p.caption && html`
+      <div style="padding:0 10px 2px;text-align:center;font-size:10.5px;color:var(--dim)">${p.caption}</div>`}
     ${(p.leds || []).length > 0 && html`
       <div style="display:flex;gap:9px;justify-content:center;padding:4px 10px 9px">${p.leds.map(panelLed)}</div>`}
   </div>`;

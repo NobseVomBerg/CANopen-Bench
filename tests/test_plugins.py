@@ -803,3 +803,12 @@ def test_two_plugins_panels_stay_distinct(tmp_path):
                       "cmds": {}, "fw": "", "sn": "", "variant": "",
                       "ident": "0xAF·0x2600", "eds": "—"}]
     assert [p["key"] for p in bench.snapshot()["panels"]] == ["fake.lcd", "other.lcd"]
+
+
+def test_panel_caption_reaches_the_snapshot(tmp_path):
+    """A one-liner under the canvas — a mode or screen name — so a device's
+    own words do not have to be drawn into the picture that mirrors it."""
+    panel = _FakePanel(data={"canvas": {"w": 10, "h": 10, "draw": []},
+                             "caption": "Working tension"})
+    bench = _panel_bench(tmp_path, panel)
+    assert bench.snapshot()["panels"][0]["caption"] == "Working tension"
