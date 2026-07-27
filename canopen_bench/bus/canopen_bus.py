@@ -4,7 +4,7 @@ Adapter-agnostic: which python-can backend actually moves the bytes is
 selected purely by the ``interface`` string passed to ``connect()`` — the
 built-in ``virtual`` bus (used in tests, no hardware) or any python-can
 interface (``ixxat``, ``pcan``, or one registered by a separately installed
-driver package such as ``bench-cpcusb``). This class contains no
+driver package such as ``cob-cpcusb``). This class contains no
 adapter-specific logic at all; bench plugins extend the adapter-key mapping
 via the ``extra_backends`` constructor argument.
 """

@@ -93,7 +93,7 @@ reinstalled.
 
 Plugins are separate distributions with their own licensing; installing
 one does not change the license of this package. The public
-[`bench-cpcusb`](plugins/bench-cpcusb/)
+[`cob-cpcusb`](plugins/cob-cpcusb/)
 is MIT. Check each plugin's own `LICENSE` before redistributing an
 environment that contains it — a copyleft or proprietary plugin puts its
 own obligations on that environment.

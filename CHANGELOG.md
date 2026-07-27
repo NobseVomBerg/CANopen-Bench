@@ -12,7 +12,7 @@ state of the tool; the rules are in
 
 This file is therefore not a log of every bump. It gets one dated
 section per second-position change, covering everything since the
-previous one. Plugin packages such as `plugins/bench-cpcusb/` version
+previous one. Plugin packages such as `plugins/cob-cpcusb/` version
 and document themselves separately.
 
 ## 1.0.x — from 2026-07-26
@@ -65,7 +65,7 @@ development; the version counts from here.
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed
-- `plugins/bench-cpcusb/` — CPC-USB/ARM7 support as a worked reference
+- `plugins/cob-cpcusb/` — CPC-USB/ARM7 support as a worked reference
   for what a plugin package looks like: a python-can driver over pyusb
   plus the bench adapter card, its own tests, its own `PROTOCOL.md`,
   MIT. A separate distribution that happens to share this repository —

@@ -1,4 +1,4 @@
-# bench-cpcusb
+# cob-cpcusb
 
 CPC-USB/ARM7 adapter support for [canopen-bench](../../): a python-can
 backend plus the bench's adapter-card UI, in one package. It registers
@@ -37,7 +37,7 @@ reasoning, and what remains in common, is written up in
 ## Install
 
 ```bash
-pip install -e ./plugins/bench-cpcusb     # from the repository root
+pip install -e ./plugins/cob-cpcusb     # from the repository root
 ```
 
 Requires `canopen-bench>=1,<2`. On Windows, the device must be bound
@@ -47,11 +47,11 @@ driver = WinUSB).
 
 ## What's in here
 
-- `bench_cpcusb/bus.py` — `can.BusABC` implementation, driven over
+- `cob_cpcusb/bus.py` — `can.BusABC` implementation, driven over
   native USB bulk transfers (no vendor DLL, no COM-port framing)
-- `bench_cpcusb/plugin.py` — the bench-side adapter card
+- `cob_cpcusb/plugin.py` — the bench-side adapter card
   (`BenchPlugin.adapters()` / `adapter_backends()`)
-- `bench_cpcusb/protocol.py` — CPC-USB wire protocol constants/framing
+- `cob_cpcusb/protocol.py` — CPC-USB wire protocol constants/framing
 
 Both halves ship in one package deliberately: the adapter card is
 meaningless without the driver it points at, and vice versa.

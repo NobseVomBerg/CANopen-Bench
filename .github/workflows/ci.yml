@@ -37,7 +37,7 @@ jobs:
         run: python -m pytest tests/ --cov=canopen_bench -q
 
       - name: Install plugin package
-        run: python -m pip install -e ./plugins/bench-cpcusb
+        run: python -m pip install -e ./plugins/cob-cpcusb
 
       # The core suite again, now with a plugin's entry points registered —
       # it must still pass unchanged, which is what makes the core neutral.
@@ -45,4 +45,4 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Plugin tests
-        run: python -m pytest plugins/bench-cpcusb/tests -q
+        run: python -m pytest plugins/cob-cpcusb/tests -q

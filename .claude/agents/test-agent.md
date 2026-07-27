@@ -37,7 +37,7 @@ declare a test fixed or added without a passing run in front of you.
   (`test_canopen_bus.py`) when the task is specifically about the
   real-hardware protocol path — those use python-can's `virtual` bus
   plus a `canopen.LocalNode` peer, not actual adapters. Adapter-specific
-  driver plugins (e.g. `bench-cpcusb`) ship their own test suites in
+  driver plugins (e.g. `cob-cpcusb`) ship their own test suites in
   their own repos.
 - Test-case YAML fixtures (`TestCase`/`parse_testcase`/`load_catalog` from
   `canopen_bench/testcases.py`) are plain strings written under `tmp_path`;

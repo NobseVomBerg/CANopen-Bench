@@ -199,7 +199,7 @@ the adapter selected on the Setup page:
   separately installed package registering two entry points: a
   python-can driver (`can.interface`) plus a bench plugin contributing
   the adapter card and key mapping (`canopen_bench.plugins`) — e.g.
-  the public [`bench-cpcusb`](plugins/bench-cpcusb/)
+  the public [`cob-cpcusb`](plugins/cob-cpcusb/)
   package carries both for the CPC-USB/ARM7. Device-family
   plugins are a separate concern (EDS/firmware seeds, addressing flow)
   and contribute no adapter card of their own.
@@ -236,7 +236,7 @@ VM, SWDL download strategies) lives in separate pip packages registered
 under the `canopen_bench.plugins` entry-point group. Installing such a package activates it — no
 configuration. The concept and full hook reference are in
 `docs/extending.md`. Licensing is per package, not blanket: vendor
-plugins are proprietary, while [`plugins/bench-cpcusb/`](plugins/bench-cpcusb/)
+plugins are proprietary, while [`plugins/cob-cpcusb/`](plugins/cob-cpcusb/)
 — the one that lives in this repo — is MIT like the core. Sharing a
 repository does not merge the distributions: it is built, versioned,
 installed and licensed on its own, and `pip install canopen-bench` does

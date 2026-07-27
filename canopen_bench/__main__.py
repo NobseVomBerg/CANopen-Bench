@@ -3,7 +3,7 @@
 Hardware adapters (CPC-USB / IXXAT / PCAN) talk to the bus via
 python-can/canopen; pick the adapter on the Setup page. Demo mode needs no
 hardware — it generates virtual DUTs from the uploaded EDS files. The
-CPC-USB adapter additionally needs the bench-cpcusb driver package.
+CPC-USB adapter additionally needs the cob-cpcusb driver package.
 """
 import argparse
 

@@ -10,8 +10,8 @@ import struct
 import can
 import pytest
 import usb.core
-from bench_cpcusb import CpcUsbBus
-from bench_cpcusb import protocol as p
+from cob_cpcusb import CpcUsbBus
+from cob_cpcusb import protocol as p
 
 # -- protocol.py: pure encode/decode --------------------------------------------
 
