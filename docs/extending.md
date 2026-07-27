@@ -41,6 +41,7 @@ only what you provide.
 | `seed_eds()` | `list[dict]` | EDS registry rows seeded once into an empty workspace |
 | `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits |
+| `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables; seeded into the workspace like flows |
 | `addressing_provider()` | `AddressingProvider \| None` | Session identity for (re-)addressing runs (`$session` in flows); first plugin wins |
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |
 | `trace_decoders()` | `list[TraceDecoder]` | Decoding for vendor-specific frames in the trace monitor |
@@ -54,6 +55,32 @@ The helper base classes (`AddressingProvider`, `DemoHook`,
 `TraceDecoder`, `DevicePanel`, `StepType`, `SwdlStrategy`) are defined
 next to `BenchPlugin` in `canopen_bench/plugin.py`, each with docstrings
 covering the exact contract.
+
+### Symbol tables
+
+Object indices, sub-indices and enum values are whatever the firmware
+calls them. Keeping a second copy of those numbers in the tool is how a
+bench ends up writing to the wrong object after a firmware change, so
+`symbol_dirs()` points at the device's own C headers instead and the core
+parses them (`canopen_bench/symbols.py`).
+
+They are used in both directions: `$eObjIdx_LampControl` in a
+test case or flow resolves **at load time**, so a typo makes the file
+invalid in the catalog rather than failing mid-run; and a value read back
+can be rendered as `WorkingTension (4)` rather than `0x04`.
+
+Headers are seeded into `<workspace>/symbols/<plugin>/` and never
+overwritten afterwards — the copy there is the firmware actually under
+test, which is regularly newer than the plugin. The per-plugin
+subdirectory is also what keeps two vendors' `eObjIdx` apart;
+where they disagree, the bare name stops resolving and
+`$<plugin>:<NAME>` is the way through.
+
+Only a small subset of C is accepted: enums (including implicit
+successors and constant expressions over symbols already parsed, so
+`(eLamp_Off << 8)` works) and `#define` constants. Anything else is
+reported with file and line rather than guessed — a table that is subtly
+wrong is worse than no table.
 
 ### Device panels
 

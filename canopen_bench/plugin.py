@@ -214,6 +214,14 @@ class BenchPlugin:
         before the core's demo entries."""
         return []
 
+    def symbol_dirs(self) -> list[Path]:
+        """Directories with the device's own C headers, parsed into symbol
+        tables (indices, sub-indices, enum values — see
+        ``canopen_bench/symbols.py``). Seeded into the workspace like flows,
+        so the operator can drop in the headers of the firmware actually
+        under test without waiting for a new plugin release."""
+        return []
+
     def flow_dirs(self) -> list[Path]:
         """Directories with packaged flow files (*.yaml, format v2).
         Seeded into the workspace flows dir on startup; existing files

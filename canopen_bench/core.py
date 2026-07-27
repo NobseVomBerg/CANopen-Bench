@@ -35,6 +35,7 @@ from .bus.interface import BusInterface, SdoResult
 from .db import Db
 from .eds_od import OdCache, find_var, pdo_mapping
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
+from .symbols import SymbolTables, load_symbols
 
 VERSION = __version__  # single source: canopen_bench/__init__.py
 
@@ -489,6 +490,11 @@ class Bench:
         self.plot_sel: list[dict] = db.get("plot_sel", [])
         self.plot_series: dict[str, deque[tuple[float, float]]] = {}
         self._plot_keys: set[str] = {f"{r['idx']}:{r['sub']}" for r in self.plot_sel}
+        # symbol tables from the device's own C headers, seeded per plugin
+        # like flows and parsed before the test-case catalog — cases may
+        # reference $Symbol and must fail to load, not mid-run, on a typo
+        self.symbols_dir = db.path.parent / "symbols"
+        self.symbols: SymbolTables = self._load_symbols()
         # test-config paths default into the workspace folder; the default is
         # computed (not persisted) so a copied workspace keeps pointing at its
         # own copy — act_set_path persists once the user configures something
@@ -1274,7 +1280,8 @@ class Bench:
 
     def _load_testcases(self, log: bool = True) -> None:
         catalog = tclib.load_catalog(self.paths.get("tc", ""),
-                                     extensions=self._step_types)
+                                     extensions=self._step_types,
+                                     symbols=self.symbols)
         self.testcases = {tc.id: tc for tc in catalog}
         if log:
             broken = sum(1 for tc in catalog if tc.error)
@@ -1726,7 +1733,8 @@ class Bench:
             self.log(f'MC   flow "{name}" not found in {self.flows_dir}', "emcy0")
             return None
         flow = tclib.parse_testcase(text, name, require_prefix=False,
-                                    extensions=self._step_types)
+                                    extensions=self._step_types,
+                                    symbols=self.symbols)
         if flow.error:
             self.log(f'MC   flow "{name}" invalid — {flow.error}', "emcy0")
             return None
@@ -2992,6 +3000,38 @@ class Bench:
             return {}, [], built
         return built[0], built[1], ""
 
+    def _load_symbols(self) -> SymbolTables:
+        """Seed each plugin's packaged headers into ``<workspace>/symbols/
+        <plugin>/`` (never overwriting — the operator's copy is the firmware
+        under test), then parse everything found there.
+
+        Origins are per plugin directory, so two vendors' ``eObjIdx``
+        stay apart instead of the winner depending on file order.
+        """
+        for plugin in self.plugins:
+            for src_dir in plugin.symbol_dirs():
+                dst_dir = self.symbols_dir / plugin.name
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                for src in sorted(Path(src_dir).glob("*.h")):
+                    dst = dst_dir / src.name
+                    if not dst.exists():
+                        shutil.copy2(src, dst)
+        origins = [(d.name, d) for d in sorted(self.symbols_dir.glob("*"))
+                   if d.is_dir()] if self.symbols_dir.is_dir() else []
+        tables = load_symbols(origins)
+        if tables.by_name:
+            self.log(f"SYM  {len(tables.by_name)} symbols in {len(tables.tables)} tables "
+                     f"from {', '.join(o for o, _ in origins)}")
+        for err in tables.errors:
+            self.log(f"SYM  {err}", "emcy0")
+        return tables
+
+    def act_symbols_reload(self, p: dict) -> None:
+        """Re-parse the workspace symbol directory, so dropping in the
+        headers of a newer firmware does not need a restart."""
+        self.symbols = self._load_symbols()
+        self._load_testcases()
+
     def _mirror_slots(self, eds: str) -> list[dict]:
         entry = next((e for e in self.db.eds_list() if e["file"] == eds), None)
         return entry["display_slots"] if entry else []
@@ -3092,6 +3132,7 @@ class Bench:
                 "addressing": self.addressing.name if self.addressing else None,
                 "canInstall": self.plugin_dir is not None,
                 "installed": self._installed_plugin_packages(),
+                "symbols": self.symbols.summary(),
             },
             "devices": self.devices,
             "logs": self.logs[-30:],

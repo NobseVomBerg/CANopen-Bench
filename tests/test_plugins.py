@@ -160,8 +160,9 @@ class _ExtPlugin(BenchPlugin):
 
 def test_snapshot_ext_section_empty_without_plugins(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[])
-    assert bench.snapshot()["ext"] == {"plugins": [], "addressing": None,
-                                       "canInstall": False, "installed": []}
+    assert bench.snapshot()["ext"] == {
+        "plugins": [], "addressing": None, "canInstall": False, "installed": [],
+        "symbols": {"tables": 0, "symbols": 0, "errors": []}}
 
 
 def test_snapshot_ext_section_lists_plugin_name_and_addressing_provider(tmp_path):
