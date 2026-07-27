@@ -19,7 +19,8 @@ No virtualenv needed to just run it, and no `-e` — that installs the
 package for editing, which is what `## Development` below is for.
 
 Pick **Demo mode** on the Setup page, **Connect**, **Scan**: virtual
-devices are generated from the bundled `DemoDevice.eds` (installed into
+devices are generated from the bundled `canopen_bench/seed/DemoDevice.eds`
+(installed into
 the workspace on first run). SDO reads/writes are answered from the EDS
 object dictionary — including realistic aborts on out-of-range writes —
 and every access shows up in the Trace like real bus traffic.

@@ -539,7 +539,7 @@ def test_lss_assign_returns_zero_when_disconnected(demo_bench):
 @pytest.fixture()
 def demo_device_bench(tmp_path):
     """A fresh workspace: the first-run seed installs the real
-    examples/eds/DemoDevice.eds (with its 0x1800/0x1A00 objects) as the sole
+    canopen_bench/seed/DemoDevice.eds (with its 0x1800/0x1A00 objects) as the sole
     loadable EDS, so scan finds only its DUTs (nodes 1 and 2)."""
     bench = Bench(Db(tmp_path / "fresh" / "canopen-bench.db"))
     assert bench.adapter == "demo"

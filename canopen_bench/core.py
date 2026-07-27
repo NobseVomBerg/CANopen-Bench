@@ -38,6 +38,13 @@ from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 
 VERSION = __version__  # single source: canopen_bench/__init__.py
 
+# Inside the package on purpose, not at the repository root. Anything the
+# running tool reads has to ship in the wheel, and only package data does:
+# this file used to live in examples/, which pip does not install, so
+# `pip install canopen-bench` produced a demo mode that scanned and found
+# nothing at all. Keep it here, and keep seed/*.eds in package-data.
+SEED_EDS = Path(__file__).resolve().parent / "seed" / "DemoDevice.eds"
+
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
 TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈1 h at 55 frames/s
@@ -1470,10 +1477,14 @@ class Bench:
     # -- setup: EDS -----------------------------------------------------------
     def _seed_demo_eds(self) -> None:
         """First-ever run: install the bundled DemoDevice.eds like a manual upload, so Demo mode works out of the box."""
-        src = Path(__file__).resolve().parent.parent / "examples" / "eds" / "DemoDevice.eds"
+        src = SEED_EDS
         try:
             content = src.read_text(encoding="utf-8")
-        except OSError:
+        except OSError as e:
+            # Never silent: without this file a demo scan finds nothing, and
+            # an empty device list with no explanation is the worst way to
+            # learn that. It went missing once already — see SEED_EDS.
+            self.log(f'EDS  demo seed unavailable ({src.name}) — {e}', "emcy0")
             return
         ok, msg = self.add_eds_file(src.name, content)
         if not ok:
@@ -1481,7 +1492,7 @@ class Bench:
             return
         # the sidebar display mirror is specific to this device profile —
         # velocity + board temperature are the only two live gauges
-        # DemoDevice.eds actually has (see examples/eds/DemoDevice.eds)
+        # DemoDevice.eds actually has (see canopen_bench/seed/DemoDevice.eds)
         self.db.eds_set_display(src.name, [
             {"label": "m/min", "idx": "0x606C", "sub": "00"},
             {"label": "°C", "idx": "0x2002", "sub": "00"},

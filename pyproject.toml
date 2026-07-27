@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.5"
+version = "1.0.6"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
 license = {text = "MIT"}
@@ -70,7 +70,9 @@ license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 include = ["canopen_bench*"]
 
 [tool.setuptools.package-data]
-canopen_bench = ["static/**/*", "flows/*.yaml"]
+# seed/*.eds is what makes demo mode work after a plain `pip install`:
+# it is read at runtime (core.SEED_EDS), so it has to be in the wheel.
+canopen_bench = ["static/**/*", "flows/*.yaml", "seed/*.eds"]
 
 [tool.ruff]
 line-length = 110

@@ -47,7 +47,7 @@ light + dark theme (toggle in the header, persisted per browser):
   paths (defaulting into the workspace folder).
   `data/` is gitignored, so a fresh checkout ships no real .eds files; on
   the workspace's first run (`Db.is_first_run`) `Bench` installs
-  `examples/eds/DemoDevice.eds` the same way an upload would
+  `canopen_bench/seed/DemoDevice.eds` the same way an upload would
   (`Bench._seed_demo_eds`), so Demo mode has one working DUT out of the
   box. One-shot and deletable — removing it via the registry doesn't
   bring it back.

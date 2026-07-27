@@ -14,9 +14,9 @@ pip install -e ".[dev]"
 canopen-bench            # http://127.0.0.1:8000 — pick "Demo" as adapter
 ```
 
-Demo mode simulates devices from real EDS files (`examples/eds/`), so the
-whole flow — scan, object browser, trace, test runs — works without an
-adapter.
+Demo mode simulates devices from real EDS files — the bundled one is
+`canopen_bench/seed/DemoDevice.eds` — so the whole flow (scan, object
+browser, trace, test runs) works without an adapter.
 
 ## Before you open a PR
 

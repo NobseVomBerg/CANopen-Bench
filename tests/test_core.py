@@ -17,7 +17,7 @@ from canopen_bench.db import Db
 from canopen_bench.eds_od import pdo_mapping
 from canopen_bench.plugin import BenchPlugin
 
-DEMO_DEVICE_EDS = Path(__file__).resolve().parent.parent / "examples" / "eds" / "DemoDevice.eds"
+DEMO_DEVICE_EDS = core_mod.SEED_EDS
 
 
 def drive_verify(bench: Bench, timeout: float = 3.0) -> None:
@@ -2511,6 +2511,34 @@ def test_real_testcases_win_regardless_of_adapter(bench, tmp_path):
 
 
 # -- live bus statistics + version/workspace snapshot fields ------------------
+
+def test_demo_seed_eds_ships_inside_the_package():
+    """The seed EDS has to be package data, or a wheel install has no demo.
+
+    It used to live in `examples/` at the repository root, which pip does
+    not install. From a source checkout it resolved fine and every test
+    passed; from `pip install canopen-bench` it was simply absent, and
+    `_seed_demo_eds` swallowed the OSError — so demo mode scanned and
+    found nothing, with no message anywhere.
+
+    Two conditions make it shippable, and both are checked here: the file
+    lives under the package directory, and pyproject declares a
+    package-data pattern that covers it.
+    """
+    import canopen_bench
+
+    pkg_dir = Path(canopen_bench.__file__).resolve().parent
+    assert core_mod.SEED_EDS.is_file(), f"seed EDS missing at {core_mod.SEED_EDS}"
+    assert core_mod.SEED_EDS.is_relative_to(pkg_dir), (
+        f"{core_mod.SEED_EDS} is outside {pkg_dir} — it cannot ship as package data")
+
+    # the package-data entry itself, not just any mention of the pattern —
+    # a comment naming it would otherwise satisfy this check
+    pyproject = (pkg_dir.parent / "pyproject.toml").read_text(encoding="utf-8")
+    entry = next((ln for ln in pyproject.splitlines()
+                  if ln.strip().startswith("canopen_bench = [")), "")
+    assert "seed/*.eds" in entry, f"package-data does not cover the seed EDS: {entry!r}"
+
 
 def test_version_has_one_source_of_truth():
     """The version lives in pyproject.toml and nowhere else.
