@@ -11,9 +11,12 @@ workspace folder per bench.
 ## Try it — no hardware needed
 
 ```bash
-pip install -e .
-python -m canopen_bench        # → http://127.0.0.1:8000
+pip install .
+canopen-bench                  # → http://127.0.0.1:8000
 ```
+
+No virtualenv needed to just run it, and no `-e` — that installs the
+package for editing, which is what `## Development` below is for.
 
 Pick **Demo mode** on the Setup page, **Connect**, **Scan**: virtual
 devices are generated from the bundled `DemoDevice.eds` (installed into
@@ -106,9 +109,15 @@ adapter.
 ## Development
 
 ```bash
-pip install -e .[dev]
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"         # editable + pytest/ruff
 pytest                          # core suite
 ```
+
+`CONTRIBUTING.md` has the rest: what CI checks, where things belong, the
+versioning rule. Behind a TLS-inspecting proxy pip will fail to verify
+pypi.org — `pip install --use-feature=truststore …` makes it use the
+operating system's certificate store.
 
 ## License & author
 
