@@ -316,12 +316,15 @@ function SetupPage({ s }) {
     </div>`}
     <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0">
       <div style="font-weight:600;font-size:13px">Bus interface</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <!-- grid, not a wrapping flex row: with flex-grow a card that wraps into
+           a row of its own stretches across the full panel, so the adapters
+           end up different sizes. Equal columns keep every card the same. -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px">
         ${s.adapters.map((a) => {
           const on = s.adapter === a.key;
           return html`
           <div class="hv-bd" onClick=${() => send('set_adapter', { adapter: a.key })}
-            style="flex:1 1 200px;min-width:0;border:1px solid ${on ? 'var(--acc)' : 'var(--bd)'};background:${on ? 'var(--acc-soft)' : 'var(--panel)'};border-radius:7px;padding:9px 11px;cursor:pointer">
+            style="min-width:0;border:1px solid ${on ? 'var(--acc)' : 'var(--bd)'};background:${on ? 'var(--acc-soft)' : 'var(--panel)'};border-radius:7px;padding:9px 11px;cursor:pointer">
             <div style="font-weight:600;font-size:12px;color:${on ? 'var(--acc)' : 'var(--tx)'}">${a.label}</div>
             <div style="font:10.5px ${MONO};color:var(--dim);margin-top:2px">${a.sub}</div>
             <div style="font:10px ${MONO};color:var(--faint);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.driver || ''}</div>
