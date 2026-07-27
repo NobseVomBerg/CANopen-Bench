@@ -40,14 +40,24 @@ against the demo bus; look at `tests/conftest.py` for the fixtures
 
 ## Versioning
 
-There are no tagged releases: `main` is the current state. Instead the
-version in `pyproject.toml` moves with every commit, so a version number
-always identifies a specific state of the tool — which is what makes a
-bug report answerable. Bump it as part of the change, not afterwards:
+There are no tagged releases: `main` is the current state. The version in
+`pyproject.toml` is what identifies that state, which is what makes a bug
+report answerable — so it moves **once per merge into `main`, and only
+when the tool's own code changed.**
+
+Once per merge, not per commit: a branch lands as a single state on
+`main` no matter how many commits it took to get there. Bump it in the
+branch, before merging.
+
+Only for the tool's code — `canopen_bench/**`, or dependencies and
+metadata in `pyproject.toml` that change what gets installed. Not for
+changes to tests, documentation, CI or `CLAUDE.md`: they leave the
+running tool byte-for-byte identical, and a version that moved without
+the tool moving tells a bug reporter nothing.
 
 | Position | When | Example |
 |---|---|---|
-| third | every commit — the default | 1.0.1 → 1.0.2 |
+| third | the default for a change to the tool | 1.0.4 → 1.0.5 |
 | second | a larger change, or anything that makes an existing workspace database or capture file need migrating | 1.0.7 → 1.1.0 |
 | first | a redesign, or a break that needs a manual step from the user | 1.4.2 → 2.0.0 |
 

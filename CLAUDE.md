@@ -23,10 +23,15 @@ git push -u origin <topic>
 CI runs on a push to any branch, so no pull request is needed to get a
 run — check the branch's own run before merging.
 
-Bump the version in `pyproject.toml` as part of the change — the rules
-are in `CONTRIBUTING.md` under "Versioning". Delete merged branches
-promptly; stale ones only raise the question of whether something is
-still in them.
+If the branch changes the tool's own code (`canopen_bench/**`, or what
+`pyproject.toml` installs), bump the version there once before merging —
+not per commit, and not for branches that only touch tests, docs, CI or
+this file. Rules in `CONTRIBUTING.md` under "Versioning".
+
+Deleting a merged branch on the remote does not work from this
+environment: the git proxy rejects delete refspecs and there is no
+delete-branch tool. Delete it locally, then tell the user which branch
+they need to remove — do not leave it unmentioned.
 
 ## Model routing
 

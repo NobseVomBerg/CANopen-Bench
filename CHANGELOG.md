@@ -5,9 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **There are no tagged releases.** `main` is the current state and the
 version to use — install from the repository, not from a release
-artifact. The version in `pyproject.toml` moves with every commit, so it
-always identifies one specific state of the tool; the rules for which
-position moves are in [`CONTRIBUTING.md`](CONTRIBUTING.md#versioning).
+artifact. The version in `pyproject.toml` moves once per merge into
+`main` that changes the tool itself, so it always identifies one specific
+state of the tool; the rules are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md#versioning).
 
 This file is therefore not a log of every bump. It gets one dated
 section per second-position change, covering everything since the
