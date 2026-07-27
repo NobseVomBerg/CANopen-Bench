@@ -27,35 +27,35 @@ def syms(text: str, source: str = "fake/x.h"):
 def test_typedef_enum_members_and_table_name():
     table, errors = syms("""
         typedef enum eObjIdx {
-            eObjIdx_Setup = 0x2002,
-            eObjIdx_MotorCurrent = 0x2003,
+            eObjIdx_LampControl = 0x2050,
+            eObjIdx_MotorCurrent = 0x2060,
         } eObjIdx;
     """)
     assert not errors
-    assert table["eObjIdx_Setup"].value == 0x2002
-    assert table["eObjIdx_MotorCurrent"].value == 0x2003
+    assert table["eObjIdx_LampControl"].value == 0x2050
+    assert table["eObjIdx_MotorCurrent"].value == 0x2060
 
 
 def test_implicit_successors_continue_from_the_last_anchor():
-    """eSubLamp anchors at 0x01, 0x05, 0x0A, 0x10, 0x16 and lets the rest run
+    """a real sub-index table anchors at 0x01, 0x05, 0x0A, 0x10, 0x16 and lets the rest run
     on. Miscounting shifts a sub-index silently, which is the worst thing
     that can go wrong here."""
     table, _ = syms("""
-        typedef enum eObj {
-            eObj_A = 0x01,
-            eObj_B,
-            eObj_C,
-            eObj_D,
-            eObj_E = 0x05,
-            eObj_F,
-        } eObj;
+        typedef enum eSub {
+            eSub_A = 0x01,
+            eSub_B,
+            eSub_C,
+            eSub_D,
+            eSub_E = 0x05,
+            eSub_F,
+        } eSub;
     """)
-    assert [table[n].value for n in ("eObj_A", "eObj_B", "eObj_C", "eObj_D",
-                                     "eObj_E", "eObj_F")] == [1, 2, 3, 4, 5, 6]
+    assert [table[n].value for n in ("eSub_A", "eSub_B", "eSub_C", "eSub_D",
+                                     "eSub_E", "eSub_F")] == [1, 2, 3, 4, 5, 6]
 
 
 def test_bare_enum_starts_at_zero():
-    table, _ = syms("typedef enum eBtn { eKey_Up, eKey_Down, eKey_Enter } eBtn;")
+    table, _ = syms("typedef enum eKey { eKey_Up, eKey_Down, eKey_Enter } eKey;")
     assert [table[n].value for n in ("eKey_Up", "eKey_Down", "eKey_Enter")] == [0, 1, 2]
 
 
@@ -71,18 +71,18 @@ def test_two_enums_in_one_file_do_not_bleed_into_each_other():
 # -- expressions ------------------------------------------------------------
 
 def test_value_may_be_an_expression_over_earlier_symbols():
-    """lamp.h composes its states as (eLamp_Off << 8) — a literal-only reader
-    would reject the file outright."""
+    """A composed state written as (eLamp_Off << 8) makes a literal-only
+    reader throw out the whole file."""
     table, errors = syms("""
-        typedef enum eLed { eLamp_Off = 1, eLamp_Blinking = 3 } eLed;
-        typedef enum eLedState {
-            eLedState_GreenOff = (eLamp_Off << 8),
-            eLedState_BlueBlinking = (eLamp_Blinking << 16),
-        } eLedState;
+        typedef enum eLamp { eLamp_Off = 1, eLamp_Blinking = 3 } eLamp;
+        typedef enum eLampState {
+            eLampState_GreenOff = (eLamp_Off << 8),
+            eLampState_BlueBlinking = (eLamp_Blinking << 16),
+        } eLampState;
     """)
     assert not errors
-    assert table["eLedState_GreenOff"].value == 0x0100
-    assert table["eLedState_BlueBlinking"].value == 0x030000
+    assert table["eLampState_GreenOff"].value == 0x0100
+    assert table["eLampState_BlueBlinking"].value == 0x030000
 
 
 def test_unknown_reference_is_an_error_not_a_zero():
@@ -118,7 +118,7 @@ def test_real_c_octal_is_read_as_octal():
 def test_leading_zero_with_an_8_is_refused_rather_than_guessed():
     """08150815 is not valid C either. This number unlocks write access on a
     device — picking a reading for it is not the parser's call."""
-    _table, errors = syms("#define UNLOCK_CODE 08150815\n")
+    _table, errors = syms("#define UNLOCK_CODE 0918\n")
     assert any("octal" in e for e in errors)
 
 
@@ -131,11 +131,11 @@ def test_integer_suffixes_are_tolerated():
 
 def test_trailing_doc_comment_becomes_the_description():
     table, _ = syms("""
-        typedef enum eObj {
-            eObj_Tension = 0x0B,   //!< In 0.1 cN
-        } eObj;
+        typedef enum eSub {
+            eSub_Tension = 0x0B,   //!< In 0.1 cN
+        } eSub;
     """)
-    assert table["eObj_Tension"].desc == "In 0.1 cN"
+    assert table["eSub_Tension"].desc == "In 0.1 cN"
 
 
 def test_block_comments_are_ignored_without_shifting_line_numbers():
@@ -158,15 +158,15 @@ def test_includes_and_pragmas_are_ignored():
 
 @pytest.fixture()
 def tables(tmp_path):
-    (tmp_path / "memiro").mkdir()
-    (tmp_path / "memiro" / "a.h").write_text(
+    (tmp_path / "acme").mkdir()
+    (tmp_path / "acme" / "a.h").write_text(
         "typedef enum eMode { eMode_Off = 2, eMode_Run = 4 } eMode;\n"
-        "typedef enum eObjIdx { eObjIdx_Button = 0x220C } eObjIdx;\n")
-    return load_symbols([("memiro", tmp_path / "memiro")])
+        "typedef enum eObjIdx { eObjIdx_Lamp = 0x2050 } eObjIdx;\n")
+    return load_symbols([("acme", tmp_path / "acme")])
 
 
 def test_forward_and_reverse_lookup(tables):
-    assert tables.value("eObjIdx_Button") == 0x220C
+    assert tables.value("eObjIdx_Lamp") == 0x2050
     assert tables.name("eMode", 4) == "eMode_Run"
     assert tables.name("eMode", 99) == ""
 
@@ -179,16 +179,16 @@ def test_unknown_symbol_raises_with_the_name_in_the_message(tables):
 def test_conflicting_definitions_are_refused_and_need_qualifying(tmp_path):
     """Silently picking one of two definitions is how a bench ends up
     writing to the wrong object and blaming the device."""
-    for origin, value in (("memiro", "0x220C"), ("acme", "0x3000")):
+    for origin, value in (("acme", "0x2050"), ("globex", "0x3000")):
         (tmp_path / origin).mkdir()
         (tmp_path / origin / "h.h").write_text(
             f"typedef enum eIdx {{ eIdx_Button = {value} }} eIdx;\n")
-    tables = load_symbols([(o, tmp_path / o) for o in ("acme", "memiro")])
+    tables = load_symbols([(o, tmp_path / o) for o in ("acme", "globex")])
     assert any("eIdx_Button" in e for e in tables.errors)
     with pytest.raises(SymbolError, match="qualify"):
         tables.value("eIdx_Button")
-    assert tables.value("memiro:eIdx_Button") == 0x220C
-    assert tables.value("acme:eIdx_Button") == 0x3000
+    assert tables.value("acme:eIdx_Button") == 0x2050
+    assert tables.value("globex:eIdx_Button") == 0x3000
 
 
 # -- workspace wiring -------------------------------------------------------
@@ -208,14 +208,14 @@ def sym_bench(tmp_path):
     packaged = tmp_path / "packaged"
     packaged.mkdir()
     (packaged / "obj.h").write_text(
-        "typedef enum eObjIdx { eObjIdx_Button = 0x220C } eObjIdx;\n")
+        "typedef enum eObjIdx { eObjIdx_Lamp = 0x2050 } eObjIdx;\n")
     return Bench(Db(tmp_path / "s.db"), plugins=[_SymbolPlugin(packaged)]), packaged
 
 
 def test_plugin_headers_are_seeded_into_the_workspace(sym_bench):
     bench, _packaged = sym_bench
     assert (bench.symbols_dir / "fake" / "obj.h").exists()
-    assert bench.symbols.value("eObjIdx_Button") == 0x220C
+    assert bench.symbols.value("eObjIdx_Lamp") == 0x2050
 
 
 def test_workspace_copy_wins_and_is_never_overwritten(tmp_path):
@@ -240,9 +240,9 @@ def test_symbol_summary_reaches_the_snapshot(sym_bench):
 def test_reload_action_picks_up_a_changed_header(sym_bench):
     bench, _ = sym_bench
     (bench.symbols_dir / "fake" / "obj.h").write_text(
-        "typedef enum eObjIdx { eObjIdx_Button = 0x2222 } eObjIdx;\n")
+        "typedef enum eObjIdx { eObjIdx_Lamp = 0x2222 } eObjIdx;\n")
     bench.dispatch("symbols_reload", {})
-    assert bench.symbols.value("eObjIdx_Button") == 0x2222
+    assert bench.symbols.value("eObjIdx_Lamp") == 0x2222
 
 
 # -- test-case references ---------------------------------------------------
@@ -251,26 +251,26 @@ _CASE = """
 id: "9.9"
 name: Symbol reference
 steps:
-  - sdo_write: {index: $eObjIdx_Button, sub: "00", value: "0x01", size: 4}
+  - sdo_write: {index: $eObjIdx_Lamp, sub: "00", value: "0x01", size: 4}
 """
 
 
 def test_symbol_reference_resolves_at_parse_time(tables):
     tc = parse_testcase(_CASE, "TC9.9_x.yaml", symbols=tables)
     assert tc.error is None
-    assert tc.steps[0]["sdo_write"]["index"] == "0x220C"
+    assert tc.steps[0]["sdo_write"]["index"] == "0x2050"
 
 
 def test_unknown_symbol_fails_the_file_not_the_run(tables):
     """A typo must surface in the catalog, not twenty minutes into a run
     against real hardware."""
-    tc = parse_testcase(_CASE.replace("eObjIdx_Button", "eObjIdx_Buttn"),
+    tc = parse_testcase(_CASE.replace("eObjIdx_Lamp", "eObjIdx_Buttn"),
                         "TC9.9_x.yaml", symbols=tables)
     assert tc.error and "eObjIdx_Buttn" in tc.error
 
 
 def test_builtins_are_left_alone(tables):
-    case = _CASE.replace("$eObjIdx_Button", '"0x220C"').replace(
+    case = _CASE.replace("$eObjIdx_Lamp", '"0x2050"').replace(
         'value: "0x01"', "value: $node")
     tc = parse_testcase(case, "TC9.9_x.yaml", symbols=tables)
     assert tc.error is None and tc.steps[0]["sdo_write"]["value"] == "$node"

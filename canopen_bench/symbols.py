@@ -6,9 +6,9 @@ copy that drifts. So plugins ship (or the operator drops in) the firmware
 headers, and this module turns them into two lookups:
 
 * **name → value**, so flows and test cases can write
-  ``$eObjIdx_LampControl`` instead of ``0x220C``,
+  ``$eObjIdx_LampControl`` instead of ``0x2050``,
 * **value → name**, so an object holding ``4`` reads as
-  ``WorkingTension (4)`` instead of ``0x04``.
+  ``Running (4)`` instead of ``0x04``.
 
 Only a small subset of C is accepted — enums, ``#define`` constants and
 constant expressions over symbols already parsed. Anything else is
@@ -47,7 +47,7 @@ class Symbol:
     value: int
     table: str          # owning enum, "" for a #define
     desc: str           # the //!< comment, verbatim
-    source: str         # "<origin>/<file>", e.g. "memiro/objects.h"
+    source: str         # "<origin>/<file>", e.g. "acme/objects.h"
     line: int
 
     @property
@@ -89,8 +89,8 @@ class SymbolTables:
 
     def name(self, table: str, value: int) -> str:
         """Reverse lookup inside one table, or "" when it has no such value.
-        First definition wins: aliases like eLampState_RedOff = eLamp_Off
-        are the same value under two names, and the table's own name is the
+        First definition wins: a composed table often aliases a plain
+        one (``eLampState_RedOff = eLamp_Off``), and the first name is the
         one worth showing."""
         for sym in self.tables.get(table, {}).values():
             if sym.value == value:
@@ -139,8 +139,9 @@ def _normalize_int_literals(expr: str) -> str:
 def _evaluate(expr: str, known: dict[str, Symbol]) -> int:
     """A constant expression over already-parsed symbols.
 
-    lamp.h needs this: its composed states are ``(eLamp_Off << 8)``, so a
-    literal-only reader would reject the file outright. Everything beyond
+    Real headers need this: a composed state written as
+    ``(eLamp_Off << 8)`` makes a literal-only reader reject the whole file.
+    Everything beyond
     integers, the listed operators and known names is refused — no macro
     expansion, no calls, and an unresolvable name is an error rather than a
     zero.
@@ -185,7 +186,7 @@ def _strip_comments(text: str) -> str:
 def _members(body: str, first_line: int):
     """Enum body to (name, expression, description, line).
 
-    Members are split on commas rather than on newlines: `enum eBtn { A, B }`
+    Members are split on commas rather than on newlines: `enum eKey { A, B }`
     on one line is ordinary C, and a parser that only understands one member
     per line would silently see nothing at all. A line's trailing //!<
     comment describes the last member on that line, which is how these

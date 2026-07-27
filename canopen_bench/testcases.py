@@ -17,7 +17,7 @@ MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
 
 REGISTERS = {f"R{i}" for i in range(10)}  # the 10 predefined variables (v2)
 _BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send data
-#: $eObjIdx_Foo / $memiro:eObjIdx_Foo — a symbol from the device's
+#: $eObjIdx_Foo / $acme:eObjIdx_Foo — a symbol from the device's
 #: own headers (canopen_bench/symbols.py), substituted before validation
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 

@@ -136,20 +136,20 @@ def test_connect_failure_leaves_tool_disconnected(tmp_path):
 
 
 def test_normalize_identity_canonicalizes_all_historic_widths():
-    assert normalize_identity("0x000000AF·0x00002600") == "0xAF·0x2600"  # hardware scan
-    assert normalize_identity("0x00AF·0x2600") == "0xAF·0x2600"  # old EDS upload
-    assert normalize_identity("0xAF·0x2600") == "0xAF·0x2600"  # already canonical
+    assert normalize_identity("0x000004D2·0x00001150") == "0x4D2·0x1150"  # hardware scan
+    assert normalize_identity("0x04D2·0x1150") == "0x4D2·0x1150"  # old EDS upload
+    assert normalize_identity("0x4D2·0x1150") == "0x4D2·0x1150"  # already canonical
     assert normalize_identity("?") == "?"  # incomplete identity passes through
 
 
 def test_scan_matches_registry_entries_stored_in_legacy_format(bench):
     # entry stored in the old fixed-width format; the demo bus reports its
     # identity verbatim, so both comparison sides run through normalization
-    bench.db.eds_remove("dut2_800_v14.eds")
-    bench.db.eds_add("legacy_d28.eds", "DUT2_800", "0x000000AF·0x00002600", "L28", True)
-    bench.db.eds_write_file("legacy_d28.eds", SEED_EDS)
+    bench.db.eds_remove("dut_alpha_v2.eds")
+    bench.db.eds_add("legacy_alpha.eds", "DUT_ALPHA", "0x000004D2·0x00001150", "LGA", True)
+    bench.db.eds_write_file("legacy_alpha.eds", SEED_EDS)
     connect_and_scan(bench)
-    legacy = [d for d in bench.devices if d["eds"] == "legacy_d28.eds"]
+    legacy = [d for d in bench.devices if d["eds"] == "legacy_alpha.eds"]
     assert legacy, bench.devices
 
 
@@ -187,7 +187,7 @@ def _trace_row(cob: str, data: str) -> dict:
 
 
 def test_trace_annotation_names_object_and_decodes_decimal(connected_bench):
-    bench = connected_bench  # node 1 carries dut2_800_v14.eds (SEED_EDS)
+    bench = connected_bench  # node 1 carries dut_alpha_v2.eds (SEED_EDS)
     row = _trace_row("0x581", "43 50 20 00 2A 00 00 00")  # expedited upload resp
     bench._annotate_sdo(row)
     assert row["obj"] == "0x2050:00 Variant id"
@@ -325,7 +325,7 @@ def test_annotate_pdo_ignores_non_pdo_rows(pdo_bench):
 # -- signal plot (Trace page) ------------------------------------------------
 
 def test_plot_toggle_adds_then_removes_signal(connected_bench):
-    bench = connected_bench  # node 1 carries dut2_800_v14.eds (SEED_EDS)
+    bench = connected_bench  # node 1 carries dut_alpha_v2.eds (SEED_EDS)
     bench.dispatch("dev_toggle", {"node": 1})
     assert bench.plot_sel == []
     bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
@@ -598,7 +598,7 @@ def test_mc_verify_detects_missing_device(connected_bench):
     bench = connected_bench
     bench.dispatch("mc_adopt", {})  # adopts the current bus state as the reference
     bench.mc["autoReaddr"] = False  # keep the mismatch result observable
-    (bench.db.eds_dir / "dut3_ht_v03.eds").unlink()  # its demo DUT disappears
+    (bench.db.eds_dir / "dut_gamma_v5.eds").unlink()  # its demo DUT disappears
     drive_verify(bench)
     assert bench.mc["result"] == "mismatch"
     assert bench.mc["found"] == 2
@@ -656,7 +656,7 @@ def test_mc_adopt_stores_ref_and_persists(connected_bench):
     ref = bench.mc_ref
     assert ref is not None
     assert ref["expected"] == 3
-    assert ref["assignments"]["1"] == "dut2_800_v14.eds"
+    assert ref["assignments"]["1"] == "dut_alpha_v2.eds"
     assert ref["session"] == bench.mc["session"]
     assert bench.mc["expected"] == 3
     assert any("expected state adopted" in ln["msg"] for ln in bench.logs)
@@ -1050,11 +1050,11 @@ def test_dev_menu_nmt_skipped_when_not_connected(connected_bench, monkeypatch):
 
 
 def test_eds_toggle_and_code(bench):
-    bench.dispatch("eds_toggle", {"file": "dut2_400_v11.eds"})
-    assert "dut2_400_v11.eds" in bench.eds_enabled
-    bench.dispatch("eds_code", {"file": "dut2_400_v11.eds", "code": "X24"})
+    bench.dispatch("eds_toggle", {"file": "dut_beta_v7.eds"})
+    assert "dut_beta_v7.eds" in bench.eds_enabled
+    bench.dispatch("eds_code", {"file": "dut_beta_v7.eds", "code": "X24"})
     reloaded = {e["file"]: e for e in Db(bench.db.path).eds_list()}
-    assert reloaded["dut2_400_v11.eds"]["code"] == "X24"
+    assert reloaded["dut_beta_v7.eds"]["code"] == "X24"
 
 
 def test_swdl_serial_updates_firmware(connected_bench):
@@ -1130,18 +1130,18 @@ def test_eds_upload_action_logs_rejection(bench):
 
 
 def test_eds_remove(bench):
-    assert "dut2_400_v11.eds" in {e["file"] for e in bench.db.eds_list()}
-    bench.dispatch("eds_remove", {"file": "dut2_400_v11.eds"})
-    assert "dut2_400_v11.eds" not in {e["file"] for e in bench.db.eds_list()}
+    assert "dut_beta_v7.eds" in {e["file"] for e in bench.db.eds_list()}
+    bench.dispatch("eds_remove", {"file": "dut_beta_v7.eds"})
+    assert "dut_beta_v7.eds" not in {e["file"] for e in bench.db.eds_list()}
 
 
 def test_eds_set_commands_roundtrip(bench):
     commands = [{"key": "su", "label": "SuperUser", "badge": "SU"},
                 {"key": "w", "label": "W", "write": {"index": "0x2000", "sub": "00", "on": 1, "off": 0}}]
-    bench.db.eds_set_commands("dut2_800_v14.eds", commands)
-    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut2_800_v14.eds")
+    bench.db.eds_set_commands("dut_alpha_v2.eds", commands)
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut_alpha_v2.eds")
     assert entry["device_commands"] == commands
-    reloaded = next(e for e in Db(bench.db.path).eds_list() if e["file"] == "dut2_800_v14.eds")
+    reloaded = next(e for e in Db(bench.db.path).eds_list() if e["file"] == "dut_alpha_v2.eds")
     assert reloaded["device_commands"] == commands
 
 
@@ -1240,21 +1240,21 @@ def test_set_own_node_id_garbage_logs_not_a_number(bench):
 
 
 def test_read_variant_no_object_configured(bench):
-    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut2_800_v14.eds")
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut_alpha_v2.eds")
     assert bench._read_variant(1, entry) == ""
 
 
 def test_read_variant_maps_sdo_value_to_label(bench):
     connect_and_scan(bench)  # demo DUT node 1 must exist for the SDO read
-    bench.db.eds_set_variant("dut2_800_v14.eds", "0x2050", "00", {"0x00": "HV"})
-    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut2_800_v14.eds")
+    bench.db.eds_set_variant("dut_alpha_v2.eds", "0x2050", "00", {"0x00": "HV"})
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut_alpha_v2.eds")
     assert bench._read_variant(1, entry) == "HV"
 
 
 def test_read_variant_falls_back_to_raw_value_if_unmapped(bench):
     connect_and_scan(bench)
-    bench.db.eds_set_variant("dut2_800_v14.eds", "0x2050", "00", {"0x01": "LV"})
-    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut2_800_v14.eds")
+    bench.db.eds_set_variant("dut_alpha_v2.eds", "0x2050", "00", {"0x01": "LV"})
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "dut_alpha_v2.eds")
     assert bench._read_variant(1, entry) == "0x00"  # EDS default 0, no match in map
 
 
@@ -1781,10 +1781,10 @@ def test_trace_import_reports_skipped_line_count_on_partial_success(bench):
 
 
 def test_scan_assigns_variant_to_matched_device(bench):
-    bench.db.eds_set_variant("dut2_800_v14.eds", "0x2050", "00", {"0x00": "HV"})
+    bench.db.eds_set_variant("dut_alpha_v2.eds", "0x2050", "00", {"0x00": "HV"})
     connect_and_scan(bench)
     dev = next(d for d in bench.devices if d["node"] == 1)
-    assert dev["eds"] == "dut2_800_v14.eds"
+    assert dev["eds"] == "dut_alpha_v2.eds"
     assert dev["variant"] == "HV"
 
 
@@ -2143,7 +2143,7 @@ def test_scanned_devices_carry_ident(connected_bench):
     assert all(d["ident"] for d in connected_bench.devices)
 
 
-def _bare_device(node: int = 1, ident: str = "0xAF·0x2600") -> dict:
+def _bare_device(node: int = 1, ident: str = "0x4D2·0x1150") -> dict:
     """Field shape from Bench._apply_scan, with no EDS assigned yet."""
     return {"node": node, "name": "", "nmt": "Pre-Operational", "sel": True,
             "cmds": {}, "fw": "", "sn": "", "variant": "", "ident": ident,
@@ -2162,8 +2162,8 @@ def test_rematch_on_upload_assigns_matching_device(bench):
 
 
 def test_rematch_on_enable_assigns_matching_device(bench):
-    bench.db.eds_remove("dut2_800_v14.eds")  # avoid a same-identity collision with the seed row
-    bench.db.eds_add("disabled_match.eds", "SEED_DEV", "0xAF·0x2600", "SEE", False)
+    bench.db.eds_remove("dut_alpha_v2.eds")  # avoid a same-identity collision with the seed row
+    bench.db.eds_add("disabled_match.eds", "SEED_DEV", "0x4D2·0x1150", "SEE", False)
     bench.db.eds_write_file("disabled_match.eds", SEED_EDS)
     bench.devices = [_bare_device()]
 
@@ -2176,7 +2176,7 @@ def test_rematch_on_enable_assigns_matching_device(bench):
 
 
 def test_toggle_to_disabled_does_not_rematch(bench):
-    bench.db.eds_add("enabled_match.eds", "SEED_DEV", "0xAF·0x2600", "SEE", True)
+    bench.db.eds_add("enabled_match.eds", "SEED_DEV", "0x4D2·0x1150", "SEE", True)
     bench.db.eds_write_file("enabled_match.eds", SEED_EDS)
     bench.devices = [_bare_device()]
 
@@ -2227,7 +2227,7 @@ def test_objects_hint_unparseable_eds(bench):
 
 def test_objects_hint_valid_eds(bench):
     dev = _bare_device()
-    dev["eds"] = "dut2_800_v14.eds"
+    dev["eds"] = "dut_alpha_v2.eds"
     bench.devices = [dev]
     snap = bench.snapshot()
     assert snap["objects"]["hint"] == ""
@@ -2260,12 +2260,12 @@ def test_parse_failure_hint_is_cached_and_recovers_after_fix(bench):
 # -- EDS identity conflicts (_eds_by_identity / _eds_conflicts) ---------------
 
 def _make_conflicting_pair(bench: Bench) -> None:
-    """Two enabled, same-identity (0xAF·0x2600) files: conflict_a.eds and
+    """Two enabled, same-identity (0x4D2·0x1150) files: conflict_a.eds and
     conflict_b.eds, both parseable — mtimes not yet ordered."""
-    bench.db.eds_remove("dut2_800_v14.eds")  # same identity — avoid interference
-    bench.db.eds_add("conflict_a.eds", "SEED_DEV", "0xAF·0x2600", "CFA", True)
+    bench.db.eds_remove("dut_alpha_v2.eds")  # same identity — avoid interference
+    bench.db.eds_add("conflict_a.eds", "SEED_DEV", "0x4D2·0x1150", "CFA", True)
     bench.db.eds_write_file("conflict_a.eds", SEED_EDS)
-    bench.db.eds_add("conflict_b.eds", "SEED_DEV", "0xAF·0x2600", "CFB", True)
+    bench.db.eds_add("conflict_b.eds", "SEED_DEV", "0x4D2·0x1150", "CFB", True)
     bench.db.eds_write_file("conflict_b.eds", SEED_EDS)
 
 
@@ -2309,7 +2309,7 @@ def test_snapshot_flags_conflict_and_winner(bench):
     assert files["conflict_b.eds"]["conflictWin"] is True
 
     # a unique-identity entry is unaffected
-    unique = files["dut3_ht_v03.eds"]
+    unique = files["dut_gamma_v5.eds"]
     assert unique["conflict"] == []
     assert unique["conflictWin"] is False
 
@@ -2443,9 +2443,9 @@ def test_switching_eds_folder_triggers_rematch(bench, tmp_path):
     pool = tmp_path / "pool"
     pool.mkdir()
     (pool / "pool_match.eds").write_text(SEED_EDS, encoding="utf-8")
-    bench.db.eds_add("pool_match.eds", "POOLDEV", "0xAF·0x9999", "PLM", True)
+    bench.db.eds_add("pool_match.eds", "POOLDEV", "0x4D2·0x9999", "PLM", True)
 
-    bench.devices = [_bare_device(ident="0xAF·0x9999")]
+    bench.devices = [_bare_device(ident="0x4D2·0x9999")]
     assert bench.devices[0]["eds"] == "—"  # nothing re-matched it yet
 
     bench.dispatch("set_path", {"which": "eds", "value": str(pool)})
@@ -2759,15 +2759,15 @@ def test_rate_window_trims_entries_older_than_five_seconds(bench):
 
 
 def test_eds_by_identity_missing_file_falls_back_to_mtime_zero(bench):
-    bench.db.eds_remove("dut2_800_v14.eds")
-    bench.db.eds_add("real.eds", "SEED_DEV", "0xAF·0x2600", "REA", True)
+    bench.db.eds_remove("dut_alpha_v2.eds")
+    bench.db.eds_add("real.eds", "SEED_DEV", "0x4D2·0x1150", "REA", True)
     bench.db.eds_write_file("real.eds", SEED_EDS)
     # registry entry with no backing file on disk — same identity
-    bench.db.eds_add("ghost.eds", "SEED_DEV", "0xAF·0x2600", "GHO", True)
+    bench.db.eds_add("ghost.eds", "SEED_DEV", "0x4D2·0x1150", "GHO", True)
 
     by_ident = bench._eds_by_identity()  # must not raise
 
-    assert by_ident[normalize_identity("0xAF·0x2600")]["file"] == "real.eds"
+    assert by_ident[normalize_identity("0x4D2·0x1150")]["file"] == "real.eds"
 
 
 # -- multi-workspace support -------------------------------------------------
