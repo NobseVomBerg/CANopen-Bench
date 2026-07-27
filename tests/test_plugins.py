@@ -729,7 +729,7 @@ def _panel_bench(tmp_path, *panels, sel: bool = True, eds: str = "—") -> Bench
     bench = Bench(Db(tmp_path / "x.db"), plugins=[_PanelPlugin(*panels)])
     bench.devices = [{"node": 7, "name": "DUT", "nmt": "Operational", "sel": sel,
                       "cmds": {}, "fw": "", "sn": "", "variant": "",
-                      "ident": "0xAF·0x2600", "eds": eds}]
+                      "ident": "0x4D2·0x1150", "eds": eds}]
     return bench
 
 
@@ -766,7 +766,7 @@ def test_panel_render_returning_none_shows_nothing(tmp_path):
 def test_panel_matches_receives_the_eds_registry_row(tmp_path):
     panel = _FakePanel(match=False)
     bench = _panel_bench(tmp_path, panel, eds="DemoDevice.eds")
-    bench.db.eds_add("DemoDevice.eds", "DemoDevice", "0xAF·0x2600", "DMO", True)
+    bench.db.eds_add("DemoDevice.eds", "DemoDevice", "0x4D2·0x1150", "DMO", True)
     bench.snapshot()
     assert panel.seen_eds[-1] is not None
     assert panel.seen_eds[-1]["file"] == "DemoDevice.eds"
@@ -801,7 +801,7 @@ def test_two_plugins_panels_stay_distinct(tmp_path):
     ])
     bench.devices = [{"node": 7, "name": "DUT", "nmt": "Operational", "sel": True,
                       "cmds": {}, "fw": "", "sn": "", "variant": "",
-                      "ident": "0xAF·0x2600", "eds": "—"}]
+                      "ident": "0x4D2·0x1150", "eds": "—"}]
     assert [p["key"] for p in bench.snapshot()["panels"]] == ["fake.lcd", "other.lcd"]
 
 

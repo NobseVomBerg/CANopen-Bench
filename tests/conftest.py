@@ -20,9 +20,9 @@ def _no_installed_plugins(monkeypatch):
 # from data.SEED_EDS_FILES, now neutralized — see write_seed_eds_files /
 # seed_test_registry below).
 TEST_EDS_ROWS = [
-    ("dut2_800_v14.eds", "DUT2_800", "0xAF·0x2600", "D28", True),
-    ("dut2_400_v11.eds", "DUT2_400", "0xAF·0x2400", "D24", False),
-    ("dut3_ht_v03.eds", "DUT3_HT", "0xAF·0x3100", "D3H", True),
+    ("dut_alpha_v2.eds", "DUT_ALPHA", "0x4D2·0x1150", "DTA", True),
+    ("dut_beta_v7.eds", "DUT_BETA", "0x4D2·0x1160", "DTB", False),
+    ("dut_gamma_v5.eds", "DUT_GAMMA", "0x4D2·0x1170", "DTG", True),
 ]
 
 
@@ -44,10 +44,10 @@ FileRevision=1
 EDSVersion=4.0
 
 [DeviceInfo]
-VendorName=Seed Vendor
-VendorNumber=175
+VendorName=Seed Vendor GmbH
+VendorNumber=1234
 ProductName=SEED_DEV
-ProductNumber=9728
+ProductNumber=4432
 RevisionNumber=1
 
 [1000]

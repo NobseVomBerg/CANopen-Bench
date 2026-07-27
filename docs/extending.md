@@ -67,7 +67,7 @@ parses them (`canopen_bench/symbols.py`).
 They are used in both directions: `$eObjIdx_LampControl` in a
 test case or flow resolves **at load time**, so a typo makes the file
 invalid in the catalog rather than failing mid-run; and a value read back
-can be rendered as `WorkingTension (4)` rather than `0x04`.
+can be rendered as `Running (4)` rather than `0x04`.
 
 Headers are seeded into `<workspace>/symbols/<plugin>/` and never
 overwritten afterwards — the copy there is the firmware actually under

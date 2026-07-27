@@ -17,8 +17,8 @@ def _bench(tmp_path) -> Bench:
 def test_dev_cmd_toggles_selection_and_logs(tmp_path):
     bench = _bench(tmp_path)
     connect_and_scan(bench)
-    bench.db.eds_set_commands("dut2_800_v14.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
-    bench.dispatch("dev_toggle", {"node": 1})  # node 1 carries dut2_800_v14.eds
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.dispatch("dev_toggle", {"node": 1})  # node 1 carries dut_alpha_v2.eds
 
     bench.dispatch("dev_cmd", {"key": "su"})
     dev = next(d for d in bench.devices if d["node"] == 1)
@@ -33,9 +33,9 @@ def test_dev_cmd_toggles_selection_and_logs(tmp_path):
 def test_dev_cmd_via_menu_targets_only_that_node(tmp_path):
     bench = _bench(tmp_path)
     connect_and_scan(bench)
-    bench.db.eds_set_commands("dut2_800_v14.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
-    # node 1 and 2 both carry dut2_800_v14.eds (2 DUTs for the first profile)
-    assert bench.devices[0]["eds"] == bench.devices[1]["eds"] == "dut2_800_v14.eds"
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    # node 1 and 2 both carry dut_alpha_v2.eds (2 DUTs for the first profile)
+    assert bench.devices[0]["eds"] == bench.devices[1]["eds"] == "dut_alpha_v2.eds"
 
     bench.dispatch("dev_cmd", {"key": "su", "node": 1})
     assert bench.devices[0]["cmds"]["su"] is True
@@ -45,9 +45,9 @@ def test_dev_cmd_via_menu_targets_only_that_node(tmp_path):
 def test_dev_cmd_skips_devices_whose_eds_lacks_the_key(tmp_path):
     bench = _bench(tmp_path)
     connect_and_scan(bench)
-    bench.db.eds_set_commands("dut2_800_v14.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
-    # node 3 carries a different EDS (dut3_ht_v03.eds) with no commands declared
-    node3 = next(d for d in bench.devices if d["eds"] == "dut3_ht_v03.eds")
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    # node 3 carries a different EDS (dut_gamma_v5.eds) with no commands declared
+    node3 = next(d for d in bench.devices if d["eds"] == "dut_gamma_v5.eds")
     bench.dispatch("dev_toggle", {"node": node3["node"]})
 
     n_logs = len(bench.logs)
@@ -69,7 +69,7 @@ def test_dev_cmd_unknown_key_is_a_clean_noop(tmp_path):
 def test_dev_cmd_state_survives_a_rescan(tmp_path):
     bench = _bench(tmp_path)
     connect_and_scan(bench)
-    bench.db.eds_set_commands("dut2_800_v14.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
     bench.dispatch("dev_toggle", {"node": 1})
     bench.dispatch("dev_cmd", {"key": "su"})
     assert bench.devices[0]["cmds"]["su"] is True
@@ -82,7 +82,7 @@ def test_dev_cmd_state_survives_a_rescan(tmp_path):
 def test_dev_cmd_write_spec_sdo_writes_on_off(tmp_path):
     bench = _bench(tmp_path)
     connect_and_scan(bench)
-    bench.db.eds_set_commands("dut2_800_v14.eds", [
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [
         {"key": "w", "label": "W", "write": {"index": "0x2000", "sub": "00", "on": 1, "off": 0}},
     ])
     bench.dispatch("dev_toggle", {"node": 1})
@@ -104,7 +104,7 @@ def test_dev_cmd_write_spec_sdo_writes_on_off(tmp_path):
 def test_dev_cmd_write_abort_keeps_state_and_logs_emcy(tmp_path):
     bench = _bench(tmp_path)
     connect_and_scan(bench)
-    bench.db.eds_set_commands("dut2_800_v14.eds", [
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [
         {"key": "w", "label": "W", "write": {"index": "0x1000", "sub": "00", "on": 1, "off": 0}},
     ])
     bench.dispatch("dev_toggle", {"node": 1})

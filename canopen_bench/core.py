@@ -165,7 +165,7 @@ def parse_candump(text: str) -> tuple[list[tuple[float, int, bytes]], int]:
 
 
 def normalize_identity(ident: str) -> str:
-    """Canonical identity signature: minimal-width hex, e.g. "0xAF·0x2600".
+    """Canonical identity signature: minimal-width hex, e.g. "0x4D2·0x1150".
 
     Historic entries carry fixed widths (EDS upload "0x00AF", hardware scan
     "0x000000AF"), so every comparison normalizes both sides — stored
@@ -3005,8 +3005,9 @@ class Bench:
         <plugin>/`` (never overwriting — the operator's copy is the firmware
         under test), then parse everything found there.
 
-        Origins are per plugin directory, so two vendors' ``eObjIdx``
-        stay apart instead of the winner depending on file order.
+        Origins are per plugin directory, so two vendors' identically
+        named tables stay apart instead of the winner depending on file
+        order.
         """
         for plugin in self.plugins:
             for src_dir in plugin.symbol_dirs():

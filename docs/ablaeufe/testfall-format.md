@@ -65,7 +65,7 @@ Die Node-ID steht **nie** in der Datei — sie wird zur Laufzeit über die
     an echter Hardware zu scheitern. Woher die Symbole kommen und wie man
     eigene ergänzt: `docs/extending.md`, Abschnitt „Symbol tables". Bei
     gleichnamigen Symbolen aus zwei Plugins qualifiziert
-    `$memiro:eObjIdx_LampControl`.
+    `$acme:eObjIdx_LampControl`.
 
 ## Schritt-Primitive
 

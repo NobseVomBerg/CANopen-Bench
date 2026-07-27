@@ -274,7 +274,7 @@ steps:
 
 
 def test_lss_assign_reports_assigned_count_into_register(tc_bench):
-    # tc_bench's demo bus scans 3 devices (dut2_800_v14 x2, dut3_ht_v03 x1)
+    # tc_bench's demo bus scans 3 devices (dut_alpha_v2 x2, dut_gamma_v5 x1)
     # at nodes 1..3; lss_assign(2) renumbers the first two into 1..2 and
     # reports 2 assigned.
     _add_tc(tc_bench, "TC0012_lss_assign.yaml", LSS_ASSIGN_TC)

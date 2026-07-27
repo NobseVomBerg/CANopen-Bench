@@ -43,7 +43,7 @@ def _write_flow(bench: Bench, filename: str, text: str) -> None:
 def teach_bench(tmp_path):
     bench = Bench(Db(tmp_path / "teach.db"))
     write_seed_eds_files(bench)
-    connect_and_scan(bench)  # 3 demo devices (dut2_800_v14 x2, dut3_ht_v03 x1)
+    connect_and_scan(bench)  # 3 demo devices (dut_alpha_v2 x2, dut_gamma_v5 x1)
     bench.dispatch("mc_adopt", {})  # adopts the current bus state as the reference
     assert bench.mc["expected"] == 3
     return bench
@@ -121,7 +121,7 @@ def test_failure_path_logs_teach_fail(teach_bench):
 
 def test_auto_gating_starts_teach_when_mc_enabled(teach_bench):
     bench = teach_bench
-    (bench.db.eds_dir / "dut3_ht_v03.eds").unlink()  # scan will now find only 2 of 3
+    (bench.db.eds_dir / "dut_gamma_v5.eds").unlink()  # scan will now find only 2 of 3
     _write_flow(bench, "quick.yaml",
                 'id: "quick"\nname: "harmless flow"\nsteps:\n'
                 '  - log: "auto teach"\n  - wait: 1.0\n')
@@ -147,7 +147,7 @@ def test_auto_gating_starts_teach_when_mc_enabled(teach_bench):
 
 def test_auto_gating_skips_teach_when_mc_disabled(teach_bench):
     bench = teach_bench
-    (bench.db.eds_dir / "dut3_ht_v03.eds").unlink()  # scan will now find only 2 of 3
+    (bench.db.eds_dir / "dut_gamma_v5.eds").unlink()  # scan will now find only 2 of 3
     bench.mc["enabled"] = False
 
     async def go():
@@ -334,7 +334,7 @@ def test_auto_readdress_verifies_and_never_adopts_a_shrunken_bus(teach_bench):
     with a verify, so a device that merely went offline can never
     silently vanish from the expected state."""
     bench = teach_bench  # adopted with expected=3
-    (bench.db.eds_dir / "dut3_ht_v03.eds").unlink()  # scan will now find only 2 of 3
+    (bench.db.eds_dir / "dut_gamma_v5.eds").unlink()  # scan will now find only 2 of 3
     _write_flow(bench, "quick.yaml",
                 'id: "quick"\nname: "harmless flow"\nsteps:\n'
                 '  - log: "auto teach"\n')
