@@ -115,9 +115,17 @@ pytest                          # core suite
 ```
 
 `CONTRIBUTING.md` has the rest: what CI checks, where things belong, the
-versioning rule. Behind a TLS-inspecting proxy pip will fail to verify
-pypi.org — `pip install --use-feature=truststore …` makes it use the
-operating system's certificate store.
+versioning rule.
+
+Behind a TLS-inspecting corporate proxy, pip fails with
+`CERTIFICATE_VERIFY_FAILED` on pypi.org: the proxy's CA is trusted by the
+operating system but not by the certificate bundle Python ships. On
+pip 23.2+, `--use-feature=truststore` makes pip use the OS store
+instead. On older pip that route is closed — it needs the `truststore`
+package, which also comes from pypi.org — so export the OS root
+certificates to a PEM and point pip at it with `--cert`, or set it once
+with `pip config set global.cert <file>`. Either way certificate
+verification stays on.
 
 ## License & author
 
