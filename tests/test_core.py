@@ -2512,6 +2512,33 @@ def test_real_testcases_win_regardless_of_adapter(bench, tmp_path):
 
 # -- live bus statistics + version/workspace snapshot fields ------------------
 
+def test_frontend_fetches_nothing_from_the_internet():
+    """The UI must load from this package alone.
+
+    A bench PC on a machine network typically has no route out, and a
+    webfont request also hands every operator's IP to whoever hosts it.
+    The fonts used to come from Google Fonts; they are vendored now, and
+    this keeps them that way — including their license text, which the
+    OFL requires to travel with the files.
+    """
+    import canopen_bench
+
+    static = Path(canopen_bench.__file__).resolve().parent / "static"
+    markup = (static / "index.html").read_text(encoding="utf-8")
+    css = (static / "styles.css").read_text(encoding="utf-8")
+
+    for name, text in (("index.html", markup), ("styles.css", css)):
+        assert "//fonts.googleapis.com" not in text, f"{name} still fetches Google Fonts"
+        assert "//fonts.gstatic.com" not in text, f"{name} still fetches Google Fonts"
+
+    fonts = static / "fonts"
+    faces = sorted(p.name for p in fonts.glob("*.woff2"))
+    assert faces, "no vendored fonts"
+    for face in faces:
+        assert f"fonts/{face}" in css, f"{face} ships but no @font-face references it"
+    assert (fonts / "LICENSE.txt").is_file(), "OFL requires the license to ship with the fonts"
+
+
 def test_demo_seed_eds_ships_inside_the_package():
     """The seed EDS has to be package data, or a wheel install has no demo.
 

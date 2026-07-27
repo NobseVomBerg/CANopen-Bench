@@ -14,11 +14,27 @@ so these notices apply to every copy of CANopen Bench:
 |---|---|---|
 | [Preact](https://preactjs.com) | MIT | © 2015-present Jason Miller |
 | [htm](https://github.com/developit/htm) | Apache-2.0 | © 2018 Jason Miller |
+| [IBM Plex](https://github.com/IBM/plex) | OFL-1.1 | © 2017 IBM Corp. |
 
-Both are combined into the single bundle
+Preact and htm are combined into the single bundle
 `canopen_bench/static/vendor/preact-htm.module.js`, which carries the
 same notices in its file header. The bundle is unmodified upstream
 output — CANopen Bench adds no code to it.
+
+### OFL-1.1 (IBM Plex)
+
+`canopen_bench/static/fonts/` holds seven woff2 files, IBM's own
+unmodified builds taken from the `@ibm/plex-sans` (1.1.0) and
+`@ibm/plex-mono` (2.5.0) packages. The full license text ships beside
+them as `fonts/LICENSE.txt`, as the OFL requires.
+
+The copyright line reserves the font name: *"Copyright © 2017 IBM Corp.
+with Reserved Font Name 'Plex'"*. Bundling the fonts with software of any
+license is explicitly allowed, so shipping them inside this MIT package
+is fine and does not affect its license. What the reserved name does
+forbid is calling a **modified** version Plex — which is why these files
+are shipped whole rather than subsetted to save bandwidth. Anyone
+subsetting or otherwise rebuilding them has to rename the result.
 
 ### MIT (Preact)
 
