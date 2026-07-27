@@ -314,14 +314,14 @@ function SetupPage({ s }) {
         style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">＋ New…</span>
       <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: data/${s.workspace}</span>
     </div>`}
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0">
       <div style="font-weight:600;font-size:13px">Bus interface</div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${s.adapters.map((a) => {
           const on = s.adapter === a.key;
           return html`
           <div class="hv-bd" onClick=${() => send('set_adapter', { adapter: a.key })}
-            style="flex:1;border:1px solid ${on ? 'var(--acc)' : 'var(--bd)'};background:${on ? 'var(--acc-soft)' : 'var(--panel)'};border-radius:7px;padding:9px 11px;cursor:pointer">
+            style="flex:1 1 200px;min-width:0;border:1px solid ${on ? 'var(--acc)' : 'var(--bd)'};background:${on ? 'var(--acc-soft)' : 'var(--panel)'};border-radius:7px;padding:9px 11px;cursor:pointer">
             <div style="font-weight:600;font-size:12px;color:${on ? 'var(--acc)' : 'var(--tx)'}">${a.label}</div>
             <div style="font:10.5px ${MONO};color:var(--dim);margin-top:2px">${a.sub}</div>
             <div style="font:10px ${MONO};color:var(--faint);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.driver || ''}</div>
@@ -363,7 +363,7 @@ function SetupPage({ s }) {
       </div>
     </div>
 
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0">
       <div style="font-weight:600;font-size:13px">EDS files</div>
       <div style="display:flex;gap:6px;align-items:center">
         <span style="font-size:11px;color:var(--dim);font-weight:600;flex:none">EDS FOLDER</span>
