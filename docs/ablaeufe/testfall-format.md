@@ -52,6 +52,20 @@ Die Node-ID steht **nie** in der Datei — sie wird zur Laufzeit über die
     inkrementiert) ist **nur** in `can_send`-Daten erlaubt — als ganze
     `data`-Quelle oder als Listeneintrag, der an Ort und Stelle zu seinen
     Bytes expandiert (`data: [$session, "0x02", 0, 0]`).
+  - **Symbol** aus den C-Headern des Geräts, `$eObjIdx_LampControl`
+    — überall erlaubt, wo ein Wert steht, also auch für `index` und `sub`:
+
+    ```yaml
+    - sdo_write: {index: $eObjIdx_LampControl, sub: "00", value: "0x01", size: 4}
+    - sdo_read:  {index: $eObjIdx_Process, sub: $eSubProcess_Status, into: R1}
+    ```
+
+    Aufgelöst wird beim **Laden** der Datei, nicht zur Laufzeit: ein
+    Tippfehler macht den Testfall im Katalog ungültig, statt mitten im Lauf
+    an echter Hardware zu scheitern. Woher die Symbole kommen und wie man
+    eigene ergänzt: `docs/extending.md`, Abschnitt „Symbol tables". Bei
+    gleichnamigen Symbolen aus zwei Plugins qualifiziert
+    `$memiro:eObjIdx_LampControl`.
 
 ## Schritt-Primitive
 

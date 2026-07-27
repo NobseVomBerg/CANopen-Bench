@@ -6,6 +6,7 @@ catalog instead of silently dropping an expectation mid-run.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,7 +16,10 @@ MANUAL_TIMEOUT_S = 120.0  # default confirmation window for `manual` steps
 MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
 
 REGISTERS = {f"R{i}" for i in range(10)}  # the 10 predefined variables (v2)
-_BUILTINS = {"$node", "$expected"}        # $session: only as can_send data
+_BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send data
+#: $eObjIdx_Foo / $memiro:eObjIdx_Foo — a symbol from the device's
+#: own headers (canopen_bench/symbols.py), substituted before validation
+_SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
 _HEAD_KEYS = {"id", "name", "tools", "est", "dut", "preconditions", "steps"}
 _NMT_COMMANDS = {"start", "preop", "stop", "reset", "resetcomm"}
@@ -209,10 +213,33 @@ def _check_labels(steps: list) -> str | None:
     return None
 
 
+def _substitute_symbols(doc: object, symbols) -> object:
+    """Replace every ``$Symbol`` with its hex value, before validation.
+
+    Resolving here rather than at run time is the whole point: an unknown
+    symbol makes the file fail to load, with the name in the message, instead
+    of failing twenty minutes into a run against real hardware. Raises
+    SymbolError, which the caller turns into the file's .error.
+    """
+    if isinstance(doc, dict):
+        return {k: _substitute_symbols(v, symbols) for k, v in doc.items()}
+    if isinstance(doc, list):
+        return [_substitute_symbols(v, symbols) for v in doc]
+    if isinstance(doc, str) and doc not in _BUILTINS:
+        ref = _SYMBOL_REF.match(doc)
+        if ref:
+            return f"0x{symbols.value(ref.group(1)):X}"
+    return doc
+
+
 def parse_testcase(text: str, filename: str, require_prefix: bool = True,
-                   extensions: dict | None = None) -> TestCase:
+                   extensions: dict | None = None, symbols=None) -> TestCase:
     """``extensions`` maps plugin step names ("<plugin>.<key>") to their
-    StepType — without it, files using plugin steps are schema errors."""
+    StepType — without it, files using plugin steps are schema errors.
+    ``symbols`` resolves ``$Symbol`` references (canopen_bench/symbols.py);
+    without it a file using them is a schema error too, for the same reason:
+    silently leaving them unresolved would send the literal text to a
+    device."""
     tc = TestCase(file=filename)
     try:
         doc = yaml.safe_load(text)
@@ -222,6 +249,12 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     if not isinstance(doc, dict):
         tc.error = "not a mapping"
         return tc
+    if symbols is not None:
+        try:
+            doc = _substitute_symbols(doc, symbols)
+        except Exception as exc:
+            tc.error = str(exc)
+            return tc
     if unknown := set(doc) - _HEAD_KEYS:
         tc.error = f"unknown key(s) {sorted(unknown)}"
         return tc
@@ -258,7 +291,8 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     return tc
 
 
-def load_catalog(folder: str | Path, extensions: dict | None = None) -> list[TestCase]:
+def load_catalog(folder: str | Path, extensions: dict | None = None,
+                 symbols=None) -> list[TestCase]:
     """All TC*.yaml files in the folder, sorted by filename. Unreadable or
     invalid files come back as entries with .error set (shown in the
     catalog, not runnable) instead of vanishing silently."""
@@ -271,6 +305,7 @@ def load_catalog(folder: str | Path, extensions: dict | None = None) -> list[Tes
     for p in files:
         try:
             tc = parse_testcase(p.read_text(encoding="utf-8"), p.name,
+                                symbols=symbols,
                                 extensions=extensions)
         except OSError as exc:
             tc = TestCase(file=p.name, error=str(exc))
