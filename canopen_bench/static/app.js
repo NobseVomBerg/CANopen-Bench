@@ -80,6 +80,73 @@ const btn = {
   ghost: 'border:1px solid var(--inp);color:var(--mid);font-weight:600;',
 };
 
+// Plugin-contributed sidebar panel (canopen_bench/plugin.py, DevicePanel):
+// a declarative box the core renders without knowing the device family it
+// belongs to. Every part is optional — buttons without a canvas, LEDs
+// alone, any combination.
+const PANEL_SLOTS = [['tl', 'bl'], ['tr', 'br']];
+
+// "fg"/"dim" resolve against the canvas foreground; anything else is a
+// literal colour, because a physical display's own colours have no business
+// following the page theme.
+const panelInk = (c, fg) => (c === 'fg' || c === 'dim' || !c ? fg : c);
+const panelOpacity = (c) => (c === 'dim' ? 0.38 : 1);
+
+const panelShape = (d, fg) => {
+  const ink = panelInk(d.c, fg);
+  const op = panelOpacity(d.c);
+  if (d.t === 'line') return html`<line x1=${d.p[0]} y1=${d.p[1]} x2=${d.p[2]} y2=${d.p[3]}
+    stroke=${ink} stroke-width=${d.w || 1} stroke-linecap="round" opacity=${op} />`;
+  if (d.t === 'poly') return html`<polygon points=${d.p.join(' ')} opacity=${op}
+    fill=${d.fill ? ink : 'none'} stroke=${ink} stroke-width=${d.w || 1} />`;
+  if (d.t === 'text') return html`<text x=${d.x} y=${d.y} fill=${ink} opacity=${op}
+    font-size=${d.size || 9} font-family="IBM Plex Sans, sans-serif">${d.s}</text>`;
+  return null;  // unknown primitive: skip it, never break the whole panel
+};
+
+// on: true lit · false dark · null NOT READABLE — a neutral ring, never
+// the same as dark, so a missing capability can't read as a measurement
+const panelLed = (l) => html`
+  <span title=${l.title || ''} style="width:9px;height:9px;border-radius:50%;flex:none;
+    background:${l.on ? l.c : 'transparent'};
+    border:1.5px solid ${l.on === null ? 'var(--faint)' : l.c};
+    opacity:${l.on === null ? 0.5 : 1};
+    animation:${l.blink ? `coPulse ${l.blink === 'fast' ? '.4s' : '1s'} infinite` : 'none'}"></span>`;
+
+function panelBox(p) {
+  const fg = (p.canvas || {}).fg || '#1d2b14';
+  const btns = p.buttons || [];
+  const press = (b) => (e) => send(p.buttonAction, { node: p.node, btn: b.id, long: !!e.shiftKey });
+  const column = (slots) => html`
+    <div style="display:flex;flex-direction:column;gap:6px;justify-content:center">
+      ${slots.map((slot) => btns.filter((b) => b.slot === slot).map((b) => html`
+        <span class="hv-chip" onClick=${press(b)} title=${b.title || ''}
+          style="width:23px;height:23px;display:grid;place-items:center;border:1px solid var(--inp);
+                 border-radius:5px;color:var(--mid);font:600 12px 'IBM Plex Sans';cursor:pointer">${b.label}</span>`))}
+    </div>`;
+
+  return html`
+  <div style="margin:0 10px 10px;background:var(--sb-box);border:1px solid var(--sb-bd);border-radius:8px;overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-bottom:1px solid var(--sb-bd)">
+      <span style="font-weight:600;color:var(--tx);font-size:12px">${p.title} · Node ${String(p.node).padStart(2, '0')}</span>
+      ${p.refresh && html`<span class="hv-white" title="Read the device — nothing here polls"
+        onClick=${() => send(p.refresh, { node: p.node })} style="color:var(--faint);cursor:pointer">⟳</span>`}
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;padding:8px 8px 4px">
+      ${column(PANEL_SLOTS[0])}
+      ${p.canvas && html`
+        <svg viewBox=${`0 0 ${p.canvas.w} ${p.canvas.h}`} preserveAspectRatio="xMidYMid meet"
+          style="flex:1;min-width:0;background:${p.canvas.bg || 'transparent'};border-radius:4px;
+                 box-shadow:inset 0 2px 6px rgba(0,0,0,.35)">
+          ${(p.canvas.draw || []).map((d) => panelShape(d, fg))}
+        </svg>`}
+      ${column(PANEL_SLOTS[1])}
+    </div>
+    ${(p.leds || []).length > 0 && html`
+      <div style="display:flex;gap:9px;justify-content:center;padding:4px 10px 9px">${p.leds.map(panelLed)}</div>`}
+  </div>`;
+}
+
 // ---------------------------------------------------------------- sidebar --
 function Sidebar({ s, ui, setUi }) {
   const selDevs = s.devices.filter((d) => d.sel);
@@ -181,6 +248,8 @@ function Sidebar({ s, ui, setUi }) {
         <div style="display:flex;justify-content:space-between;font-size:20px;letter-spacing:.06em">${s.mirror.values.map((v) => html`<span>${v.value}</span>`)}</div>
       </div>
     </div>`}
+
+    ${(s.panels || []).map(panelBox)}
     <div class=${ui.page === 'about' ? '' : 'hv-nav'} onClick=${() => setUi({ ...ui, page: 'about' })}
       style="margin:auto 10px 0;display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;background:${ui.page === 'about' ? 'var(--acc)' : 'transparent'};color:${ui.page === 'about' ? '#fff' : 'var(--dim)'};font-size:12px">
       <span style="font:600 9px ${MONO};width:22px;height:16px;display:grid;place-items:center;border:1.5px solid currentColor;border-radius:3px;flex:none;opacity:.85">i</span>About

@@ -359,6 +359,12 @@ class Bench:
         self.addressing = next((ap for p in self.plugins
                                 if (ap := p.addressing_provider()) is not None), None)
         self._trace_decoders = [d for p in self.plugins for d in p.trace_decoders()]
+        # sidebar panels, namespaced like actions and step types; a panel
+        # that raises is dropped into _panels_broken and never retried,
+        # since render() runs on every snapshot
+        self._device_panels = [(f"{p.name}.{panel.key}", panel)
+                               for p in self.plugins for panel in p.device_panels()]
+        self._panels_broken: set[str] = set()
         # CiA-301 EMCY texts with vendor codes merged over them (plugin wins)
         self._emcy_codes = dict(data.EMCY_CODES)
         for p in self.plugins:
@@ -3024,6 +3030,34 @@ class Bench:
             values.append({"label": slot["label"], "value": "—" if num is None else str(num)})
         return {"node": sel[0]["node"], "values": values}
 
+    def _panel_data(self) -> list[dict]:
+        """Plugin-contributed sidebar panels for the selected device.
+
+        The core knows nothing about which devices these apply to — that
+        is the panel's own matches(). Same on-demand rule as the display
+        mirror above: render() reads caches, and the bus is only touched
+        by the plugin actions the panel's buttons dispatch.
+        """
+        sel = self.sel_devices
+        if not sel or not self._device_panels:
+            return []
+        dev = sel[0]
+        eds = next((e for e in self.db.eds_list() if e["file"] == dev["eds"]), None)
+        panels = []
+        for key, panel in self._device_panels:
+            if key in self._panels_broken:
+                continue
+            try:
+                data = panel.render(self, dev) if panel.matches(dev, eds) else None
+            except Exception as exc:  # a broken panel must not break the snapshot
+                self._panels_broken.add(key)
+                self.log(f'PLG  panel "{key}" failed — hidden for this session ({exc})',
+                         "emcy0")
+                continue
+            if data:
+                panels.append({"key": key, "title": panel.title, "node": dev["node"]} | data)
+        return panels
+
     # ------------------------------------------------------------------
     def snapshot(self) -> dict:
         sel = self.sel_devices
@@ -3073,6 +3107,7 @@ class Bench:
                 "hint": obj_hint,
             },
             "mirror": self._mirror_data(),
+            "panels": self._panel_data(),
             "favorites": {
                 "rows": self._fav_rows(),
                 "lastDb": self.db.last_values_ts(first["sn"]) if first else None,

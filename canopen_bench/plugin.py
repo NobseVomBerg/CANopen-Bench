@@ -74,6 +74,67 @@ class TraceDecoder:
         return None
 
 
+class DevicePanel:
+    """A panel for the sidebar, below the Devices box, for device families
+    the core cannot know anything about: a front-panel mirror, virtual
+    buttons, status LEDs. The core renders a declarative description and
+    holds no device knowledge — which devices a panel applies to is
+    entirely ``matches()``.
+
+    Everything in the description is optional, because partial capability
+    is the norm: a family whose display cannot be read over CAN
+    contributes buttons and no canvas, one that only signals state
+    contributes LEDs alone. A panel describing none of the three is not
+    rendered.
+
+    ``render()`` is called on every snapshot and must not touch the bus —
+    it reads cached values (``bench.obj_vals``) and formats them. Bus
+    access belongs in the plugin's own ``actions()``, triggered by the
+    panel's buttons or its refresh action, so that showing a panel never
+    turns into polling a device. A panel that raises is dropped for the
+    rest of the session and logged once; it can never take a snapshot
+    (and with it the whole UI) down.
+    """
+
+    #: namespaced as "<plugin name>.<key>" in the snapshot
+    key = "unnamed"
+    #: box heading, e.g. "Display"
+    title = "Panel"
+
+    def matches(self, dev: dict, eds: dict | None) -> bool:
+        """True if this panel applies to ``dev`` — a row of ``bench.devices``
+        ({node, name, sn, fw, eds, variant, nmt, ...}). ``eds`` is that
+        device's registry row (``db.eds_list()``) or None when it has no
+        EDS assigned."""
+        return False
+
+    def render(self, bench, dev: dict) -> dict | None:
+        """The panel contents for the current snapshot, or None to show
+        nothing this tick. Keys, all optional:
+
+        ``canvas``  {w, h, fg?, bg?, draw: [...]} — a small vector display.
+                    Primitives: {t: "line", p: [x1,y1,x2,y2], w?, c?},
+                    {t: "poly", p: [x1,y1,x2,y2,...], fill?, w?, c?},
+                    {t: "text", x, y, s, size?, c?}. ``c`` is "fg", "dim"
+                    (fg at reduced opacity) or a literal CSS colour;
+                    ``fg``/``bg`` are literal colours, since a physical
+                    display's own colours do not follow the page theme.
+        ``buttons`` [{id, slot, label, title?}] — ``slot`` is "tl", "bl",
+                    "tr" or "br", placing the button left or right of the
+                    canvas. Clicking dispatches ``buttonAction`` with
+                    {node, btn: id}; shift-click adds long: true.
+        ``buttonAction`` the action name for the above, normally one of
+                    this plugin's own namespaced actions.
+        ``leds``    [{c, on, blink?, title?}] — ``c`` is a CSS colour,
+                    ``on`` is True (lit), False (dark) or None (**not
+                    readable**, rendered as a neutral ring, never as
+                    dark). ``blink`` is "slow" or "fast".
+        ``refresh`` action name for the box's refresh control; omitted
+                    means no refresh control.
+        """
+        return None
+
+
 class StepType:
     """A flow/test-case step primitive contributed by a plugin, referenced
     in YAML as ``<plugin name>.<key>`` (e.g. ``- acme.block_download:
@@ -171,6 +232,11 @@ class BenchPlugin:
 
     def trace_decoders(self) -> list[TraceDecoder]:
         """Decoders for vendor-specific frames in the trace monitor."""
+        return []
+
+    def device_panels(self) -> list[DevicePanel]:
+        """Sidebar panels for device families this plugin recognizes —
+        front-panel mirrors, virtual buttons, status LEDs."""
         return []
 
     def emcy_codes(self) -> dict[int, str]:

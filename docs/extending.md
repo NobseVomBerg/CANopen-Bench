@@ -44,15 +44,38 @@ only what you provide.
 | `addressing_provider()` | `AddressingProvider \| None` | Session identity for (re-)addressing runs (`$session` in flows); first plugin wins |
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |
 | `trace_decoders()` | `list[TraceDecoder]` | Decoding for vendor-specific frames in the trace monitor |
+| `device_panels()` | `list[DevicePanel]` | Sidebar boxes for a device family — front-panel mirror, virtual buttons, status LEDs |
 | `emcy_codes()` | `dict[int, str]` | Vendor-/profile-specific EMCY error-code texts, merged over the built-in CiA-301 table (plugin wins on conflict) |
 | `actions(bench)` | `dict[str, callable]` | Extra API actions, dispatched as `<plugin>.<action>` — collision-free with core actions |
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
 | `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation; first plugin wins |
 
 The helper base classes (`AddressingProvider`, `DemoHook`,
-`TraceDecoder`, `StepType`, `SwdlStrategy`) are defined next to
-`BenchPlugin` in `canopen_bench/plugin.py`, each with docstrings
+`TraceDecoder`, `DevicePanel`, `StepType`, `SwdlStrategy`) are defined
+next to `BenchPlugin` in `canopen_bench/plugin.py`, each with docstrings
 covering the exact contract.
+
+### Device panels
+
+A plugin cannot ship frontend code — and should not be able to, since
+code injected into the page can do everything the page can. Instead a
+`DevicePanel` returns a *description* and the core renders it: a small
+vector canvas, up to four buttons around it, a row of LEDs. None of that
+vocabulary mentions any device; which devices a panel applies to is the
+plugin's own `matches()`, and the core never learns a device name.
+
+Every part is optional, because partial capability is normal: a family
+whose display cannot be read contributes buttons and no canvas, one that
+only signals state contributes LEDs alone. An LED's `on` is tri-state —
+`True`, `False`, or `None` for "cannot be read", which renders as a
+neutral ring rather than as dark. Showing an unreadable LED as off would
+turn a missing capability into a wrong measurement.
+
+`render()` runs on every snapshot and must not touch the bus. It formats
+cached values (`bench.obj_vals`); reads and writes belong in the
+plugin's `actions()`, which the panel's buttons and its refresh control
+dispatch. That is what keeps a visible panel from quietly becoming a
+poll loop.
 
 ## Minimal example
 
