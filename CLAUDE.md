@@ -5,6 +5,26 @@ Project docs live elsewhere — `README.md` (what the tool does),
 sequence specs, including the test-case YAML format). This file is only
 about how Claude should work in this repo.
 
+## Git workflow
+
+**Never commit directly to `main`.** The repository is public; `main` is
+what anyone cloning it gets, and there is no release to fall back to —
+`main` *is* the release. Branch, push the branch, let CI go green, then
+merge.
+
+```bash
+git checkout -b <topic>          # e.g. fix/trace-filter-race
+# … work, then locally:
+ruff check . && pytest tests/    # on 3.10 as well, see CONTRIBUTING.md
+git push -u origin <topic>
+# CI green on 3.10/3.11/3.12 → merge into main, delete the branch
+```
+
+Bump the version in `pyproject.toml` as part of the change — the rules
+are in `CONTRIBUTING.md` under "Versioning". Delete merged branches
+promptly; stale ones only raise the question of whether something is
+still in them.
+
 ## Model routing
 
 Delegate well-scoped, mechanical work to the specialized agents in
