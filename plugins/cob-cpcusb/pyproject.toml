@@ -1,16 +1,17 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cob-cpcusb"
-version = "1.1.0"
+version = "1.1.1"
 description = "CPC-USB/ARM7 support for canopen-bench: a pyusb/WinUSB python-can backend plus its adapter card"
 # MIT, matching the canopen-bench core. This package was GPL-2.0-only while
 # one function was carried over from the mainline Linux ems_usb.c driver;
 # that function has been reimplemented against PROTOCOL.md, leaving only
 # protocol facts in common. See PROTOCOL.md, "Provenance and licensing".
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "python-can>=4.4",

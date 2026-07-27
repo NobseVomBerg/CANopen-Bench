@@ -1,20 +1,23 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.10"
+version = "1.0.11"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+# THIRD-PARTY-NOTICES.md carries the attribution required by the bundled
+# Preact (MIT) and htm (Apache-2.0) in static/vendor/, plus the LGPL note
+# for python-can — it has to travel with every wheel and sdist.
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 authors = [{name = "NobseVomBerg"}]
 keywords = ["canopen", "can", "cia301", "eds", "test-bench", "sdo", "pdo", "nmt", "lss"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Manufacturing",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -59,12 +62,6 @@ canopen-bench = "canopen_bench.__main__:main"
 # "canopen_bench.plugins" (see canopen_bench/plugin.py) and python-can
 # drivers under python-can's own "can.interface" group — the neutral core
 # itself registers neither; see docs/extending.md.
-
-[tool.setuptools]
-# THIRD-PARTY-NOTICES.md carries the attribution required by the bundled
-# Preact (MIT) and htm (Apache-2.0) in static/vendor/, plus the LGPL note
-# for python-can — it has to travel with every wheel and sdist.
-license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 
 [tool.setuptools.packages.find]
 include = ["canopen_bench*"]
