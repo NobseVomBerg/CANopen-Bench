@@ -23,6 +23,7 @@ typedef enum eFlags {
     eFlags_First = 1,
     eFlags_Second = 2,
     eFlags_Fourth = 4,
+    eFlags_Mask = 7,
 } eFlags;
 """
 
@@ -96,6 +97,14 @@ def test_a_value_inside_the_mask_that_no_symbol_names_is_still_shown(syms):
 
 def test_flag_bits_no_symbol_names_are_shown_too(syms):
     assert describe(0x09, [Field("eFlags", flags=True)], syms) == "eFlags_First+?0x8"
+
+
+def test_a_member_covering_the_whole_mask_is_not_a_flag(syms):
+    """Headers keep the mask itself in the table — a bit filter, an "all"
+    alias. Reporting it as a state would announce "everything is set" at
+    the one moment everything is, on top of the names that already say so."""
+    got = describe(0x7, [Field("eFlags", mask=0x7, flags=True)], syms)
+    assert got == "eFlags_First+eFlags_Second+eFlags_Fourth"
 
 
 def test_no_fields_means_no_interpretation(syms):

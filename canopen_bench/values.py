@@ -88,10 +88,10 @@ def describe(value: int, fields: list[Field], symbols) -> str:
         covered |= field.mask
         raw = field.extract(value, symbols)
         if field.flags:
-            named = [sym.value for sym in symbols.tables.get(field.table, {}).values()
-                     if sym.value and raw & sym.value == sym.value]
-            names = [sym.name for sym in symbols.tables.get(field.table, {}).values()
-                     if sym.value and raw & sym.value == sym.value]
+            hits = [sym for sym in symbols.tables.get(field.table, {}).values()
+                    if _is_flag(sym.value, field, symbols) and raw & sym.value == sym.value]
+            named = [sym.value for sym in hits]
+            names = [sym.name for sym in hits]
             leftover = raw & ~_union(named)
             text = "+".join(names) if names else ("none" if raw == 0 else "")
             if leftover:
@@ -105,6 +105,19 @@ def describe(value: int, fields: list[Field], symbols) -> str:
     if rest:
         parts.append(f"+0x{rest:X}")
     return " · ".join(parts)
+
+
+def _is_flag(value: int, field: Field, symbols) -> bool:
+    """Whether a table member names a set bit, in a table read as flags.
+
+    Zero does not: it is the "nothing set" member, and it matches every
+    value. Neither does a member covering the field's whole mask —
+    headers keep the mask itself in the table (a bit filter, an "all"
+    alias), and reporting that as a state would say "everything is set"
+    at the one moment everything is. The individual names still match, so
+    nothing is lost by leaving it out.
+    """
+    return bool(value) and value != (field.mask >> field.resolved_shift(symbols))
 
 
 def _union(values: list[int]) -> int:
