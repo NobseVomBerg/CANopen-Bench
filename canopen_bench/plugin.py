@@ -121,6 +121,9 @@ class DevicePanel:
                     (fg at reduced opacity) or a literal CSS colour;
                     ``fg``/``bg`` are literal colours, since a physical
                     display's own colours do not follow the page theme.
+                    Any primitive may carry ``blink``: "slow" or "fast" —
+                    an element the device itself is flashing, the same
+                    vocabulary as an LED's.
         ``buttons`` [{id, slot, label, title?}] — ``slot`` is "tl", "bl",
                     "tr" or "br", placing the button left or right of the
                     canvas. Clicking dispatches ``buttonAction`` with

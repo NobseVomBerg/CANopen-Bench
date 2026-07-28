@@ -748,6 +748,18 @@ def test_panel_is_namespaced_and_carries_title_and_node(tmp_path):
     assert got["leds"] == [{"c": "red", "on": None}]
 
 
+def test_panel_canvas_reaches_the_frontend_verbatim(tmp_path):
+    """The core does not read the description, it forwards it — including
+    a primitive's ``blink``, which says the device is flashing that
+    element rather than merely showing it. Filtering keys the core happens
+    not to know would silently turn one device state into another."""
+    draw = [{"t": "line", "p": [0, 0, 8, 0], "w": 2, "c": "fg", "blink": "slow"}]
+    bench = _panel_bench(tmp_path, _FakePanel(data={"canvas": {"w": 20, "h": 10,
+                                                               "draw": draw}}))
+    (got,) = bench.snapshot()["panels"]
+    assert got["canvas"]["draw"] == draw
+
+
 def test_panel_not_shown_when_it_does_not_match(tmp_path):
     bench = _panel_bench(tmp_path, _FakePanel(match=False, data={"leds": []}))
     assert bench.snapshot()["panels"] == []

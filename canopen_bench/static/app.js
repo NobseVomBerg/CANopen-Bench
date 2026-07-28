@@ -92,14 +92,21 @@ const PANEL_SLOTS = [['tl', 'bl'], ['tr', 'br']];
 const panelInk = (c, fg) => (c === 'fg' || c === 'dim' || !c ? fg : c);
 const panelOpacity = (c) => (c === 'dim' ? 0.38 : 1);
 
+// a blinking element is a state of the device, not decoration — same
+// vocabulary as an LED, so a panel says it once and means it everywhere
+const panelAnim = (d) => (d.blink
+  ? `animation:coPulse ${d.blink === 'fast' ? '.4s' : '1s'} infinite`
+  : '');
+
 const panelShape = (d, fg) => {
   const ink = panelInk(d.c, fg);
   const op = panelOpacity(d.c);
+  const an = panelAnim(d);
   if (d.t === 'line') return html`<line x1=${d.p[0]} y1=${d.p[1]} x2=${d.p[2]} y2=${d.p[3]}
-    stroke=${ink} stroke-width=${d.w || 1} stroke-linecap="round" opacity=${op} />`;
-  if (d.t === 'poly') return html`<polygon points=${d.p.join(' ')} opacity=${op}
+    stroke=${ink} stroke-width=${d.w || 1} stroke-linecap="round" opacity=${op} style=${an} />`;
+  if (d.t === 'poly') return html`<polygon points=${d.p.join(' ')} opacity=${op} style=${an}
     fill=${d.fill ? ink : 'none'} stroke=${ink} stroke-width=${d.w || 1} />`;
-  if (d.t === 'text') return html`<text x=${d.x} y=${d.y} fill=${ink} opacity=${op}
+  if (d.t === 'text') return html`<text x=${d.x} y=${d.y} fill=${ink} opacity=${op} style=${an}
     font-size=${d.size || 9} font-family="IBM Plex Sans, sans-serif">${d.s}</text>`;
   return null;  // unknown primitive: skip it, never break the whole panel
 };

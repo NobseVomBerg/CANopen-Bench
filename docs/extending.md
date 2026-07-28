@@ -124,7 +124,11 @@ whose display cannot be read contributes buttons and no canvas, one that
 only signals state contributes LEDs alone. An LED's `on` is tri-state —
 `True`, `False`, or `None` for "cannot be read", which renders as a
 neutral ring rather than as dark. Showing an unreadable LED as off would
-turn a missing capability into a wrong measurement.
+turn a missing capability into a wrong measurement. A canvas primitive
+and an LED both take `blink` (`"slow"`/`"fast"`), for the case where the
+device is flashing the element rather than merely showing it — an
+element drawn statically because the description had no word for
+"flashing" reads as a different device state than the real one.
 
 `render()` runs on every snapshot and must not touch the bus. It formats
 cached values (`bench.obj_vals`); reads and writes belong in the
