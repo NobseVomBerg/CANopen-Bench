@@ -221,15 +221,18 @@ class BenchPlugin:
         before the core's demo entries."""
         return []
 
-    def object_fields(self) -> dict[str, list[Field]]:
+    def object_fields(self, symbols) -> dict[str, list[Field]]:
         """How to read an object's value symbolically: "0x2007:09" -> the
         fields packed into it (``canopen_bench/values.py``). A whole-value
         enum needs only a table name; anything nested — two fields in a
         byte, a byte lane, a flag register — is the same construct with a
         mask.
 
-        Deriving these from a naming convention is a plugin's business, not
-        the core's: the convention belongs to whoever writes the headers.
+        ``symbols`` is the parsed symbol table, so a plugin can derive
+        these from its headers instead of writing them out: a naming
+        convention that ties a table to an object, a mask that the header
+        itself names. That derivation is the plugin's business, not the
+        core's — the convention belongs to whoever writes the headers.
         """
         return {}
 

@@ -350,7 +350,14 @@ class Bench:
         self.on_plugin_reload: Callable[[], None] | None = None
         # None -> entry-point discovery; a list (possibly empty) -> injected,
         # same pattern as the bus parameter (tests, embedding).
+        self.logs: list[dict] = []  # before the plugin hooks: symbol loading logs
         self.plugins = load_plugins() if plugins is None else list(plugins)
+        # symbol tables from the device's own C headers, parsed before the
+        # hooks below because object_fields() is written against them — the
+        # workspace copy is the firmware actually under test, and the field
+        # descriptions have to follow it rather than a packaged snapshot
+        self.symbols_dir = db.path.parent / "symbols"
+        self.symbols: SymbolTables = self._load_symbols()
         self.adapter_cards = ([c for p in self.plugins for c in p.adapters()]
                               + list(data.ADAPTERS))
         extra_backends = {key: backend for p in self.plugins
@@ -370,7 +377,7 @@ class Bench:
         # how to read an object's value symbolically, keyed "0x2007:09"
         self._object_fields: dict[str, list[Field]] = {}
         for p in self.plugins:
-            self._object_fields.update(p.object_fields())
+            self._object_fields.update(p.object_fields(self.symbols))
         # CiA-301 EMCY texts with vendor codes merged over them (plugin wins)
         self._emcy_codes = dict(data.EMCY_CODES)
         for p in self.plugins:
@@ -415,7 +422,6 @@ class Bench:
         self.scan_range: tuple[int, int] = (int(sr[0]), int(sr[1]))
         self.browse: dict | None = None  # directory-picker state while the modal is open
         self.devices: list[dict] = []
-        self.logs: list[dict] = []
         self.emcy_new = 0
         self.obj_vals: dict[str, str] = {}
         self.test_sel: set[str] = set(data.DEFAULT_TEST_SEL)

@@ -173,7 +173,7 @@ class _FieldPlugin(BenchPlugin):
     def symbol_dirs(self):
         return [self._dir]
 
-    def object_fields(self):
+    def object_fields(self, symbols):
         return {"0x2007:09": [Field("eMode", mask=0x0F, label="mode"),
                               Field("eLamp", mask=0x30, label="lamp")]}
 

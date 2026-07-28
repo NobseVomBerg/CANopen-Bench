@@ -42,7 +42,7 @@ only what you provide.
 | `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits |
 | `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables; seeded into the workspace like flows |
-| `object_fields()` | `dict[str, list[Field]]` | How to read an object's value symbolically — a whole-value enum, fields packed into one word, or a flag register |
+| `object_fields(symbols)` | `dict[str, list[Field]]` | How to read an object's value symbolically — a whole-value enum, fields packed into one word, or a flag register |
 | `addressing_provider()` | `AddressingProvider \| None` | Session identity for (re-)addressing runs (`$session` in flows); first plugin wins |
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |
 | `trace_decoders()` | `list[TraceDecoder]` | Decoding for vendor-specific frames in the trace monitor |
@@ -92,7 +92,7 @@ fields packed into a byte, an enum living in bits 16..23 of a word, one
 channel of several, a flag register — by adding a mask:
 
 ```python
-def object_fields(self):
+def object_fields(self, symbols):
     return {"0x2007:09": [Field("eStatus", mask=0x0F, label="state"),
                           Field("eLamp", mask=0x30, label="lamp")],
             "0x2102:11": [Field("eFlags", flags=True)]}

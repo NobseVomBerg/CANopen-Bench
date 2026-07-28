@@ -65,6 +65,11 @@ class SymbolTables:
 
     by_name: dict[str, Symbol] = field(default_factory=dict)
     tables: dict[str, dict[str, Symbol]] = field(default_factory=dict)
+    #: table name -> its /// @brief line. What a table *is* often lives only
+    #: in that sentence, and a plugin deriving field descriptions from the
+    #: headers needs it — "Flagregister ..." is a machine-readable fact
+    #: about the table that nothing else in the file states.
+    descriptions: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     ambiguous: dict[str, list[Symbol]] = field(default_factory=dict)
 
@@ -206,6 +211,36 @@ def _members(body: str, first_line: int):
                    desc if i == len(entries) - 1 else "", line)
 
 
+def _brief_above(text: str, start: int) -> str:
+    """The /// comment block immediately above an enum, joined into one
+    line. Blank lines and other code end the block."""
+    lines = text[:start].splitlines()
+    out: list[str] = []
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped:
+            if out:
+                break
+            continue
+        brief = _DOC_BRIEF.match(stripped)
+        if not brief:
+            break
+        out.insert(0, brief.group(1).strip())
+    return " ".join(out).strip()
+
+
+def table_briefs(text: str) -> dict[str, str]:
+    """Table name -> its /// @brief, for every enum in one header."""
+    text = _strip_comments(text)
+    out: dict[str, str] = {}
+    for match in _ENUM.finditer(text):
+        name = match.group(3) or match.group(1) or ""
+        brief = _brief_above(text, match.start())
+        if name and brief:
+            out[name] = brief
+    return out
+
+
 def parse_header(text: str, source: str) -> tuple[list[Symbol], list[str]]:
     """One header to symbols. Returns (symbols, errors); a bad member costs
     that member, not the file, so one unreadable constant does not take a
@@ -266,6 +301,7 @@ def load_symbols(dirs: list[tuple[str, Path]]) -> SymbolTables:
                 continue
             symbols, errors = parse_header(text, source)
             tables.errors.extend(errors)
+            tables.descriptions.update(table_briefs(text))
             for sym in symbols:
                 if sym.table:
                     tables.tables.setdefault(sym.table, {})[sym.name] = sym
