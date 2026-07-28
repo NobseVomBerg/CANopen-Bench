@@ -89,6 +89,13 @@ class DevicePanel:
     contributes LEDs alone. A panel describing none of the three is not
     rendered.
 
+    A panel that mirrors a physical device belongs to the real bus. On the
+    demo adapter (``bench.demo``) there is no device behind the values, so
+    such a panel should render nothing and leave the field to the core's
+    own generic stand-in — a picture of a front panel assembled from
+    made-up numbers is not a demo of anything. Panels that invent no
+    measurement of their own are free to show up in demo mode.
+
     ``render()`` is called on every snapshot and must not touch the bus —
     it reads cached values (``bench.obj_vals``) and formats them. Bus
     access belongs in the plugin's own ``actions()``, triggered by the
