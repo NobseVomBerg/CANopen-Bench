@@ -12,6 +12,7 @@ from conftest import SEED_EDS, connect_and_scan, write_seed_eds_files
 
 import canopen_bench.core as core_mod
 from canopen_bench.bus.canopen_bus import CanopenBus, _decode_cob
+from canopen_bench.bus.interface import NO_SERIAL
 from canopen_bench.core import Bench, normalize_identity, trace_class, trace_node
 from canopen_bench.db import Db
 from canopen_bench.eds_od import pdo_mapping
@@ -989,6 +990,63 @@ def test_last_known_values_restored_on_select(connected_bench):
     bench.dispatch("dev_toggle", {"node": 1})  # deselect
     bench.dispatch("dev_toggle", {"node": 1})  # reselect -> restore from db
     assert bench.obj_vals["0x2040:01"] == "0x00260001"
+
+
+def test_switching_devices_does_not_carry_values_over(connected_bench):
+    """The reported bug: values read from one device stayed in the table
+    after switching to another, indistinguishable from that device's own —
+    and Write would have sent them there."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    assert "0x2040:01" in bench.obj_vals
+    bench.dispatch("dev_toggle", {"node": 1})            # deselect
+    bench.dispatch("dev_toggle", {"node": 2})            # a different device
+    assert "0x2040:01" not in bench.obj_vals
+
+
+def test_deselecting_everything_empties_the_table(connected_bench):
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("dev_toggle", {"node": 1})
+    assert bench.obj_vals == {}
+
+
+def test_a_staged_value_does_not_follow_to_the_next_device(connected_bench):
+    """obj_set stages without writing. Staged for node 1, it must not be
+    sitting in the field when node 2 is selected."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x42"})
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("dev_toggle", {"node": 2})
+    assert "0x2000:00" not in bench.obj_vals
+
+
+def test_a_device_without_a_serial_number_gets_no_remembered_values(connected_bench):
+    """Every device that answers no serial reports the same "?", so keeping
+    values under it would hand one device's readings to the next. Empty
+    table, and a line saying why — a silently empty one reads as a bug."""
+    bench = connected_bench
+    bench.devices[0]["sn"] = NO_SERIAL
+    bench.dispatch("dev_toggle", {"node": bench.devices[0]["node"]})
+    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("dev_toggle", {"node": bench.devices[0]["node"]})
+    bench.dispatch("dev_toggle", {"node": bench.devices[0]["node"]})
+    assert bench.obj_vals == {}
+    assert any("no serial number" in row["msg"] for row in bench.logs)
+
+
+def test_a_scan_reloads_the_table_for_whoever_is_at_that_node(connected_bench):
+    """Selection survives a scan by node-id; the unit at that node need not
+    be the same one, so the values are re-fetched rather than kept."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.obj_vals["0x2040:01"] = "0xDEADBEEF"       # never read from anything
+    connect_and_scan(bench)
+    assert bench.obj_vals.get("0x2040:01") == "0x00260001"   # what the db holds
 
 
 def test_nmt_applies_to_selection_only(connected_bench):

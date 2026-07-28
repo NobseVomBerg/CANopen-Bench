@@ -31,7 +31,7 @@ from . import __version__, data
 from . import testcases as tclib
 from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
-from .bus.interface import BusInterface, SdoResult
+from .bus.interface import NO_SERIAL, BusInterface, SdoResult
 from .db import Db
 from .eds_od import OdCache, find_var, pdo_mapping
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
@@ -855,6 +855,11 @@ class Bench:
             else:
                 self.log(f"SCAN identity 0x1018 node {f.node:02d} → {f.identity} — no active EDS match", "sdo")
         self.devices = devices
+        # selection survives a scan by node-id, but the device sitting at
+        # that node may be a different unit than before — so the object
+        # table is rebuilt from whoever is there now, quietly: the scan
+        # says enough already
+        self._load_obj_vals(announce=False)
         if not results and self.adapter == "demo":
             self.log("SCAN demo mode found nothing — upload and enable at least one real EDS file first", "emcy0")
         elif not results and bus.bus_state() in ("passive", "error"):
@@ -1124,15 +1129,42 @@ class Bench:
             return ""
         return eds_entry["variant_map"].get(res.value, res.value)
 
+    def _load_obj_vals(self, announce: bool = True) -> None:
+        """Fill the object table from the device it belongs to — the first
+        selected one — and from nothing else.
+
+        Replaces the cache rather than merging into it. Merging left the
+        previous device's values standing for every object the new one has
+        no stored value for, so the table showed numbers under a device
+        they were never read from, and Write would have sent them there.
+
+        Values are kept per serial number (db.last_values), which is the
+        only identity that survives re-addressing. A device that answers no
+        serial number reports "?" — every such device would share one set
+        of values, which is the very thing this method exists to prevent,
+        so those get an empty table and a line saying why.
+        """
+        sel = self.sel_devices
+        first = sel[0] if sel else None
+        self.obj_vals = ({} if first is None or first["sn"] == NO_SERIAL
+                         else dict(self.db.last_values(first["sn"])))
+        if not announce:
+            return
+        if first is None:
+            self.log("DB   no device selected — object values cleared")
+        elif first["sn"] == NO_SERIAL:
+            self.log(f"DB   node {first['node']:02d} · no serial number — "
+                     "values are not remembered for this device", "emcy0")
+        else:
+            self.log(f"DB   node {first['node']:02d} · SN {first['sn']} "
+                     "→ last known values restored")
+
     def act_dev_toggle(self, p: dict) -> None:
         node = int(p["node"])
         for d in self.devices:
             if d["node"] == node:
                 d["sel"] = not d["sel"]
-                if d["sel"]:
-                    vals = self.db.last_values(d["sn"])
-                    self.obj_vals.update(vals)
-                    self.log(f"DB   node {node:02d} · SN {d['sn']} → last known values restored")
+        self._load_obj_vals()
 
     def act_nmt(self, p: dict) -> None:
         cmd = p["cmd"]
