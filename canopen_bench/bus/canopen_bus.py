@@ -19,7 +19,7 @@ from datetime import datetime
 import can
 import canopen
 
-from .interface import BusInterface, FoundDevice, Frame, SdoResult
+from .interface import NO_SERIAL, BusInterface, FoundDevice, Frame, SdoResult
 
 # app adapter key (canopen_bench.data.ADAPTERS) -> python-can interface name + default channel
 _ADAPTER_BACKENDS: dict[str, tuple[str, str | int | None]] = {
@@ -275,7 +275,7 @@ class CanopenBus(BusInterface):
                 name = self._read_string(node, 0x1008, 0) or f"node {node_id:02d}"
                 fw = self._read_string(node, 0x100A, 0) or "?"
                 sn_bytes = self._try_upload(node, 0x1018, 4)
-                sn = _bytes_to_hex(sn_bytes) if sn_bytes else "?"
+                sn = _bytes_to_hex(sn_bytes) if sn_bytes else NO_SERIAL
                 vendor = self._try_upload(node, 0x1018, 1)
                 product = self._try_upload(node, 0x1018, 2)
                 # canonical identity format: minimal hex width (core.normalize_identity),

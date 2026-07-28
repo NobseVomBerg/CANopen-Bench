@@ -11,6 +11,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 
+#: a device that does not answer 0x1018:04 has no serial number to be told
+#: apart by — anything the bench keeps per device has to treat this as "no
+#: identity", never as one shared by every such device
+NO_SERIAL = "?"
+
 
 @dataclass
 class FoundDevice:
