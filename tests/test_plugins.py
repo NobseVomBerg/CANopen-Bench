@@ -791,6 +791,17 @@ def test_panel_matches_gets_none_when_device_has_no_eds(tmp_path):
     assert panel.seen_eds[-1] is None
 
 
+def test_a_panel_can_tell_the_demo_bus_from_a_real_one(tmp_path):
+    """A panel that mirrors hardware has to be able to stay away in demo
+    mode: values the tool generated itself are not a picture of a device.
+    The core offers the fact and leaves the decision to the panel."""
+    bench = _panel_bench(tmp_path, _FakePanel(data={"leds": []}))
+    bench.dispatch("set_adapter", {"adapter": "demo"})
+    assert bench.demo is True
+    bench.dispatch("set_adapter", {"adapter": "ixxat"})
+    assert bench.demo is False
+
+
 def test_broken_panel_is_hidden_for_the_session_and_logged(tmp_path):
     """render() runs on every snapshot, so a raising panel must be dropped
     once — not retried (and re-logged) forever — and must never take the

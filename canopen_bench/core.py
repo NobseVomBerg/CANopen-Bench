@@ -562,6 +562,20 @@ class Bench:
         python-can, or whatever was injected for tests)."""
         return self._demo_bus if self.adapter == "demo" else self._hw_bus
 
+    @property
+    def demo(self) -> bool:
+        """No hardware behind the bus: devices are generated from the EDS
+        files, and every value read is something this process made up.
+
+        Plugins need this. Anything that mirrors a device — a panel
+        showing what the front of it looks like, a readout of its state —
+        is a measurement, and a measurement invented by the tool itself is
+        worse than none: it shows a device that is not there. Such a
+        feature belongs to the real bus, and the demo keeps whatever
+        generic stand-in the core provides.
+        """
+        return self.adapter == "demo"
+
     def shutdown(self) -> None:
         """Server is stopping: close the bus connection like a disconnect."""
         if self.connected:
