@@ -18,6 +18,26 @@ canopen-bench                  # → http://127.0.0.1:8000
 No virtualenv needed to just run it, and no `-e` — that installs the
 package for editing, which is what `## Development` below is for.
 
+`canopen-bench` is a shortcut the install writes; the module runs just as
+well by itself, from the repository root:
+
+```bash
+python -m canopen_bench                       # same thing, same options
+python -m canopen_bench --port 8001 --host 0.0.0.0
+```
+
+Two reasons to prefer it. It runs *this* directory rather than whatever
+`canopen-bench` happens to point at, which matters as soon as a second
+copy or a second virtualenv is around. And it needs only the
+dependencies, not the package itself: `pip install starlette uvicorn
+websockets canopen python-can pyyaml` (the `dependencies` list in
+`pyproject.toml`) and a clone is enough — worth knowing on a bench
+machine where you would rather not install anything.
+
+Note the underscore: the distribution is `canopen-bench`, the module is
+`canopen_bench`. `python -m canopen-bench` cannot work — a hyphen is not
+valid in a Python module name.
+
 Pick **Demo mode** on the Setup page, **Connect**, **Scan**: virtual
 devices are generated from the bundled `canopen_bench/seed/DemoDevice.eds`
 (installed into
