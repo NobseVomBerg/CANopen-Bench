@@ -19,6 +19,8 @@ import logging
 from importlib import metadata
 from pathlib import Path
 
+from .values import Field
+
 log = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "canopen_bench.plugins"
@@ -218,6 +220,18 @@ class BenchPlugin:
         """Firmware library entries ({ver, file, tag, meta}); listed
         before the core's demo entries."""
         return []
+
+    def object_fields(self) -> dict[str, list[Field]]:
+        """How to read an object's value symbolically: "0x2007:09" -> the
+        fields packed into it (``canopen_bench/values.py``). A whole-value
+        enum needs only a table name; anything nested — two fields in a
+        byte, a byte lane, a flag register — is the same construct with a
+        mask.
+
+        Deriving these from a naming convention is a plugin's business, not
+        the core's: the convention belongs to whoever writes the headers.
+        """
+        return {}
 
     def symbol_dirs(self) -> list[Path]:
         """Directories with the device's own C headers, parsed into symbol

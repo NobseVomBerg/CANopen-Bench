@@ -44,7 +44,8 @@ ALLOWED = {
     "eLamp_Off", "eLamp_Blinking", "eLampState_GreenOff", "eLampState_BlueBlinking",
     "eLampState_RedOff", "eKey_Up", "eKey_Down", "eKey_Enter",
     "eMode_Off", "eMode_Run", "eA_One", "eB_First", "eX_A", "eX_Bad", "eX_Good",
-    "eX_AlsoGood",
+    "eX_AlsoGood", "eFlags_First", "eFlags_Second", "eFlags_Fourth",
+    "eStatus_Running", "eLamp_On",
 }
 
 #: directories worth scanning — everything a commit can add to this repo

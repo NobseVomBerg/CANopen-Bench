@@ -36,6 +36,7 @@ from .db import Db
 from .eds_od import OdCache, find_var, pdo_mapping
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 from .symbols import SymbolTables, load_symbols
+from .values import Field, alternatives, describe, format_number, parse_value
 
 VERSION = __version__  # single source: canopen_bench/__init__.py
 
@@ -366,6 +367,10 @@ class Bench:
         self._device_panels = [(f"{p.name}.{panel.key}", panel)
                                for p in self.plugins for panel in p.device_panels()]
         self._panels_broken: set[str] = set()
+        # how to read an object's value symbolically, keyed "0x2007:09"
+        self._object_fields: dict[str, list[Field]] = {}
+        for p in self.plugins:
+            self._object_fields.update(p.object_fields())
         # CiA-301 EMCY texts with vendor codes merged over them (plugin wins)
         self._emcy_codes = dict(data.EMCY_CODES)
         for p in self.plugins:
@@ -493,6 +498,9 @@ class Bench:
         # symbol tables from the device's own C headers, seeded per plugin
         # like flows and parsed before the test-case catalog — cases may
         # reference $Symbol and must fail to load, not mid-run, on a typo
+        # hex or dec for every object value shown; the other reading stays
+        # one hover away, so switching can never hide anything
+        self.num_base: str = db.get("num_base", "hex")
         self.symbols_dir = db.path.parent / "symbols"
         self.symbols: SymbolTables = self._load_symbols()
         # test-config paths default into the workspace folder; the default is
@@ -1893,8 +1901,28 @@ class Bench:
 
     def act_obj_set(self, p: dict) -> None:
         """Value typed into the object table / favorites: staged in
-        obj_vals — the next Write sends it. No bus traffic by itself."""
-        self.obj_vals[f"{p['idx']}:{p['sub']}"] = str(p.get("val", ""))
+        obj_vals — the next Write sends it. No bus traffic by itself.
+
+        Input is resolved here rather than on write, so the field shows
+        what it became before anything reaches the device: "0x2A", "42",
+        a symbol name from the device's own headers, or several joined
+        with "+" for a flag register. Unreadable input is refused and
+        logged — staging text that only fails later, mid-write, is the
+        one outcome worth avoiding.
+        """
+        key = f"{p['idx']}:{p['sub']}"
+        text = str(p.get("val", ""))
+        if not text.strip():
+            self.obj_vals[key] = ""
+            return
+        try:
+            value = parse_value(text, self.num_base, self._object_fields.get(key, []),
+                                self.symbols)
+        except ValueError as exc:
+            self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
+            return
+        width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
+        self.obj_vals[key] = f"0x{value:0{width}X}"
 
     # value strings are hex by convention (with or without 0x); string-,
     # octet- and domain-typed objects must never be reformatted
@@ -3027,11 +3055,49 @@ class Bench:
             self.log(f"SYM  {err}", "emcy0")
         return tables
 
+    def act_num_base(self, p: dict) -> None:
+        """Hex or dec for every value shown. Persisted, because it is a
+        reading habit rather than a per-session choice."""
+        self.num_base = "dec" if self.num_base == "hex" else "hex"
+        self.db.set("num_base", self.num_base)
+
     def act_symbols_reload(self, p: dict) -> None:
         """Re-parse the workspace symbol directory, so dropping in the
         headers of a newer firmware does not need a restart."""
         self.symbols = self._load_symbols()
         self._load_testcases()
+
+    def _value_view(self, catalog: dict) -> dict[str, dict]:
+        """Per object key: the number in the chosen base, every reading of
+        it for the tooltip, and the symbolic one where a plugin declared
+        fields for it. Built here rather than in the frontend so parsing
+        and formatting have exactly one home."""
+        keys: dict[str, tuple[int, str]] = {}
+        for rows in catalog.values():
+            for row in rows:
+                default = str(row[5])
+                keys[f"{row[0]}:{row[1]}"] = (max(2, len(default.removeprefix("0x"))),
+                                              default)
+        for key in self.obj_vals:
+            keys.setdefault(key, (2, ""))
+
+        out: dict[str, dict] = {}
+        for key, (width, default) in keys.items():
+            # an object nobody has read yet still shows its EDS default, and
+            # that has to follow the chosen base too — otherwise half the
+            # table stays hex while the other half switches
+            raw = self.obj_vals.get(key) or default
+            if raw in (None, "", "—"):
+                continue
+            try:
+                value = int(str(raw), 16)
+            except ValueError:
+                continue  # string-typed object: leave it exactly as it is
+            fields = self._object_fields.get(key, [])
+            out[key] = {"txt": format_number(value, self.num_base, width),
+                        "alt": alternatives(value, fields, self.symbols, width),
+                        "sym": describe(value, fields, self.symbols) if fields else ""}
+        return out
 
     def _mirror_slots(self, eds: str) -> list[dict]:
         entry = next((e for e in self.db.eds_list() if e["file"] == eds), None)
@@ -3147,6 +3213,8 @@ class Bench:
                 "groups": obj_groups,
                 "vals": self.obj_vals,
                 "hint": obj_hint,
+                "base": self.num_base,
+                "fmt": self._value_view(catalog),
             },
             "mirror": self._mirror_data(),
             "panels": self._panel_data(),
