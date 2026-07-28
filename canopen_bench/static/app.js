@@ -640,7 +640,7 @@ function ObjectsPage({ s, ui, setUi }) {
   const raw = s.raw;
   // fixed columns must leave room for star+Read+Write (last col); NAME is
   // the only flexible one and may wrap long identifiers inside its cell
-  const cols = '62px 30px minmax(140px,1fr) 40px 34px 96px 132px';
+  const cols = '62px 30px minmax(120px,1fr) 40px 34px minmax(200px,260px) 132px';
   const rawInp = (r, ri, field, width) => html`
     <${SyncInput} value=${r[field]} onCommit=${(v) => send('raw_update', { row: ri, field, value: v })}
       style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:${width}px;outline:none" />`;
@@ -658,6 +658,14 @@ function ObjectsPage({ s, ui, setUi }) {
         title=${on ? 'remove from signal plot' : plotFull ? 'signal plot full (4 max) — remove one first' : 'add to signal plot'}
         style="cursor:${!on && plotFull ? 'default' : 'pointer'};color:${on ? 'var(--acc)' : plotFull ? 'var(--bd2)' : 'var(--faint)'};font-size:12px">∿</span>`;
   };
+  // Values are formatted core-side (canopen_bench/values.py) so parsing and
+  // display have one home: `txt` in the chosen base, `alt` every reading of
+  // it for the tooltip, `sym` the symbolic one where a plugin declared
+  // fields. The raw number never disappears behind a name.
+  const fmt = s.objects.fmt || {};
+  const shownValue = (key, fallback) => (fmt[key] ? fmt[key].txt : fallback);
+  const valueTitle = (key, fallback) => (fmt[key] ? fmt[key].alt : fallback);
+
   const accByKey = {};
   for (const rows of Object.values(s.objects.catalog)) {
     for (const r of rows) accByKey[r[0] + ':' + r[1]] = r[4];
@@ -678,13 +686,13 @@ function ObjectsPage({ s, ui, setUi }) {
           <span style="font:10.5px ${MONO};color:var(--acc)">${idx}:${sub}</span>
           <span style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label || '—'}</span>
           ${writable ? html`
-            <${SyncInput} value=${cur ?? ''} title="staged value — Write sends it"
+            <${SyncInput} value=${shownValue(key, cur ?? '')} title=${valueTitle(key, 'staged value — Write sends it')}
               onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
               style="border:1px solid var(--inp);background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:86px;outline:none;text-align:right" />
             <span class="hv" onClick=${() => send('obj_write', { idx, sub })} title="write the staged value to the device"
               style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer">Write</span>`
           : html`
-            <span style="font:600 12px ${MONO};color:${cur ? 'var(--acc)' : 'var(--tx)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:44px;text-align:right">${cur ?? '—'}</span>`}
+            <span title=${valueTitle(key, '')} style="font:600 12px ${MONO};color:${cur ? 'var(--acc)' : 'var(--tx)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:44px;text-align:right">${shownValue(key, cur ?? '—')}</span>`}
           ${plotIcon(idx, sub)}
           <span class="hv" onClick=${() => send('fav_toggle', { idx, sub })} title="remove favorite" style="color:var(--faint);cursor:pointer">✕</span>
         </div>`;
@@ -714,7 +722,12 @@ function ObjectsPage({ s, ui, setUi }) {
 
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel2)">
       <div style="display:grid;grid-template-columns:${cols};padding:7px 0 7px 14px;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel)">
-        <span>Index</span><span>Sub</span><span>Name</span><span>Type</span><span>Acc</span><span>Value</span><span></span>
+        <span>Index</span><span>Sub</span><span>Name</span><span>Type</span><span>Acc</span>
+        <span style="display:flex;align-items:center;gap:6px">Value
+          <span class="hv-chip" onClick=${() => send('num_base')}
+            title="show values as hex or decimal — the other reading stays in the tooltip"
+            style="font:600 9px ${MONO};border:1px solid var(--inp);color:var(--acc);padding:1px 5px;border-radius:4px;cursor:pointer;letter-spacing:.04em">${(s.objects.base || 'hex').toUpperCase()}</span>
+        </span><span></span>
       </div>
       <div style="flex:1;min-height:0;overflow:auto">
         ${!s.objects.groups.length && html`
@@ -722,8 +735,9 @@ function ObjectsPage({ s, ui, setUi }) {
         ${(s.objects.catalog[ui.objGroup] || []).map(([idx, sub, name, type, acc, val, min, max]) => {
           const key = idx + ':' + sub;
           const cur = vals[key];
-          const shown = cur ?? val;
-          const oor = outOfRange(shown, min, max);
+          const shown = shownValue(key, cur ?? val);
+          const sym = (fmt[key] || {}).sym;
+          const oor = outOfRange(cur ?? val, min, max);
           const rangeHint = (min != null || max != null) ? ` (EDS range ${min ?? '−∞'}…${max ?? '∞'})` : '';
           return html`
           <div style="display:grid;grid-template-columns:${cols};align-items:center;padding:5px 0 5px 14px;border-bottom:1px solid var(--bd2)">
@@ -733,11 +747,14 @@ function ObjectsPage({ s, ui, setUi }) {
             <span style="font:10.5px ${MONO};color:var(--faint)">${type}</span>
             <span style="font:10.5px ${MONO};color:${acc === 'ro' ? 'var(--faint)' : acc === 'wo' ? 'var(--amb)' : 'var(--grn)'}">${acc}</span>
             ${acc !== 'ro' ? html`
-              <${SyncInput} value=${shown} title=${'staged value — Write sends it' + rangeHint}
-                onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
-                style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;margin-right:10px" />`
+              <span style="display:flex;align-items:center;gap:6px;min-width:0;padding-right:10px">
+                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + ' · type a number or a symbol name' + rangeHint}
+                  onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
+                  style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;flex:none" />
+                ${sym && html`<span title=${valueTitle(key, shown)} style="font-size:10.5px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sym}</span>`}
+              </span>`
             : html`
-              <span title=${shown + rangeHint} style="font:11.5px ${MONO};font-weight:${oor ? 600 : 400};color:${oor ? 'var(--amb)' : (cur ? 'var(--acc)' : 'var(--tx)')};padding-right:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`}
+              <span title=${valueTitle(key, shown) + rangeHint} style="font:11.5px ${MONO};font-weight:${oor ? 600 : 400};color:${oor ? 'var(--amb)' : (cur ? 'var(--acc)' : 'var(--tx)')};padding-right:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}${sym ? html`<span style="color:var(--dim);font-family:'IBM Plex Sans';font-size:10.5px"> ${sym}</span>` : ''}</span>`}
             <span style="display:flex;gap:5px;align-items:center;padding-right:12px">
               <span onClick=${() => send('fav_toggle', { idx, sub })} title="favorite"
                 style="cursor:pointer;color:${favKeys.has(key) ? 'var(--amb, #d97706)' : 'var(--faint)'};font-size:12px">${favKeys.has(key) ? '★' : '☆'}</span>

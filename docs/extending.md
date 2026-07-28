@@ -42,6 +42,7 @@ only what you provide.
 | `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits |
 | `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables; seeded into the workspace like flows |
+| `object_fields(symbols)` | `dict[str, list[Field]]` | How to read an object's value symbolically — a whole-value enum, fields packed into one word, or a flag register |
 | `addressing_provider()` | `AddressingProvider \| None` | Session identity for (re-)addressing runs (`$session` in flows); first plugin wins |
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |
 | `trace_decoders()` | `list[TraceDecoder]` | Decoding for vendor-specific frames in the trace monitor |
@@ -81,6 +82,33 @@ successors and constant expressions over symbols already parsed, so
 `(eLamp_Off << 8)` works) and `#define` constants. Anything else is
 reported with file and line rather than guessed — a table that is subtly
 wrong is worse than no table.
+
+### Object fields
+
+`symbol_dirs()` gives the bench the device's names; `object_fields()`
+says which name belongs to which value. The common case is one enum for
+a whole object, but the same construct covers the awkward ones — two
+fields packed into a byte, an enum living in bits 16..23 of a word, one
+channel of several, a flag register — by adding a mask:
+
+```python
+def object_fields(self, symbols):
+    return {"0x2007:09": [Field("eStatus", mask=0x0F, label="state"),
+                          Field("eLamp", mask=0x30, label="lamp")],
+            "0x2102:11": [Field("eFlags", flags=True)]}
+```
+
+`shift` defaults to the mask's lowest set bit. `flags=True` switches from
+"the value names one thing" to "each set bit names one thing".
+
+Deriving these from a naming convention is a plugin's business, not the
+core's — the convention belongs to whoever writes the headers.
+
+Two things the renderer will not do. It never replaces the number with a
+name: the value column keeps showing the number in the operator's chosen
+base, with the reading beside it. And it never drops bits — a value no
+symbol names shows as `?0x7`, bits outside every mask as `+0x80`. An
+unexplained bit in a status word is exactly what someone needs to see.
 
 ### Device panels
 
