@@ -112,9 +112,9 @@ def test_parse_valid_v2_file():
 
 
 def test_parse_rejects_arith_to_non_register():
-    text = 'id: "1"\nname: x\nsteps:\n  - mov: {to: R10, value: 1}\n'
+    text = 'id: "1"\nname: x\nsteps:\n  - mov: {to: R16, value: 1}\n'
     tc = parse_testcase(text, "TC1_x.yaml")
-    assert tc.error and "R10" in tc.error
+    assert tc.error and "R16" in tc.error
 
 
 def test_parse_rejects_duplicate_label():
@@ -273,3 +273,56 @@ def test_parse_wait_for_frame_form_still_rejects_unknown_field():
             '  - wait_for: {cob: "0x700", timeout: 0.5, bogus: 1}\n')
     tc = parse_testcase(text, "TC1_x.yaml")
     assert tc.error and "unknown field" in tc.error
+
+
+# -- header and steps a foreign suite needs translated ----------------------
+
+def test_desc_and_grade_are_optional_header_fields():
+    """Both exist because a report has to say what the case is about and
+    whether somebody has to stand next to the bench for it."""
+    text = ('id: "1"\nname: x\ndesc: "what this checks"\ngrade: semi\n'
+            'steps:\n  - end:\n')
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error is None
+    assert tc.desc == "what this checks" and tc.grade == "semi"
+
+
+def test_an_invented_grade_is_a_schema_error():
+    text = 'id: "1"\nname: x\ngrade: mostly\nsteps:\n  - end:\n'
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "grade" in tc.error
+
+
+def test_a_step_may_name_its_own_node():
+    text = ('id: "1"\nname: x\nsteps:\n'
+            '  - sdo_read: {index: "0x2000", sub: "00", node: 2}\n'
+            '  - sdo_write: {index: "0x2000", sub: "00", value: 1, node: R3}\n')
+    assert parse_testcase(text, "TC1_x.yaml").error is None
+
+
+def test_a_node_that_is_not_a_value_is_rejected():
+    text = ('id: "1"\nname: x\nsteps:\n'
+            '  - sdo_read: {index: "0x2000", sub: "00", node: everyone}\n')
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "invalid node" in tc.error
+
+
+def test_expect_emcy_needs_a_code_and_takes_a_mask():
+    ok = ('id: "1"\nname: x\nsteps:\n'
+          '  - emcy_clear:\n'
+          '  - expect_emcy: {code: "0x7100", mask: "0x00FF", node: 2, timeout: 1.5}\n')
+    assert parse_testcase(ok, "TC1_x.yaml").error is None
+    missing = 'id: "1"\nname: x\nsteps:\n  - expect_emcy: {mask: "0x00FF"}\n'
+    tc = parse_testcase(missing, "TC1_x.yaml")
+    assert tc.error and "missing field" in tc.error
+
+
+def test_the_register_file_goes_to_r15():
+    text = 'id: "1"\nname: x\nsteps:\n  - mov: {to: R15, value: 1}\n'
+    assert parse_testcase(text, "TC1_x.yaml").error is None
+
+
+def test_skip_needs_a_reason():
+    text = 'id: "1"\nname: x\nsteps:\n  - skip:\n'
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "skip" in tc.error
