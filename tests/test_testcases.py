@@ -398,3 +398,32 @@ def test_adjust_rejects_a_non_numeric_timeout():
             '  - adjust: {index: "0x2000", sub: "00", timeout: "soon"}\n')
     tc = parse_testcase(text, "TC1_x.yaml")
     assert tc.error and "timeout" in tc.error
+
+
+def test_every_mapping_valued_step_may_carry_a_note():
+    """The note is what makes a report say *why* a step ran, so it has to
+    work on all of them. Three primitives compared their key set exactly
+    and rejected it — which only showed up as a whole generated test case
+    failing to load, not as anything the schema complained about clearly.
+    """
+    text = ('id: "1"\nname: x\nsteps:\n'
+            '  - mov: {to: R1, value: 5, note: "remember the variant"}\n'
+            '  - jump_eq: {a: R1, b: 5, to: done, note: "700 -> jump"}\n'
+            '  - lss_assign: {count: 3, note: "address them"}\n'
+            '  - can_send: {cob: "0x80", data: [], note: "SYNC"}\n'
+            '  - nmt: {cmd: start, note: "needed for PDOs"}\n'
+            '  - wait_for: {cob: "0x700", timeout: 1.0, note: "boot-up"}\n'
+            '  - sdo_read: {index: "0x2000", sub: "00", note: "read it back"}\n'
+            '  - manual: {text: "flip it", note: "the aux supply"}\n'
+            '  - ask: {text: "turning?", note: "watch the wheel"}\n'
+            '  - label: done\n')
+    assert parse_testcase(text, "TC1_x.yaml").error is None
+
+
+def test_a_note_must_be_a_text_and_a_typo_is_still_caught():
+    """Allowing `note` everywhere must not turn the strict-key contract
+    into a free-for-all — `notee` is still a schema error."""
+    bad = 'id: "1"\nname: x\nsteps:\n  - mov: {to: R1, value: 5, notee: "typo"}\n'
+    assert parse_testcase(bad, "TC1_x.yaml").error
+    empty = 'id: "1"\nname: x\nsteps:\n  - mov: {to: R1, value: 5, note: ""}\n'
+    assert "note must be a text" in parse_testcase(empty, "TC1_x.yaml").error

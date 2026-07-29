@@ -23,11 +23,16 @@ _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
 _HEAD_KEYS = {"id", "name", "desc", "grade", "tools", "est", "dut",
               "variants", "on_fail", "preconditions", "steps"}
-#: what a failed expectation does to the rest of the case. "stop" (the
-#: default) ends it there. "continue" records the failure and keeps
-#: going, which is what a case needs when its last steps put the bench
-#: back the way it found it — a run that fails at 12 V and stops has left
-#: the device at 12 V.
+#: what a failed expectation does to the rest of the case. "continue"
+#: (the default) records the failure and keeps going; "stop" ends the
+#: case there.
+#:
+#: Continuing is the default because stopping loses two things a bench
+#: needs. A case whose last steps put the equipment back never reaches
+#: them — a run that fails at 12 V leaves the device at 12 V. And a case
+#: that would have told you about four broken things tells you about one,
+#: so you fix it, run again, and find the next. Where the first failure
+#: really does invalidate everything after it, the file says so.
 _ON_FAIL = {"stop", "continue"}
 #: how much of the case runs without a person at the bench — catalog and
 #: report show it; "" when the file does not say
@@ -36,6 +41,13 @@ _NMT_COMMANDS = {"start", "preop", "stop", "reset", "resetcomm"}
 _HB_STATES = {"boot", "stopped", "operational", "pre-operational"}
 _ARITH = {"mov", "add", "sub", "mul", "div", "and", "or", "xor"}
 _COND_JUMPS = {"jump_eq", "jump_ne", "jump_gt", "jump_lt", "jump_ge", "jump_le"}
+#: every mapping-valued step may carry a `note`: the sentence somebody
+#: wrote next to it, which the report shows under the step. The old tool's
+#: cases carry one on most lines and they are half of what makes a report
+#: readable a week later — "Reboot DUT" says why, where "write 0x1F51:0x02
+#: = 2" only says what.
+_NOTE = {"note"}
+
 # mapping-valued primitives: required fields, optional fields
 _STEP_FIELDS = {
     "sdo_read": ({"index", "sub"}, {"expect", "expect_abort", "mask", "into", "node"}),
@@ -81,7 +93,7 @@ class TestCase:
     tools: list[str] = field(default_factory=list)
     est: str = ""
     dut: object = "selected"  # "selected" | {"code": "<DUT code>"}
-    on_fail: str = "stop"     # "stop" | "continue" — see _ON_FAIL
+    on_fail: str = "continue"  # "continue" | "stop" — see _ON_FAIL
     #: hardware variants this case applies to, as the device reports them
     #: ("820", "920"). Empty means every variant. Declared rather than
     #: checked in preconditions so the catalog can filter on it without
@@ -97,11 +109,14 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
     if not isinstance(step, dict) or len(step) != 1:
         return f"step must be a single-key mapping: {step!r}"
     key, val = next(iter(step.items()))
+    if isinstance(val, dict) and "note" in val \
+            and not (isinstance(val["note"], str) and val["note"]):
+        return f"{key}: note must be a text"
     if extensions and key in extensions:  # plugin step "<plugin>.<key>"
         return extensions[key].validate(val)
     if key == "nmt":
         if isinstance(val, dict):
-            if unknown := set(val) - {"cmd", "node"}:
+            if unknown := set(val) - {"cmd", "node"} - _NOTE:
                 return f"nmt: unknown field(s) {sorted(unknown)}"
             if val.get("cmd") not in _NMT_COMMANDS:
                 return f"nmt: unknown command {val.get('cmd')!r}"
@@ -132,26 +147,26 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return None if val else "ask: needs a text"
         if not isinstance(val, dict):
             return "ask: needs a text"
-        if unknown := set(val) - {"text", "title", "timeout"}:
+        if unknown := set(val) - {"text", "title", "timeout"} - _NOTE:
             return f"ask: unknown field(s) {sorted(unknown)}"
         if "timeout" in val and not isinstance(val["timeout"], (int, float)):
             return "ask: timeout must be a duration in seconds"
         return None if val.get("text") else "ask: needs a text"
     if key in _ARITH:
-        if not isinstance(val, dict) or set(val) != {"to", "value"}:
+        if not isinstance(val, dict) or set(val) - _NOTE != {"to", "value"}:
             return f"{key}: needs {{to, value}}"
         if val["to"] not in REGISTERS:
             return f"{key}: to must be a register R0–R15, got {val['to']!r}"
         return None if _is_value(val["value"]) else f"{key}: invalid value {val['value']!r}"
     if key in _COND_JUMPS:
-        if not isinstance(val, dict) or set(val) != {"a", "b", "to"}:
+        if not isinstance(val, dict) or set(val) - _NOTE != {"a", "b", "to"}:
             return f"{key}: needs {{a, b, to}}"
         for operand in ("a", "b"):
             if not _is_value(val[operand]):
                 return f"{key}: invalid operand {val[operand]!r}"
         return None if isinstance(val["to"], str) and val["to"] else f"{key}: needs a target label"
     if key == "lss_assign":
-        if not isinstance(val, dict) or not {"count"} <= set(val) <= {"count", "into"}:
+        if not isinstance(val, dict) or not {"count"} <= set(val) - _NOTE <= {"count", "into"}:
             return "lss_assign: needs {count, into?}"
         if not _is_value(val["count"]):
             return f"lss_assign: invalid count {val['count']!r}"
@@ -159,7 +174,7 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return f"lss_assign: into must be a register R0–R15, got {val['into']!r}"
         return None
     if key == "can_send":
-        if not isinstance(val, dict) or set(val) != {"cob", "data"}:
+        if not isinstance(val, dict) or set(val) - _NOTE != {"cob", "data"}:
             return "can_send: needs {cob, data}"
         if not _is_value(val["cob"]):
             return f"can_send: invalid cob {val['cob']!r}"
@@ -178,7 +193,7 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if isinstance(val, str) and val:
             return None
         if isinstance(val, dict):
-            unknown = set(val) - {"text", "timeout"}
+            unknown = set(val) - {"text", "timeout"} - _NOTE
             if unknown:
                 return f"manual: unknown field(s) {sorted(unknown)}"
             return None if val.get("text") else "manual: needs a text"
@@ -189,7 +204,7 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if "on_timeout" in val and not (isinstance(val["on_timeout"], str) and val["on_timeout"]):
             return "wait_for: on_timeout needs a target label"
         if "cob" in val:  # frame form (v2)
-            if unknown := set(val) - {"cob", "timeout", "data", "on_timeout", "into"}:
+            if unknown := set(val) - {"cob", "timeout", "data", "on_timeout", "into"} - _NOTE:
                 return f"wait_for: unknown field(s) {sorted(unknown)}"
             if "timeout" not in val:
                 return "wait_for: missing timeout"
@@ -204,7 +219,7 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             if isinstance(data, list) and len(data) != len(cobs):
                 return "wait_for: cob and data lists must be the same length"
             return None
-        if unknown := set(val) - {"heartbeat", "timeout", "node", "on_timeout"}:
+        if unknown := set(val) - {"heartbeat", "timeout", "node", "on_timeout"} - _NOTE:
             return f"wait_for: unknown field(s) {sorted(unknown)}"
         if "timeout" not in val:
             return "wait_for: missing timeout"
@@ -215,7 +230,7 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         required, optional = _STEP_FIELDS[key]
         if not isinstance(val, dict):
             return f"{key}: needs a mapping"
-        if unknown := set(val) - required - optional:
+        if unknown := set(val) - required - optional - _NOTE:
             return f"{key}: unknown field(s) {sorted(unknown)}"
         if missing := required - set(val):
             return f"{key}: missing field(s) {sorted(missing)}"
@@ -347,7 +362,7 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     tc.tools = [str(t) for t in doc.get("tools") or []]
     tc.est = str(doc.get("est") or "")
     tc.dut = doc.get("dut") or "selected"
-    tc.on_fail = str(doc.get("on_fail") or "stop")
+    tc.on_fail = str(doc.get("on_fail") or "continue")
     raw_variants = doc.get("variants") or []
     tc.variants = ([str(v) for v in raw_variants]
                    if isinstance(raw_variants, list) else [])

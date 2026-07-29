@@ -50,15 +50,21 @@ UI → `Bench.act_run_start` → Step-Executor →
    nicht stimmt. SKIP zählt im Report gesondert und löst `stop_on_err`
    nicht aus.
 4. **Je Testfall — Schritte [Ist]:** die `steps` sequenziell ausführen
-   (Semantik der Primitive in `testfall-format.md`). Der erste
-   fehlgeschlagene Erwartungs-Schritt bricht den Testfall mit **FAIL**
-   ab; technische Fehler (Ausnahme, Verbindungsverlust, `manual` ohne
-   Bestätigung) ergeben **ERROR**. Laufen alle Schritte durch: **PASS**.
+   (Semantik der Primitive in `testfall-format.md`). Ein fehlgeschlagener
+   Erwartungs-Schritt macht das Verdikt **FAIL**; der Fall läuft
+   standardmäßig weiter (`on_fail`, Default `continue`), damit seine
+   letzten Schritte den Prüfstand wieder herrichten können und
+   `jump_on_error` dorthin springen kann. Ein explizites `fail:` beendet
+   den Fall immer. Technische Fehler (Ausnahme, Verbindungsverlust,
+   `manual` ohne Bestätigung) ergeben **ERROR** und brechen ab. Laufen
+   alle Schritte ohne Fehlschlag durch: **PASS**.
 5. **Ergebnis [Ist-Format]:** `results[tid]`, Logzeile
    `TEST <tid> passed` / `TEST <tid> FAILED` (Typ `test` bzw. `emcy0`).
 6. **stop_on_err [Ist]:** bei FAIL und ERROR mit gesetzter Option: Lauf
    abbrechen, Log `RUN  aborted — stop on error (after k of N)`, Report
-   über die gelaufenen Fälle.
+   über die gelaufenen Fälle. **Standardmäßig aus**: ein
+   fehlgeschlagener Fall ist ein Ergebnis, kein Grund, über die
+   restlichen nichts mehr zu erfahren.
 7. **Abschluss [Ist]:** `RUN  finished — report created`, Report via
    `_push_report` (`core.py`) mit Score `passed/total` in die
    Report-Historie.
@@ -124,7 +130,7 @@ Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
 
 | Datei | Inhalt |
 |---|---|
-| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, jeder Schritt mit Zeitstempel und Begründung |
+| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt) |
 | `<stamp>__summary.html` | der Lauf: eine Zeile je Testfall, verlinkt auf dessen Datei |
 | `<stamp>__summary.json` | derselbe Lauf als Daten — Grundlage der Übersicht unten |
 | `testReportStyle.css` | einmal geschrieben, von allen Reports verlinkt, **nie überschrieben** |
