@@ -247,14 +247,18 @@ def _step_text(key: str, val) -> str:
         return f"send frame {val['cob']}"
     if key == "lss_assign":
         return f"LSS assign 1..{val['count']}"
-    if key in ("mov", "add", "sub", "and", "or"):
+    if key in tclib._ARITH:
         return f"{key} {val['to']}, {val['value']}"
     if key in ("jump", "label"):
         return f"{key} {val}"
-    if key in ("jump_eq", "jump_ne", "jump_gt", "jump_lt"):
+    if key in tclib._COND_JUMPS:
         return f"{key} {val['a']} {val['b']} → {val['to']}"
-    if key == "fail":
-        return f"fail: {val}"
+    if key == "expect_emcy":
+        return f"expect EMCY {_hexstr(val['code'])}"
+    if key == "emcy_clear":
+        return "clear EMCY list"
+    if key in ("fail", "skip"):
+        return f"{key}: {val}"
     if key == "end":
         return "end"
     return str(val)
@@ -423,6 +427,12 @@ class Bench:
         self.browse: dict | None = None  # directory-picker state while the modal is open
         self.devices: list[dict] = []
         self.emcy_new = 0
+        #: (node, error code) of every EMCY seen since the last emcy_clear —
+        #: what a test case checks against. A device sends an EMCY when it
+        #: is ready, not when a step happens to be waiting, so the check
+        #: reads a record rather than a live window (deque: a run that
+        #: never clears must not grow without bound)
+        self.emcy_seen: deque[tuple[int, int]] = deque(maxlen=200)
         self.obj_vals: dict[str, str] = {}
         self.test_sel: set[str] = set(data.DEFAULT_TEST_SEL)
         self.running = False
@@ -1091,6 +1101,7 @@ class Bench:
         row["val"] = reg
         if not live:
             return
+        self.emcy_seen.append((row["node"], code))
         node = f"node {row['node']:02d}" if row["node"] else "node ?"
         # an error reset clears, it doesn't alarm — log it without the badge
         self.log(f"EMCY {node}  0x{code:04X}  {text}", "emcy" if code else "info")
@@ -2523,7 +2534,7 @@ class Bench:
 
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
                                               builtins, 0, on_step, stop)
-        if status == "fail":
+        if status in ("fail", "skip"):
             return "SKIP", f"precondition: {why}"
         if status == "error":
             return "ERROR", why
@@ -2531,6 +2542,8 @@ class Bench:
                                               len(tc.preconditions), on_step, stop)
         if status == "ok":
             return "PASS", ""
+        if status == "skip":
+            return "SKIP", why
         return ("FAIL" if status == "fail" else "ERROR"), why
 
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
@@ -2583,21 +2596,31 @@ class Bench:
             return "ok", ""
         if key == "jump":
             return "jump", val
-        if key in ("jump_eq", "jump_ne", "jump_gt", "jump_lt"):
+        if key in tclib._COND_JUMPS:
             a = _resolve(val["a"], regs, builtins)
             b = _resolve(val["b"], regs, builtins)
             hit = {"jump_eq": a == b, "jump_ne": a != b,
-                   "jump_gt": a > b, "jump_lt": a < b}[key]
+                   "jump_gt": a > b, "jump_lt": a < b,
+                   "jump_ge": a >= b, "jump_le": a <= b}[key]
             return ("jump", val["to"]) if hit else ("ok", "")
-        if key in ("mov", "add", "sub", "and", "or"):
+        if key in tclib._ARITH:
             v = _resolve(val["value"], regs, builtins)
             cur = regs[val["to"]]
-            out = {"mov": v, "add": cur + v, "sub": cur - v,
-                   "and": cur & v, "or": cur | v}[key]
-            regs[val["to"]] = out & 0xFFFFFFFF
+            if key == "div" and v == 0:
+                return "error", f"div {val['to']} by zero"
+            # a mapping of every result would divide even when the step is
+            # an add — the operands come from the device, so that is a real
+            # crash waiting for a zero
+            ops = {"mov": lambda: v, "add": lambda: cur + v, "sub": lambda: cur - v,
+                   "mul": lambda: cur * v, "div": lambda: cur // v,
+                   "and": lambda: cur & v, "or": lambda: cur | v,
+                   "xor": lambda: cur ^ v}
+            regs[val["to"]] = ops[key]() & 0xFFFFFFFF
             return "ok", ""
         if key == "fail":
             return "fail", val
+        if key == "skip":
+            return "skip", val
         if key == "end":
             return "end", ""
         if key == "log":
@@ -2643,6 +2666,11 @@ class Bench:
                 return "error", "connection lost"
             regs[val.get("into", "R0")] = assigned & 0xFFFFFFFF
             return "ok", ""
+        if key in ("sdo_read", "sdo_write") and "node" in val:
+            # a case may talk to more than the one device it is about — a
+            # second feeder consuming yarn, a gateway. Default stays the
+            # DUT resolved from the file's `dut`.
+            node = _resolve(val["node"], regs, builtins)
         if key == "sdo_write":
             raw = val["value"]
             if isinstance(raw, str) and raw not in regs and not raw.startswith("$"):
@@ -2668,6 +2696,38 @@ class Bench:
             if res.ok:  # the result is always available for further processing
                 regs[val.get("into", "R0")] = (_as_int(res.value) or 0) & 0xFFFFFFFF
             return _judge_read(val, res)
+        if key == "emcy_clear":
+            self.emcy_seen.clear()
+            return "ok", ""
+        if key == "expect_emcy":
+            code = _resolve(val["code"], regs, builtins)
+            mask = _resolve(val["mask"], regs, builtins) if "mask" in val else 0xFFFF
+            want_node = _resolve(val["node"], regs, builtins) if "node" in val else None
+            timeout = float(val.get("timeout", 1.0))
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+
+            def seen() -> bool:
+                return any(c & mask == code & mask and (want_node in (None, n))
+                           for n, c in self.emcy_seen)
+
+            # an EMCY that arrived before this step is a hit too: the device
+            # sends it when it feels like it, and a check that only looks
+            # forward turns a timing difference into a test failure
+            while True:
+                if seen():
+                    return "ok", ""
+                if loop.time() >= deadline:
+                    break
+                if should_stop():
+                    return "error", "aborted"
+                if not self.connected:
+                    return "error", "connection lost"
+                await asyncio.sleep(0.05)
+            where = f"expect_emcy {_hexstr(val['code'])}"
+            if mask != 0xFFFF:
+                where += f" (mask {_hexstr(val['mask'])})"
+            return "fail", f"{where} — none seen within {timeout:g}s"
         if key == "wait_for":
             timeout = float(val["timeout"])
             loop = asyncio.get_running_loop()

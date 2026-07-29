@@ -385,3 +385,151 @@ def test_sdo_write_without_expect_abort_still_fails_on_abort(tc_bench):
     _add_tc(tc_bench, "TC0018_sdo_write_plain_abort.yaml", SDO_WRITE_PLAIN_ABORT_TC)
     run_selected(tc_bench, {"0018"})
     assert tc_bench.results == {"0018": "FAIL"}
+
+
+# -- primitives that exist so foreign test suites can be translated ----------
+# A test bench is not the only tool a device family has ever had. These
+# steps come from what such a suite needs to say — a second device on the
+# bus, an EMCY that arrived a moment ago, "not applicable to this variant"
+# — and each is here because a case could not be expressed without it.
+
+MULTI_NODE_TC = """\
+id: "0010"
+name: "a second device on the bus"
+steps:
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x2040", sub: "0x01", node: 2, into: R5}
+  - jump_ne: {a: R5, b: 0, to: other_answered}
+  - fail: "node 2 answered nothing"
+  - label: other_answered
+"""
+
+SKIP_TC_MID = """\
+id: "0011"
+name: "not applicable to this device"
+steps:
+  - sdo_read: {index: "0x2050", sub: "0x00", into: R0}
+  - jump_eq: {a: R0, b: "0x99", to: applicable}
+  - skip: "variant not covered by this case"
+  - label: applicable
+  - fail: "should not get here"
+"""
+
+MATH_TC = """\
+id: "0012"
+name: "the arithmetic a translated case needs"
+steps:
+  - mov: {to: R0, value: 5}
+  - mul: {to: R0, value: "0x100"}
+  - add: {to: R0, value: 3}
+  - xor: {to: R0, value: 1}
+  - div: {to: R0, value: 2}
+  - jump_ge: {a: R0, b: "0x281", to: big_enough}
+  - fail: "arithmetic went wrong"
+  - label: big_enough
+  - jump_le: {a: R0, b: "0x281", to: exact}
+  - fail: "arithmetic went wrong the other way"
+  - label: exact
+"""
+
+DIV0_TC = """\
+id: "0013"
+name: "division by a value the device supplied"
+steps:
+  - mov: {to: R1, value: 0}
+  - div: {to: R0, value: R1}
+"""
+
+
+def test_a_step_can_target_another_node(tc_bench):
+    """The case is about one DUT, but the bus has more devices on it — a
+    second feeder consuming yarn, a gateway. Without a per-step node such a
+    case cannot be written down at all."""
+    _add_tc(tc_bench, "TC0010_multi.yaml", MULTI_NODE_TC)
+    run_selected(tc_bench, {"0010"})
+    assert tc_bench.results == {"0010": "PASS"}
+
+
+def test_skip_ends_the_case_as_skipped_not_failed(tc_bench):
+    """"Does not apply here" is not a failure. A case that says so must not
+    turn a full test run red."""
+    _add_tc(tc_bench, "TC0011_skip.yaml", SKIP_TC_MID)
+    run_selected(tc_bench, {"0011"})
+    assert tc_bench.results == {"0011": "SKIP"}
+
+
+def test_the_full_arithmetic_set(tc_bench):
+    _add_tc(tc_bench, "TC0012_math.yaml", MATH_TC)
+    run_selected(tc_bench, {"0012"})
+    assert tc_bench.results == {"0012": "PASS"}
+
+
+def test_division_by_zero_is_an_error_not_a_crash(tc_bench):
+    """The divisor can come from a register the device filled, so this is a
+    run-time outcome, not a broken file — ERROR, with the register named."""
+    _add_tc(tc_bench, "TC0013_div0.yaml", DIV0_TC)
+    run_selected(tc_bench, {"0013"})
+    assert tc_bench.results == {"0013": "ERROR"}
+
+
+# -- EMCY -------------------------------------------------------------------
+
+EMCY_TC = """\
+id: "0014"
+name: "an emergency arrived"
+steps:
+  - expect_emcy: {code: "0x7100", timeout: 0.2}
+"""
+
+EMCY_MASK_TC = """\
+id: "0015"
+name: "only the manufacturer part is known"
+steps:
+  - expect_emcy: {code: "0x0071", mask: "0x00FF", timeout: 0.2}
+"""
+
+EMCY_CLEAR_TC = """\
+id: "0016"
+name: "cleared, so it must not count any more"
+steps:
+  - emcy_clear:
+  - expect_emcy: {code: "0x7100", timeout: 0.2}
+"""
+
+
+def _emcy(bench: Bench, node: int = 1, code: int = 0x7100) -> None:
+    """Feed one EMCY frame through the same path the bus takes."""
+    row = {"cls": "EMCY", "node": node, "data": f"{code & 0xFF:02X} {code >> 8:02X} 00",
+           "obj": "", "val": ""}
+    bench._annotate_emcy(row)
+
+
+def test_an_emcy_that_already_arrived_counts(tc_bench):
+    """The device sends when it is ready, not when a step happens to be
+    waiting. A check that only looks forward turns timing into a failure."""
+    _emcy(tc_bench)
+    _add_tc(tc_bench, "TC0014_emcy.yaml", EMCY_TC)
+    run_selected(tc_bench, {"0014"})
+    assert tc_bench.results == {"0014": "PASS"}
+
+
+def test_no_emcy_fails_after_the_timeout(tc_bench):
+    _add_tc(tc_bench, "TC0014_emcy.yaml", EMCY_TC)
+    run_selected(tc_bench, {"0014"})
+    assert tc_bench.results == {"0014": "FAIL"}
+
+
+def test_a_mask_matches_the_manufacturer_part_only(tc_bench):
+    """Which class byte a device puts in front of its own error number is
+    not always documented — the mask is how a case says "this part I know"."""
+    _emcy(tc_bench, code=0x7100 | 0x71)
+    _add_tc(tc_bench, "TC0015_emcy_mask.yaml", EMCY_MASK_TC)
+    run_selected(tc_bench, {"0015"})
+    assert tc_bench.results == {"0015": "PASS"}
+
+
+def test_emcy_clear_forgets_what_came_before(tc_bench):
+    _emcy(tc_bench)
+    _add_tc(tc_bench, "TC0016_emcy_clear.yaml", EMCY_CLEAR_TC)
+    run_selected(tc_bench, {"0016"})
+    assert tc_bench.results == {"0016": "FAIL"}

@@ -15,21 +15,26 @@ import yaml
 MANUAL_TIMEOUT_S = 120.0  # default confirmation window for `manual` steps
 MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
 
-REGISTERS = {f"R{i}" for i in range(10)}  # the 10 predefined variables (v2)
+REGISTERS = {f"R{i}" for i in range(16)}  # the predefined variables (v2)
 _BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send data
 #: $eObjIdx_Foo / $acme:eObjIdx_Foo — a symbol from the device's
 #: own headers (canopen_bench/symbols.py), substituted before validation
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
-_HEAD_KEYS = {"id", "name", "tools", "est", "dut", "preconditions", "steps"}
+_HEAD_KEYS = {"id", "name", "desc", "grade", "tools", "est", "dut",
+              "preconditions", "steps"}
+#: how much of the case runs without a person at the bench — catalog and
+#: report show it; "" when the file does not say
+_GRADES = {"automated", "semi", "manual", "production"}
 _NMT_COMMANDS = {"start", "preop", "stop", "reset", "resetcomm"}
 _HB_STATES = {"boot", "stopped", "operational", "pre-operational"}
-_ARITH = {"mov", "add", "sub", "and", "or"}
-_COND_JUMPS = {"jump_eq", "jump_ne", "jump_gt", "jump_lt"}
+_ARITH = {"mov", "add", "sub", "mul", "div", "and", "or", "xor"}
+_COND_JUMPS = {"jump_eq", "jump_ne", "jump_gt", "jump_lt", "jump_ge", "jump_le"}
 # mapping-valued primitives: required fields, optional fields
 _STEP_FIELDS = {
-    "sdo_read": ({"index", "sub"}, {"expect", "expect_abort", "mask", "into"}),
-    "sdo_write": ({"index", "sub", "value"}, {"size", "expect_abort"}),
+    "sdo_read": ({"index", "sub"}, {"expect", "expect_abort", "mask", "into", "node"}),
+    "sdo_write": ({"index", "sub", "value"}, {"size", "expect_abort", "node"}),
+    "expect_emcy": ({"code"}, {"mask", "node", "timeout"}),
 }
 
 
@@ -54,6 +59,8 @@ def _is_value(v: object) -> bool:
 class TestCase:
     id: str = ""
     name: str = ""
+    desc: str = ""
+    grade: str = ""
     tools: list[str] = field(default_factory=list)
     est: str = ""
     dut: object = "selected"  # "selected" | {"code": "<DUT code>"}
@@ -85,17 +92,19 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             else "wait: needs a duration in seconds"
     if key == "log":
         return None if isinstance(val, str) and val else "log: needs a text"
-    if key == "fail":
-        return None if isinstance(val, str) and val else "fail: needs a reason text"
+    if key in ("fail", "skip"):
+        return None if isinstance(val, str) and val else f"{key}: needs a reason text"
     if key == "end":
         return None  # value is ignored ("- end:")
+    if key == "emcy_clear":
+        return None  # value is ignored ("- emcy_clear:")
     if key == "label" or key == "jump":
         return None if isinstance(val, str) and val else f"{key}: needs a name"
     if key in _ARITH:
         if not isinstance(val, dict) or set(val) != {"to", "value"}:
             return f"{key}: needs {{to, value}}"
         if val["to"] not in REGISTERS:
-            return f"{key}: to must be a register R0–R9, got {val['to']!r}"
+            return f"{key}: to must be a register R0–R15, got {val['to']!r}"
         return None if _is_value(val["value"]) else f"{key}: invalid value {val['value']!r}"
     if key in _COND_JUMPS:
         if not isinstance(val, dict) or set(val) != {"a", "b", "to"}:
@@ -110,7 +119,7 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if not _is_value(val["count"]):
             return f"lss_assign: invalid count {val['count']!r}"
         if "into" in val and val["into"] not in REGISTERS:
-            return f"lss_assign: into must be a register R0–R9, got {val['into']!r}"
+            return f"lss_assign: into must be a register R0–R15, got {val['into']!r}"
         return None
     if key == "can_send":
         if not isinstance(val, dict) or set(val) != {"cob", "data"}:
@@ -177,12 +186,20 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             if "mask" in val and "expect" not in val:
                 return "sdo_read: mask requires expect"
             if "into" in val and val["into"] not in REGISTERS:
-                return f"sdo_read: into must be a register R0–R9, got {val['into']!r}"
+                return f"sdo_read: into must be a register R0–R15, got {val['into']!r}"
         if key == "sdo_write":
             if not _is_value(val["value"]):
                 return f"sdo_write: invalid value {val['value']!r}"
             if "size" in val and val["size"] not in (1, 2, 4):
                 return "sdo_write: size must be 1, 2 or 4"
+        if key == "expect_emcy":
+            for name in ("code", "mask", "node"):
+                if name in val and not _is_value(val[name]):
+                    return f"expect_emcy: invalid {name} {val[name]!r}"
+            if "timeout" in val and not isinstance(val["timeout"], (int, float)):
+                return "expect_emcy: timeout must be a duration in seconds"
+        if "node" in val and not _is_value(val["node"]):
+            return f"{key}: invalid node {val['node']!r}"
         return None
     return f"unknown step primitive {key!r}"
 
@@ -261,6 +278,8 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
 
     tc.id = str(doc.get("id") or "")
     tc.name = str(doc.get("name") or "")
+    tc.desc = str(doc.get("desc") or "")
+    tc.grade = str(doc.get("grade") or "")
     tc.tools = [str(t) for t in doc.get("tools") or []]
     tc.est = str(doc.get("est") or "")
     tc.dut = doc.get("dut") or "selected"
@@ -278,6 +297,8 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
         problems.append(f'id "{tc.id}" does not match filename prefix TC{tc.id}_')
     if not (tc.dut == "selected" or (isinstance(tc.dut, dict) and set(tc.dut) == {"code"})):
         problems.append('dut must be "selected" or {code: ...}')
+    if tc.grade and tc.grade not in _GRADES:
+        problems.append(f'grade must be one of {sorted(_GRADES)}, got "{tc.grade}"')
     for group_name, group in (("preconditions", tc.preconditions), ("steps", tc.steps)):
         if not isinstance(group, list):
             problems.append(f"{group_name} must be a list")

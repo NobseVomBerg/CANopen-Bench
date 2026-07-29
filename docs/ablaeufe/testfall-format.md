@@ -24,6 +24,8 @@ Ausführungssemantik (Verdikte, Executor, Abbruch): siehe
 ```yaml
 id: "4602"                  # Pflicht; Katalog-ID, eindeutig im Ordner
 name: "Aux power off handling, under-voltage"   # Pflicht; Anzeige
+desc: "Prüft, dass ..."     # optional; ein Satz für den Report-Kopf
+grade: automated            # optional; automated | semi | manual | production
 tools: [PSU]                # optional; benötigte Zusatzgeräte, [] = keine
 est: "8.4 s"                # optional; erwartete Dauer, nur Anzeige
 dut: selected               # optional; Zielgerät der Bus-Schritte:
@@ -32,12 +34,16 @@ preconditions: []           # optional; Schritte; Fehlschlag → SKIP
 steps: []                   # Pflicht; die eigentliche Sequenz
 ```
 
-Die Node-ID steht **nie** in der Datei — sie wird zur Laufzeit über die
-`dut`-Angabe aufgelöst (Builtin `$node`).
+Die Node-ID des Prüflings steht **nie** in der Datei — sie wird zur
+Laufzeit über die `dut`-Angabe aufgelöst (Builtin `$node`). Ein einzelner
+Bus-Schritt darf per `node:` ein anderes Gerät ansprechen: ein Fall
+handelt von einem Prüfling, aber am Bus hängt manchmal mehr — ein zweites
+Gerät, das Material verbraucht, ein Gateway. Ohne diese Angabe ließe sich
+so ein Fall gar nicht aufschreiben.
 
 ## Register und Werte (v2)
 
-- **10 vordefinierte Register `R0`…`R9`**, je Lauf mit 0 initialisiert;
+- **16 vordefinierte Register `R0`…`R15`**, je Lauf mit 0 initialisiert;
   Inhalt: ganze Zahlen, Arithmetik mit 32-bit-Wrap (unsigned).
 - **Wert-Angaben** — überall, wo ein Wert erwartet wird (`value`,
   `expect`, `mask`, `cob`, `data`-Bytes, Vergleichsoperanden `a`/`b`,
@@ -76,25 +82,28 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | Primitive | Form | Semantik | Verdikt-Wirkung |
 |---|---|---|---|
 | `nmt` | `nmt: start` oder `nmt: {cmd, node: all\|<wert>}` | NMT-Kommando; Kurzform zielt auf das DUT, `node: all` = Broadcast | Fehler nur ohne Verbindung → ERROR |
-| `sdo_read` | `{index, sub, into?, expect?, expect_abort?, mask?}` | SDO-Upload; **Ergebnis landet immer im Register `into` (Default `R0`)** — numerisch als int, nicht-numerische Antworten (Strings) als 0 | Abort/Timeout ohne `expect_abort` → FAIL; `expect` verfehlt → FAIL |
-| `sdo_write` | `{index, sub, value, size?, expect_abort?}` | SDO-Download; `value` darf Register/Builtin sein — dann bestimmt `size` (1/2/4 Bytes, Default 4) die Breite; literale Hex-Strings behalten ihre eigene Breite | Abort/Timeout ohne `expect_abort` → FAIL; mit `expect_abort` (wie bei `sdo_read`) muss **genau dieser** Abort-Code kommen — ein erfolgreicher Write oder ein anderer Code → FAIL |
+| `sdo_read` | `{index, sub, into?, expect?, expect_abort?, mask?, node?}` | SDO-Upload; **Ergebnis landet immer im Register `into` (Default `R0`)** — numerisch als int, nicht-numerische Antworten (Strings) als 0 | Abort/Timeout ohne `expect_abort` → FAIL; `expect` verfehlt → FAIL |
+| `sdo_write` | `{index, sub, value, size?, expect_abort?, node?}` | SDO-Download; `value` darf Register/Builtin sein — dann bestimmt `size` (1/2/4 Bytes, Default 4) die Breite; literale Hex-Strings behalten ihre eigene Breite | Abort/Timeout ohne `expect_abort` → FAIL; mit `expect_abort` (wie bei `sdo_read`) muss **genau dieser** Abort-Code kommen — ein erfolgreicher Write oder ein anderer Code → FAIL |
 | `wait` | `wait: 1.5` | Sekunden warten | — |
 | `wait_for` | `{heartbeat: <zustand>, timeout, node?, on_timeout?}` **oder** `{cob: <wert> \| [<wert>, …], timeout, data?: "00" \| [...], into?: Rn, on_timeout?}` | auf Heartbeat-Zustand warten oder (v2) auf einen Frame mit dieser COB-ID, optional mit Datenpräfix. `cob`/`data` als **Liste** racen mehrere (COB, Präfix)-Paare **gleichzeitig in einem Wait** (nicht nacheinander) — mit `into: Rn` landet der Index des zuerst getroffenen Paars in diesem Register (ohne `into` wird kein Register beschrieben); damit lässt sich ein Nebensignal (z. B. Addr-End) nicht mehr verpassen, während auf das Hauptsignal gewartet wird — kein blindes Zeitfenster zwischen zwei getrennten Polls mehr nötig. Mit `on_timeout: <label>` wird bei Timeout dorthin **gesprungen** statt FAIL | Timeout → FAIL (ohne `on_timeout`) |
 | `can_send` | `{cob: <wert>, data: [<byte-werte>] \| $session}` | (v2) rohen CAN-Frame senden; Listeneinträge liefern je 1 Byte (Register: Low-Byte); `$session` als Eintrag expandiert zu seinen Bytes. Ohne installierten Addressing-Provider (Vendor-Plugin) gibt es keine Session-Identität — ein Schritt mit `$session` schlägt dann fehl | Fehler ohne Verbindung → ERROR; `$session` ohne Provider → FAIL |
 | `lss_assign` | `{count: <wert>, into?: Rn}` | (v2) Standard-Adressierung nach CiA 305: unkonfigurierte Slaves (Node-ID 0xFF) einzeln per LSS-Fastscan identifizieren und auf die Node-IDs 1..count konfigurieren/speichern; genau ein bereits konfiguriertes Gerät wird per globalem State-Switching umadressiert. Die Anzahl tatsächlich zugewiesener Nodes landet in `into` (Default `R0`) — auf echter LSS-Hardware bislang **ungetestet** (A-03) | Fehler nur ohne Verbindung → ERROR; Unterzahl per `jump_lt`/`fail` im Ablauf behandeln |
 | `manual` | `manual: "Text"` bzw. `{text, timeout?}` | Bedieneranweisung, wartet auf Bestätigung (Default 120 s) | Abbruch/Timeout → ERROR |
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
+| `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
+| `expect_emcy` | `{code, mask?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. `mask` vergleicht nur einen Teil des Codes, für Geräte, deren Klassenbyte nicht dokumentiert ist | keine passende EMCY → FAIL |
 
 ### Variablen, Arithmetik, Sprünge (v2)
 
 | Primitive | Form | Semantik |
 |---|---|---|
 | `mov` | `{to: Rn, value: <wert>}` | Rn := value |
-| `add` / `sub` / `and` / `or` | `{to: Rn, value: <wert>}` | Rn := Rn OP value (32-bit-Wrap) |
+| `add` / `sub` / `mul` / `div` / `and` / `or` / `xor` | `{to: Rn, value: <wert>}` | Rn := Rn OP value (32-bit-Wrap); `div` ist ganzzahlig, Division durch 0 → ERROR |
 | `label` | `label: <name>` | Sprungmarke (eindeutig je Schrittliste) |
 | `jump` | `jump: <name>` | unbedingter Sprung |
-| `jump_eq` / `jump_ne` / `jump_gt` / `jump_lt` | `{a: <wert>, b: <wert>, to: <name>}` | Sprung, wenn a == / ≠ / > / < b |
+| `jump_eq` / `jump_ne` / `jump_gt` / `jump_lt` / `jump_ge` / `jump_le` | `{a: <wert>, b: <wert>, to: <name>}` | Sprung, wenn a == / ≠ / > / < / ≥ / ≤ b |
 | `fail` | `fail: "Text"` | Fall sofort mit **FAIL** beenden (typisches Sprungziel) |
+| `skip` | `skip: "Text"` | Fall sofort mit **SKIP** beenden — „gilt hier nicht", etwa für eine Gerätevariante, die der Fall nicht abdeckt. Kein Fehler, färbt einen Lauf nicht rot |
 | `end` | `end:` | Fall sofort mit **PASS** beenden |
 
 Sprungziele müssen in **derselben** Schrittliste liegen (`preconditions`
