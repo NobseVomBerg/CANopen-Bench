@@ -135,7 +135,7 @@ function PsuBox({ psu }) {
           <span style="font:11px ${MONO};color:var(--tx)">${c.mcurr ?? '—'} A</span>
         </div>`)}
       <span style="font-size:10.5px;color:var(--faint)">measured at the terminals</span>
-    </div>
+    </div>`}
   </div>`;
 }
 
