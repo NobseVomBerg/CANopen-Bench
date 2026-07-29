@@ -196,6 +196,79 @@ def _as_int(value) -> int | None:
         return None
 
 
+def _hexstr_width(value: object) -> int:
+    """Byte width of a "0x001E"-style answer, or 0 when it is not one.
+
+    The device already told us how wide the object is by how many digits
+    it sent back; that is a better default than a constant."""
+    text = str(value).strip()
+    if not text.lower().startswith("0x"):
+        return 0
+    digits = len(text) - 2
+    return (digits + 1) // 2 if digits else 0
+
+
+def _variant_matches(declared: list[str], actual: str) -> bool:
+    """Does the device's variant satisfy the ones the case names?
+
+    Compared as numbers wherever both sides are numbers, because they
+    reach here written differently: a case says ``820``, and the device's
+    answer is whatever the SDO read produced — a hex string like
+    ``"0x0334"``. Plain string equality meant every case naming a variant
+    skipped against real hardware while passing any test that happened to
+    spell the value byte for byte.
+
+    A variant that is not a number — an EDS row can map the raw answer to
+    a label — falls back to comparing text, case-insensitively.
+    """
+    got = _typed_number(actual)
+    for want in declared:
+        number = _typed_number(want)
+        if number is not None and got is not None:
+            if number == got:
+                return True
+        elif str(want).strip().lower() == str(actual).strip().lower():
+            return True
+    return False
+
+
+def _open_in_editor(path: Path) -> None:
+    """Hand a file to whatever the machine opens it with.
+
+    Three platforms, three commands, none of them a shell: the path is
+    passed as an argument, so a file name with a space or a quote in it
+    is a file name and not a second command.
+    """
+    import subprocess
+    if sys.platform == "win32":
+        import os
+        os.startfile(str(path))          # noqa: S606 — the platform's own opener
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)  # never share this server's stdin
+
+
+def _typed_number(text: str) -> int | None:
+    """A number the way a person types it: hex only when it says ``0x``.
+
+    Everywhere a *file* supplies a value, a bare string is hex — it was
+    written against a datasheet and the format says so. Everywhere a
+    person types one, it is not: "30" is thirty. Guessing hex from the
+    digits means somebody watching a meter types 30 and the device gets
+    forty-eight, and nothing on screen admits it.
+
+    So the rule for typed input is one rule, in one place, and it is the
+    explicit one: write 0x or it is decimal.
+    """
+    text = str(text).strip()
+    try:
+        return int(text, 16) if text.lower().startswith(("0x", "-0x")) else int(text, 10)
+    except ValueError:
+        return None
+
+
 def _judge_read(spec: dict, res: SdoResult) -> tuple[str, str]:
     """Verdict for an sdo_read step: values compare numerically (with
     optional mask) so "0x2A" matches "0x0000002A"; non-hex values (strings
@@ -245,8 +318,15 @@ def _with_registers(spec: dict, regs: dict) -> dict:
 
 def _step_text(key: str, val) -> str:
     """Human-readable step line for the run progress ("step 3/9 <text>")."""
-    if key == "manual":
+    if key in ("manual", "ask"):
         return val if isinstance(val, str) else str(val.get("text", ""))
+    if key == "adjust":
+        where = f"{_hexstr(val['index'])}:{_hexstr(val['sub'])}"
+        return f"adjust {where}" + (f" — {val['text']}" if val.get("text") else "")
+    if key == "rand":
+        return f"rand {val['to']} in {val.get('min', 0)}..{val.get('max', '2^32-1')}"
+    if key == "jump_on_error":
+        return f"jump to {val} if the case already failed"
     if key == "nmt":
         if isinstance(val, dict):
             return f"NMT {val['cmd']}" + (" (all)" if val.get("node") == "all" else "")
@@ -507,7 +587,8 @@ class Bench:
         self.run_prog: dict | None = None       # {tid, step, of, text} while executing
         self.manual_prompt: dict | None = None  # {tid, text} while waiting for the operator
         self._manual_event: asyncio.Event | None = None
-        self._manual_result = False
+        self._manual_result = "cancel"   # "ok" | "no" | "cancel" | "abort"
+        self._manual_value = ""          # what an `adjust` prompt was given
         self._run_stop_requested = False
         self._run_mode = "sim"  # "exec" once a run uses real test-case files
         self.stop_on_err = True
@@ -1502,6 +1583,38 @@ class Bench:
     def act_tc_rescan(self, p: dict) -> None:
         self._load_testcases()
 
+    def act_tc_open(self, p: dict) -> None:
+        """Open a test case in whatever the machine opens .yaml with.
+
+        The bench does not edit test cases — they are files, and people
+        already have an editor they like. This only hands one to the
+        system, which is also why it is the *server's* system: the browser
+        cannot, and this tool runs on the bench it is looking at.
+
+        Only files inside the configured TestCases folder are opened, and
+        only ones the catalog knows. A path arriving from the outside is
+        not a path this resolves.
+        """
+        tc = self.testcases.get(str(p.get("id") or ""))
+        if tc is None or not tc.file:
+            self.log("CFG  open — no such test case", "emcy0")
+            return
+        folder = Path(self.paths.get("tc") or "").resolve()
+        try:
+            target = (folder / tc.file).resolve()
+            target.relative_to(folder)          # no escaping the folder
+            if not target.is_file():
+                raise FileNotFoundError(target)
+        except (OSError, ValueError) as exc:
+            self.log(f"CFG  open {tc.file} — {exc}", "emcy0")
+            return
+        try:
+            _open_in_editor(target)
+        except OSError as exc:
+            self.log(f"CFG  open {tc.file} — {exc}", "emcy0")
+            return
+        self.log(f"CFG  opening {tc.file} in the system editor")
+
     # -- workspaces --------------------------------------------------------
     _WS_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,49}$")
     _RESERVED_WORKSPACE_NAMES = {"plugins"}  # plugin_dir lives beside the workspaces
@@ -2251,16 +2364,21 @@ class Bench:
 
     @staticmethod
     def _pad_hex(value: str, width_bytes: int) -> str:
-        """Normalize a numeric value to the object's byte width, so the SDO
+        """Normalize a typed value to the object's byte width, so the SDO
         download carries the length the EDS declares ("0x42" as U16 ->
         "0x0042" -> 2 bytes on the wire; the bus layer sizes the transfer
         from the digit count). Longer values are never truncated — the
-        device's abort is more honest than silently dropped bytes."""
-        v = str(value).strip()
-        try:
-            num = int(v, 16)
-        except (TypeError, ValueError):
-            return value
+        device's abort is more honest than silently dropped bytes.
+
+        The value is read the way a person writes one: hex only with an
+        explicit ``0x`` (see ``_typed_number``). This box used to read
+        everything as hex, so typing 30 wrote forty-eight — and a field
+        that quietly means something else than it says is worse on a bench
+        than one that refuses.
+        """
+        num = _typed_number(value)
+        if num is None:
+            return value              # a string value (device name) — untouched
         if num < 0 or width_bytes <= 0:
             return value
         digits = max(width_bytes * 2, (num.bit_length() + 3) // 4)
@@ -2717,14 +2835,42 @@ class Bench:
             self.running = False
             self.log("RUN  stopped by user")
 
+    async def _prompt(self, prompt: dict, timeout: float) -> str | None:
+        """Put a question on the screen and wait for the person at the bench.
+
+        Returns their answer ("ok" | "no" | "cancel"), or None on timeout.
+        One waiting mechanism for all three prompt kinds — a second one
+        would be a second way to leave the run stuck with no dialog.
+        """
+        self.manual_prompt = prompt
+        self._manual_event = asyncio.Event()
+        self._manual_result, self._manual_value = "cancel", ""
+        self._changed()
+        try:
+            await asyncio.wait_for(self._manual_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self.manual_prompt = None
+            self._manual_event = None
+            self._changed()
+        return self._manual_result
+
     def act_manual_confirm(self, p: dict) -> None:
-        if self.manual_prompt and self._manual_event is not None:
-            self._manual_result = True
-            self._manual_event.set()
+        self._answer("ok", p)
 
     def act_manual_abort(self, p: dict) -> None:
+        self._answer("abort", p)
+
+    def act_manual_answer(self, p: dict) -> None:
+        """The three-way answer to `ask`, and the value typed into `adjust`."""
+        choice = str(p.get("choice") or "cancel")
+        self._answer(choice if choice in ("ok", "no", "cancel") else "cancel", p)
+
+    def _answer(self, choice: str, p: dict) -> None:
         if self.manual_prompt and self._manual_event is not None:
-            self._manual_result = False
+            self._manual_result = choice
+            self._manual_value = str(p.get("value", ""))
             self._manual_event.set()
 
     # -- step executor (real test-case files, see docs/ablaeufe/A-04) --------
@@ -2796,10 +2942,20 @@ class Bench:
         if dev is not None:
             rec.device, rec.variant = dev.get("name", ""), dev.get("variant", "")
             rec.sn, rec.node = dev.get("sn", ""), node
+        # a case that says which variants it is for, against a device that
+        # says which one it is: only a real mismatch skips. An unknown
+        # variant runs the case — refusing to run because the bench could
+        # not read a number is how coverage disappears without a trace
+        if tc.variants and rec.variant and not _variant_matches(tc.variants, rec.variant):
+            rec.seconds = time.time() - started
+            rec.verdict = "SKIP"
+            rec.reason = f"for variant {', '.join(tc.variants)}, this is {rec.variant}"
+            return rec.verdict, rec.reason
         regs = {name: 0 for name in tclib.REGISTERS}
         sess = self.mc.get("session") or ""  # "" until an addressing run distributed one
         builtins = {"node": node, "expected": int(self.mc.get("expected") or 0),
-                    "session": _session_bytes(sess) if sess else None}
+                    "session": _session_bytes(sess) if sess else None,
+                    "failed": ""}   # set by a failure the case chose to survive
         total = len(tc.preconditions) + len(tc.steps)
 
         def on_step(idx: int, text: str) -> None:
@@ -2820,9 +2976,11 @@ class Bench:
             return done("SKIP", f"precondition: {why}")
         if status == "error":
             return done("ERROR", why)
+        # only the body may carry on after a failure — a precondition that
+        # fails means the case does not apply, and there is nothing to undo
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
                                               len(tc.preconditions), on_step, stop,
-                                              rec.steps)
+                                              rec.steps, allow_continue=True)
         if status == "ok":
             return done("PASS")
         if status == "skip":
@@ -2831,7 +2989,8 @@ class Bench:
 
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
                            regs: dict, builtins: dict, base: int,
-                           on_step, should_stop, record: list | None = None) -> tuple[str, str]:
+                           on_step, should_stop, record: list | None = None,
+                           allow_continue: bool = False) -> tuple[str, str]:
         """Program-counter loop over one step list (format v2: labels, jumps,
         registers). Returns ("ok" | "fail" | "error", reason)."""
         labels = {step["label"]: i for i, step in enumerate(steps)
@@ -2864,11 +3023,26 @@ class Bench:
                 pc = labels[info]
                 continue
             if status == "end":
-                return "ok", ""
+                break
+            if (status == "fail" and allow_continue and tc.on_fail == "continue"
+                    and key != "fail"):
+                # the case says it wants to reach its own last steps even
+                # when something failed — that is where it puts the bench
+                # back. The failure is remembered, not forgiven: the first
+                # one is the verdict's reason, and jump_on_error can see it.
+                if not builtins.get("failed"):
+                    builtins["failed"] = info or "step failed"
+                pc += 1
+                continue
             if status != "ok":
+                # a case that already failed does not get to end as SKIP
+                # because a later step was cancelled — the device failed,
+                # and that is the verdict the report has to carry
+                if status == "skip" and builtins.get("failed"):
+                    return "fail", builtins["failed"]
                 return status, info
             pc += 1
-        return "ok", ""
+        return ("fail", builtins["failed"]) if builtins.get("failed") else ("ok", "")
 
     def _resolve_dut(self, tc: tclib.TestCase) -> int | None:
         if isinstance(tc.dut, dict):
@@ -2889,6 +3063,17 @@ class Bench:
             return "ok", ""
         if key == "jump":
             return "jump", val
+        if key == "jump_on_error":
+            # only ever true in a case with on_fail: continue — anywhere
+            # else the run would already have ended at the failure
+            return ("jump", val) if builtins.get("failed") else ("ok", "")
+        if key == "rand":
+            lo = _resolve(val.get("min", 0), regs, builtins)
+            hi = _resolve(val.get("max", 0xFFFFFFFF), regs, builtins)
+            if lo > hi:
+                return "error", f"rand {val['to']}: min {lo} above max {hi}"
+            regs[val["to"]] = random.randint(lo, hi) & 0xFFFFFFFF
+            return "ok", ""
         if key in tclib._COND_JUMPS:
             a = _resolve(val["a"], regs, builtins)
             b = _resolve(val["b"], regs, builtins)
@@ -3102,21 +3287,69 @@ class Bench:
             text = val if isinstance(val, str) else val["text"]
             timeout = tclib.MANUAL_TIMEOUT_S if isinstance(val, str) \
                 else float(val.get("timeout", tclib.MANUAL_TIMEOUT_S))
-            self.manual_prompt = {"tid": tc.id, "text": text}
-            self._manual_event = asyncio.Event()
-            self._manual_result = False
-            self._changed()
-            try:
-                await asyncio.wait_for(self._manual_event.wait(), timeout)
-            except asyncio.TimeoutError:
+            answer = await self._prompt(
+                {"tid": tc.id, "text": text, "kind": "confirm"}, timeout)
+            if answer is None:
                 return "error", "manual step timed out"
-            finally:
-                self.manual_prompt = None
-                self._manual_event = None
-                self._changed()
+            self._manual_result = answer
             if should_stop():
                 return "error", "aborted"
-            return ("ok", "") if self._manual_result else ("error", "manual step aborted")
+            return ("ok", "") if self._manual_result == "ok" \
+                else ("error", "manual step aborted")
+        if key == "ask":
+            text = val if isinstance(val, str) else val["text"]
+            title = "" if isinstance(val, str) else str(val.get("title", ""))
+            timeout = tclib.MANUAL_TIMEOUT_S if isinstance(val, str) \
+                else float(val.get("timeout", tclib.MANUAL_TIMEOUT_S))
+            answer = await self._prompt({"tid": tc.id, "text": text, "title": title,
+                                         "kind": "ask"}, timeout)
+            if answer is None:
+                return "error", "question timed out"
+            if should_stop():
+                return "error", "aborted"
+            # the operator looked and said no: that is a verdict about the
+            # device, not an aborted run, so it is a FAIL and the question
+            # is the reason — nobody has to guess what was answered
+            if answer == "no":
+                return "fail", text
+            return ("ok", "") if answer == "ok" else ("skip", f"cancelled: {text}")
+        if key == "adjust":
+            index, sub = _hexstr(val["index"]), _hexstr(val["sub"])
+            node_ = _resolve(val["node"], regs, builtins) if "node" in val else node
+            res = await asyncio.to_thread(bus.sdo_read, node_, index, sub)
+            if not res.ok:
+                return "fail", f"adjust {index}:{sub} abort {res.abort}"
+            answer = await self._prompt(
+                {"tid": tc.id, "kind": "adjust", "text": str(val.get("text", "")),
+                 "index": index, "sub": sub, "value": str(res.value)},
+                float(val.get("timeout", tclib.MANUAL_TIMEOUT_S)))
+            if answer is None:
+                return "error", "adjust step timed out"
+            if should_stop():
+                return "error", "aborted"
+            if answer != "ok":
+                return "skip", f"cancelled: {val.get('text') or index}"
+            number = _typed_number(self._manual_value)
+            if number is None:
+                return "error", (f"adjust {index}:{sub}: "
+                                 f"{self._manual_value!r} is not a number")
+            # width travels in the literal, the way the sdo_write step does
+            # it. Default it from the value the device just answered rather
+            # than from 4: this step read the object a moment ago, so its
+            # width is known, and widening a U16 to four bytes is an abort
+            # the operator would have to guess the cause of.
+            size = int(val.get("size", 0)) or _hexstr_width(res.value) or 4
+            if number.bit_length() > size * 8 or number < 0:
+                # truncating what somebody typed while watching a meter
+                # writes a different value than they read back
+                return "error", (f"adjust {index}:{sub}: {number} does not fit "
+                                 f"in {size} byte(s)")
+            wres = await asyncio.to_thread(bus.sdo_write, node_, index, sub,
+                                           f"0x{number:0{size * 2}X}")
+            if not wres.ok:
+                return "fail", f"adjust {index}:{sub} write abort {wres.abort}"
+            regs["R0"] = number
+            return "ok", ""
         return "error", f"unknown step {key!r}"
 
     # -- SWDL ---------------------------------------------------------------------
@@ -3656,10 +3889,18 @@ class Bench:
             "sync": {"run": self.sync_run, "ms": self.sync_ms},
             "tests": {
                 "catalog": ([[tc.id, tc.name, ", ".join(tc.tools) or "—",
-                              tc.est or "—", bool(tc.error)]
+                              tc.est or "—", bool(tc.error), tc.grade, tc.variants,
+                              tc.file, tc.error or ""]
                              for tc in sorted(self.testcases.values(), key=lambda t: t.id)]
                             if self.testcases
-                            else [list(t) for t in data.TESTS] if demo else []),
+                            else [list(t) + ["", [], "", ""] for t in data.TESTS]
+                            if demo else []),
+                #: what the two catalog filters can offer, from what is
+                #: actually in the folder — an empty dropdown is better
+                #: than one listing grades no case has
+                "grades": sorted({tc.grade for tc in self.testcases.values() if tc.grade}),
+                "variants": sorted({v for tc in self.testcases.values()
+                                    for v in tc.variants}),
                 "lastRes": data.LAST_RESULTS if not self.testcases and demo else {},
                 "runProg": self.run_prog,
                 "manual": self.manual_prompt,

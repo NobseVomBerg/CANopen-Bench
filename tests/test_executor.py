@@ -14,6 +14,7 @@ from conftest import connect_and_scan, write_seed_eds_files
 
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
+from canopen_bench.plugin import BenchPlugin
 
 PASS_TC = """\
 id: "0001"
@@ -678,3 +679,217 @@ def test_literal_expect_is_unaffected_by_register_resolution(tc_bench):
     _add_tc(tc_bench, "TC0024_literal_expect.yaml", LITERAL_EXPECT_REGRESSION_TC)
     run_selected(tc_bench, {"0024"})
     assert tc_bench.results == {"0024": "PASS"}
+
+
+# -- `variants:` header enforcement (docs/ablaeufe/testfall-format.md) -------
+# A case can declare which hardware variants it applies to. _exec_case skips
+# it against a device reporting a different one, runs it against a matching
+# one, and — because an unread variant is not a mismatch — still runs it
+# against a device that never reported a variant at all: refusing to run
+# over a number the bench could not read is how coverage disappears without
+# a trace.
+
+class _VariantSeedPlugin(BenchPlugin):
+    """Seeds one EDS row carrying a variant config, so a scan fills the
+    device's variant field — same plugin-seeded-variant approach as
+    tests/test_plugins.py."""
+    name = "variantseed"
+
+    def __init__(self, row: dict):
+        self._row = row
+
+    def seed_eds(self) -> list[dict]:
+        return [self._row]
+
+
+VARIANT_MATCH_TC = """\
+id: "0030"
+name: "runs for its declared variant"
+variants: ["820"]
+steps:
+  - log: "ran"
+"""
+
+VARIANT_MISMATCH_TC = """\
+id: "0031"
+name: "skipped for a variant it does not cover"
+variants: ["920"]
+steps:
+  - fail: "should not run"
+"""
+
+
+@pytest.fixture()
+def variant_bench(tmp_path):
+    """A single DUT whose scanned variant is "820" — the seed EDS's 0x2050
+    object defaults to 0, which reads back as "0x00" and is mapped to "820"
+    here, same as the seeded-variant tests in tests/test_plugins.py."""
+    row = {"file": "variant_dev.eds", "dev": "VARIANT_DEV", "ident": "0x4D2·0x1150",
+           "code": "VAR", "enabled": True,
+           "variant": {"index": "0x2050", "sub": "00", "map": {"0x00": "820"}}}
+    bench = Bench(Db(tmp_path / "v.db"), plugins=[_VariantSeedPlugin(row)])
+    write_seed_eds_files(bench)
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    return bench
+
+
+def test_variants_header_skips_a_device_reporting_a_different_variant(variant_bench):
+    dev = next(d for d in variant_bench.devices if d["node"] == 1)
+    assert dev["variant"] == "820"
+    _add_tc(variant_bench, "TC0031_mismatch.yaml", VARIANT_MISMATCH_TC)
+    run_selected(variant_bench, {"0031"})
+    assert variant_bench.results == {"0031": "SKIP"}
+    assert any("920" in ln["msg"] and "820" in ln["msg"] for ln in variant_bench.logs)
+
+
+def test_variants_header_runs_a_matching_device(variant_bench):
+    _add_tc(variant_bench, "TC0030_match.yaml", VARIANT_MATCH_TC)
+    run_selected(variant_bench, {"0030"})
+    assert variant_bench.results == {"0030": "PASS"}
+
+
+def test_variants_header_still_runs_against_an_unreported_variant(tc_bench):
+    # tc_bench's DUTs never scan a variant (no variant config seeded), so
+    # rec.variant stays "". This must still RUN, not SKIP.
+    dev = next(d for d in tc_bench.devices if d["node"] == 1)
+    assert dev["variant"] == ""
+    _add_tc(tc_bench, "TC0030_match.yaml", VARIANT_MATCH_TC)
+    run_selected(tc_bench, {"0030"})
+    assert tc_bench.results == {"0030": "PASS"}
+
+
+def test_a_variant_matches_however_the_two_sides_spell_the_number(tmp_path):
+    """The device's variant is whatever the SDO read produced — a hex
+    string like "0x00260001". A case names it the way a person writes it,
+    "2490369". Comparing those as text skipped every case that declared a
+    variant against real hardware, while passing any test that happened to
+    spell the value byte for byte.
+    """
+    # no value map: the device already answers a usable number, which is
+    # the shape cob-memiro and anything like it ships
+    row = {"file": "variant_dev.eds", "dev": "VARIANT_DEV", "ident": "0x4D2·0x1150",
+           "code": "VAR", "enabled": True, "variant": {"index": "0x2040", "sub": "01"}}
+    bench = Bench(Db(tmp_path / "v.db"), plugins=[_VariantSeedPlugin(row)])
+    write_seed_eds_files(bench)
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    assert next(d for d in bench.devices if d["node"] == 1)["variant"] == "0x00260001"
+
+    # the same number three ways, then one that really is another variant
+    for tid, declared, expected in (("0040", "2490369", "PASS"),
+                                    ("0041", '"0x260001"', "PASS"),
+                                    ("0042", '"0x00260001"', "PASS"),
+                                    ("0043", "2490370", "SKIP")):
+        _add_tc(bench, f"TC{tid}_v.yaml",
+                f'id: "{tid}"\nname: "v"\nvariants: [{declared}]\n'
+                'steps:\n  - log: "ran"\n')
+        bench.results = {}
+        run_selected(bench, {tid})
+        assert bench.results[tid] == expected, f"variants: [{declared}]"
+
+
+# -- on_fail: continue -------------------------------------------------------
+
+FAIL_STEP_STOPS_UNDER_CONTINUE_TC = """\
+id: "0050"
+name: "an explicit fail: step always stops the case, even under on_fail: continue"
+on_fail: continue
+steps:
+  - fail: "first reason"
+  - log: "should not run"
+"""
+
+
+def test_explicit_fail_step_stops_even_under_on_fail_continue(tc_bench):
+    """on_fail: continue exists so a case that already failed can still
+    reach its own cleanup steps after a *checked* failure (a bad sdo_read).
+    An explicit `fail:` step is the case declaring the run over right there
+    — letting it fall through to `key != "fail"`'s absence meant a `fail:`
+    step became a no-op under on_fail: continue, and the step after it ran
+    anyway."""
+    _add_tc(tc_bench, "TC0050_fail_continue.yaml", FAIL_STEP_STOPS_UNDER_CONTINUE_TC)
+    run_selected(tc_bench, {"0050"})
+    assert tc_bench.results == {"0050": "FAIL"}
+    assert any("first reason" in ln["msg"] for ln in tc_bench.logs)
+    assert not any("should not run" in ln["msg"] for ln in tc_bench.logs)
+
+
+SKIP_AFTER_RECORDED_FAILURE_TC = """\
+id: "0051"
+name: "a skip after a recorded failure does not throw the failure away"
+on_fail: continue
+steps:
+  - sdo_read: {index: "0x2050", sub: "0x00", expect: "0x99"}
+  - skip: "cleanup, not applicable further"
+"""
+
+
+def test_skip_after_a_recorded_failure_still_reports_fail(tc_bench):
+    """Under on_fail: continue, a case that fails an expectation and then
+    hits `skip:` on its way out must still report FAIL with the original
+    failure's reason — reporting SKIP here says the run "did not apply",
+    which is not what happened: the device failed the check."""
+    _add_tc(tc_bench, "TC0051_skip_after_fail.yaml", SKIP_AFTER_RECORDED_FAILURE_TC)
+    run_selected(tc_bench, {"0051"})
+    assert tc_bench.results == {"0051": "FAIL"}
+    assert any("0x2050" in ln["msg"] and "0x99" in ln["msg"] for ln in tc_bench.logs)
+
+
+# -- rand masks its result to 32 bits, like every other register write ------
+
+RAND_MASKS_TO_32_BITS_TC = """\
+id: "0052"
+name: "rand masks its result to 32 bits"
+steps:
+  - rand: {to: R1, min: "0x100000001", max: "0x100000001"}
+  - jump_eq: {a: R1, b: 1, to: ok}
+  - fail: "rand did not mask to 32 bits"
+  - label: ok
+  - end:
+"""
+
+
+def test_rand_masks_its_result_to_32_bits(tc_bench):
+    # min == max forces a deterministic draw: 0x100000001 masked to 32 bits
+    # is 1 — every other register write (mov/add/.../sdo_read into) masks
+    # the same way, so rand leaving its own result unmasked was the odd one
+    # out, and it is where a case's arithmetic afterwards would go wrong.
+    _add_tc(tc_bench, "TC0052_rand_mask.yaml", RAND_MASKS_TO_32_BITS_TC)
+    run_selected(tc_bench, {"0052"})
+    assert tc_bench.results == {"0052": "PASS"}
+
+
+# -- adjust: the operator value is sized from the object just read, and a
+# value that does not fit is a schema-visible ERROR, not a silent truncation
+
+ADJUST_TOO_WIDE_TC = """\
+id: "0053"
+name: "adjust rejects an operator value that does not fit the read object's width"
+steps:
+  - adjust: {index: "0x2050", sub: "0x00"}
+  - fail: "should not be reached"
+"""
+
+
+def test_adjust_value_that_does_not_fit_is_an_error_not_a_truncation(tc_bench):
+    """0x2050 answers "0x00" — a 1-byte object per _hexstr_width. Typing 300
+    (needs 9 bits) must not silently mask down to a different number and
+    write it — the report would then disagree with what the operator saw
+    on the meter. It has to be an ERROR that names the size, and the step
+    after `adjust` must never run."""
+    _add_tc(tc_bench, "TC0053_adjust_too_wide.yaml", ADJUST_TOO_WIDE_TC)
+
+    def answer_adjust(bench):
+        if bench.manual_prompt and bench.manual_prompt.get("kind") == "adjust":
+            bench.dispatch("manual_answer", {"choice": "ok", "value": "300"})
+    run_selected(tc_bench, {"0053"}, during=answer_adjust)
+    assert tc_bench.results == {"0053": "ERROR"}
+    assert any("does not fit" in ln["msg"] and "1 byte" in ln["msg"] for ln in tc_bench.logs)
+    assert not any("should not be reached" in ln["msg"] for ln in tc_bench.logs)

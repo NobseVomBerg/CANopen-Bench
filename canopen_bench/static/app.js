@@ -816,7 +816,7 @@ function ObjectsPage({ s, ui, setUi }) {
             <span style="font:10.5px ${MONO};color:${acc === 'ro' ? 'var(--faint)' : acc === 'wo' ? 'var(--amb)' : 'var(--grn)'}">${acc}</span>
             ${acc !== 'ro' ? html`
               <span style="display:flex;align-items:center;gap:6px;min-width:0;padding-right:10px">
-                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + ' · type a number or a symbol name' + rangeHint}
+                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + ' · a number (hex needs 0x) or a symbol name' + rangeHint}
                   onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
                   style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;flex:none" />
                 ${sym && html`<span title=${valueTitle(key, shown)} style="font-size:10.5px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sym}</span>`}
@@ -897,11 +897,35 @@ function ObjectsPage({ s, ui, setUi }) {
 }
 
 // ------------------------------------------------------------------ tests --
+// A catalog filter, offering only what the folder actually contains — a
+// dropdown listing grades or variants no case has is a filter that can
+// only ever empty the list.
+function FilterChip({ label, value, options, empty, onPick }) {
+  const active = !!value;
+  return html`
+    <span style="display:flex;align-items:center;gap:5px;border:1px solid ${active ? 'var(--acc)' : 'var(--inp)'};background:${active ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:4px 8px;color:${active ? 'var(--acc)' : 'var(--mid)'}">
+      <span style="font-size:12px">${label}:</span>
+      <select value=${value} onChange=${(e) => onPick(e.target.value)}
+        disabled=${!options.length}
+        title=${options.length ? '' : `no case in this folder declares a ${label.toLowerCase()}`}
+        style="background:transparent;color:inherit;border:0;font:600 12px 'IBM Plex Sans';outline:none;cursor:${options.length ? 'pointer' : 'default'}">
+        <option value="">${empty}</option>
+        ${options.map((o) => html`<option value=${o}>${o}</option>`)}
+      </select>
+    </span>`;
+}
+
 function TestsPage({ s, ui, setUi }) {
   const t = s.tests;
   const filter = (ui.testFilter || '').toLowerCase();
+  // "" means no restriction for both dropdowns. A case with no variants
+  // declared runs on every variant, so it stays visible under any choice —
+  // hiding it would suggest it does not apply, which is the opposite.
   const shown = t.catalog
     .filter(([, , tools]) => t.toolFilter || tools === '—')
+    .filter(([, , , , , grade]) => !ui.gradeFilter || grade === ui.gradeFilter)
+    .filter(([, , , , , , variants]) => !ui.variantFilter || !variants.length
+      || variants.includes(ui.variantFilter))
     .filter(([id, name]) => !filter || id.includes(filter) || name.toLowerCase().includes(filter));
   const selIds = shown.map((x) => x[0]).filter((id) => t.sel.includes(id));
   const runningId = t.running ? t.runOrder[t.runIdx] : null;
@@ -916,27 +940,34 @@ function TestsPage({ s, ui, setUi }) {
     }));
   if (t.running && runningId) runLog.push({ line: runningId + ' running…', fg: 'var(--acc)' });
   const anyFail = Object.values(t.results).includes('FAIL');
-  const cols = '34px 64px 1fr 110px 90px 80px';
+  // every column is capped and clipped: a broken file's "id" is its whole
+  // filename, which used to run straight through the next two columns
+  const cols = '34px 72px minmax(160px,1fr) 110px 90px 76px 28px';
+  const cell = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   const repInp = (which, value) => html`
     <${SyncInput} value=${String(value)} onCommit=${(v) => send('set_repeat', { which, n: parseInt(v, 10) || 1 })}
       style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:4px 8px;font:12px ${MONO};text-align:right;outline:none" />`;
 
   return html`
   <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;padding:9px 18px">
-    <span class="hv" style="border:1px solid var(--inp);border-radius:6px;padding:5px 9px;color:var(--mid);cursor:pointer">Device: <b>DUT2_800</b> ▾</span>
-    <span class="hv" style="border:1px solid var(--inp);border-radius:6px;padding:5px 9px;color:var(--mid);cursor:pointer">Category: <b>Automated</b> ▾</span>
+    <${FilterChip} label="Variant" value=${ui.variantFilter || ''} options=${t.variants || []}
+      empty="all" onPick=${(v) => setUi({ ...ui, variantFilter: v })} />
+    <${FilterChip} label="Category" value=${ui.gradeFilter || ''} options=${t.grades || []}
+      empty="all" onPick=${(v) => setUi({ ...ui, gradeFilter: v })} />
     <span onClick=${() => send('tool_filter_toggle')}
       style="border:1px solid ${t.toolFilter ? 'var(--acc)' : 'var(--inp)'};background:${t.toolFilter ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:5px 9px;color:${t.toolFilter ? 'var(--acc)' : 'var(--mid)'};font-weight:600;cursor:pointer">Tool: PSU ${t.toolFilter ? '✓' : '✕'}</span>
-    <span style="flex:1"></span>
-    <span onClick=${() => send('tests_all')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
-    <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
     <input placeholder="⌕ Filter test cases…" value=${ui.testFilter || ''} onInput=${(e) => setUi({ ...ui, testFilter: e.target.value })}
       style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:5px 10px;width:170px;outline:none;font:12px 'IBM Plex Sans'" />
+    <span style="width:10px"></span>
+    <span onClick=${() => send('tests_all')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
+    <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
+    <span style="flex:1"></span>
+    <span style="font:10.5px ${MONO};color:var(--faint)">${shown.length} of ${t.catalog.length}</span>
   </div>
   <div style="flex:1;display:flex;min-height:0">
     <div style="flex:1;min-width:0;display:flex;flex-direction:column">
       <div style="display:grid;grid-template-columns:${cols};padding:7px 0;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel2)">
-        <span></span><span>ID</span><span>Test case</span><span>Tools</span><span>Result</span><span style="text-align:right;padding-right:16px">Ø time</span>
+        <span></span><span>ID</span><span>Test case</span><span>Tools</span><span>Result</span><span style="text-align:right">Ø time</span><span></span>
       </div>
       <div style="flex:1;min-height:0;overflow:auto">
         ${!t.catalog.length && html`
@@ -947,19 +978,27 @@ function TestsPage({ s, ui, setUi }) {
               format spec: <span style="font-family:${MONO}">docs/ablaeufe/testfall-format.md</span> ·
               ready-to-copy examples: <span style="font-family:${MONO}">examples/testcases/</span></div>
           </div>`}
-        ${shown.map(([id, name, tools, time, err]) => {
+        ${shown.map(([id, name, tools, time, err, , , file, errMsg]) => {
           const sel = t.sel.includes(id);
           const res = t.results[id] || t.lastRes[id] || '—';
           const isRun = id === runningId;
           return html`
           <div class=${err ? '' : 'hv'} onClick=${err ? null : () => send('test_toggle', { id })}
-            style="display:grid;grid-template-columns:${cols};align-items:center;padding:6px 0;border-bottom:1px solid var(--bd2);background:${isRun ? 'var(--acc-soft)' : sel ? 'var(--sel)' : 'transparent'};cursor:${err ? 'default' : 'pointer'};opacity:${err ? '.65' : '1'}">
+            style="display:grid;grid-template-columns:${cols};align-items:center;padding:6px 0;border-bottom:1px solid var(--bd2);background:${isRun ? 'var(--acc-soft)' : sel ? 'var(--sel)' : 'transparent'};cursor:${err ? 'default' : 'pointer'};opacity:${err ? '.8' : '1'}">
             <span style="display:grid;place-items:center">${err ? html`<span style="color:var(--red);font-weight:700">!</span>` : Cb(sel)}</span>
-            <span style="font:11.5px ${MONO};color:${err ? 'var(--red)' : 'var(--acc)'}">${id}</span>
-            <span style="color:${err ? 'var(--red)' : 'var(--tx)'}">${err ? name + ' — schema error, see file' : name}</span>
-            <span style="font:10.5px ${MONO};color:var(--faint)">${tools}</span>
-            <span style="font-weight:600;font-size:11px;color:${isRun ? 'var(--acc)' : res === 'PASS' ? 'var(--grn)' : res === 'FAIL' || res === 'ERROR' ? 'var(--red)' : 'var(--faint)'}">${isRun ? 'RUN…' : res}</span>
-            <span style="text-align:right;padding-right:16px;font:11px ${MONO};color:var(--faint)">${time}</span>
+            <span style="${cell};font:11.5px ${MONO};color:${err ? 'var(--red)' : 'var(--acc)'}" title=${id}>${err ? '—' : id}</span>
+            ${err
+              ? html`<span style="min-width:0;color:var(--red)" title=${`${file}\n${errMsg}`}>
+                  <div style="font:11px ${MONO};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${file}</div>
+                  <div style="font-size:11px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${errMsg || 'schema error'}</div>
+                </span>`
+              : html`<span style="${cell};color:var(--tx)" title=${name}>${name}</span>`}
+            <span style="${cell};font:10.5px ${MONO};color:var(--faint)">${err ? '' : tools}</span>
+            <span style="${cell};font-weight:600;font-size:11px;color:${isRun ? 'var(--acc)' : res === 'PASS' ? 'var(--grn)' : res === 'FAIL' || res === 'ERROR' ? 'var(--red)' : 'var(--faint)'}">${err ? '' : isRun ? 'RUN…' : res}</span>
+            <span style="${cell};text-align:right;font:11px ${MONO};color:var(--faint)">${err ? '' : time}</span>
+            <span class="hv-white" title="Open in the system's editor"
+              onClick=${(e) => { e.stopPropagation(); send('tc_open', { id }); }}
+              style="text-align:center;color:var(--faint);cursor:pointer;font-size:12px">✎</span>
           </div>`;
         })}
       </div>
@@ -987,15 +1026,7 @@ function TestsPage({ s, ui, setUi }) {
           style="flex:1;text-align:center;background:${t.running || !selIds.length ? 'var(--faint)' : 'var(--grn)'};color:#fff;font-weight:600;padding:8px 0;border-radius:7px;cursor:pointer">${t.running ? 'Running…' : `▶ Start ${selIds.length} tests`}</span>
         <span class="hv" onClick=${() => send('run_stop')} style="border:1px solid var(--inp);color:${t.running ? 'var(--red)' : 'var(--faint)'};font-weight:600;padding:8px 12px;border-radius:7px;cursor:pointer">■</span>
       </div>
-      ${t.manual && html`
-      <div style="border:1px solid var(--acc-bd);border-radius:8px;padding:10px 12px;background:var(--acc-soft)">
-        <div style="font-size:10.5px;color:var(--acc);font-weight:700;letter-spacing:.05em;margin-bottom:4px">OPERATOR ACTION · TEST ${t.manual.tid}</div>
-        <div style="font-size:12.5px;color:var(--tx);margin-bottom:8px">${t.manual.text}</div>
-        <div style="display:flex;gap:8px">
-          <span class="hv-b" onClick=${() => send('manual_confirm')} style="flex:1;text-align:center;background:var(--grn);color:#fff;font-weight:600;padding:6px 0;border-radius:6px;cursor:pointer">Done ✓</span>
-          <span class="hv" onClick=${() => send('manual_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Abort</span>
-        </div>
-      </div>`}
+      ${t.manual && html`<${OperatorPrompt} p=${t.manual} />`}
       <div style="border:1px solid var(--bd);border-radius:8px;padding:10px 12px;background:var(--panel2)">
         <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mid);margin-bottom:6px">
           <span>${t.running ? 'Running ' + runningId : total ? 'Idle — last run' : 'Idle'}</span>
@@ -1013,6 +1044,46 @@ function TestsPage({ s, ui, setUi }) {
           <span style="display:flex;justify-content:space-between;color:var(--mid)"><span style="color:var(--acc);text-decoration:underline;cursor:pointer">${rp.name}</span><span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
       </div>
       <${OverviewBox} ov=${t.overview} />
+    </div>
+  </div>`;
+}
+
+// The run is stopped, waiting for the person at the bench. Three shapes,
+// one box: confirm ("done / abort"), ask ("yes / no / cancel" — where no
+// is a verdict about the device, not an aborted run) and adjust, which
+// reads an object, lets it be corrected, and writes it back.
+const promptBtn = 'font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer;text-align:center';
+
+function OperatorPrompt({ p }) {
+  const [val, setVal] = useState(p.value ?? '');
+  const kind = p.kind || 'confirm';
+  const key = `${p.tid}:${p.index || ''}:${p.sub || ''}:${p.text || ''}`;
+  useEffect(() => setVal(p.value ?? ''), [key]);
+  return html`
+  <div style="border:1px solid var(--acc-bd);border-radius:8px;padding:10px 12px;background:var(--acc-soft)">
+    <div style="font-size:10.5px;color:var(--acc);font-weight:700;letter-spacing:.05em;margin-bottom:4px">
+      ${kind === 'ask' ? 'QUESTION' : kind === 'adjust' ? 'ADJUST' : 'OPERATOR ACTION'} · TEST ${p.tid}
+    </div>
+    ${p.title && html`<div style="font-size:12.5px;color:var(--tx);font-weight:600">${p.title}</div>`}
+    <div style="font-size:12.5px;color:var(--tx);margin-bottom:8px">${p.text}</div>
+    ${kind === 'adjust' && html`
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font:11px ${MONO};color:var(--dim);flex:none">${p.index}:${p.sub}</span>
+        <input value=${val} onInput=${(e) => setVal(e.target.value)}
+          style="flex:1;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--inp);border-radius:6px;font:12px ${MONO};padding:4px 8px" />
+      </div>
+      <div style="font-size:10.5px;color:var(--faint);margin:3px 0 8px 0">0x… is hex, anything else decimal</div>`}
+    <div style="display:flex;gap:8px">
+      ${kind === 'confirm' && html`
+        <span class="hv-b" onClick=${() => send('manual_confirm')} style="flex:1;${promptBtn};background:var(--grn);color:#fff">Done ✓</span>
+        <span class="hv" onClick=${() => send('manual_abort')} style="${promptBtn};border:1px solid var(--inp);color:var(--red)">Abort</span>`}
+      ${kind === 'ask' && html`
+        <span class="hv-b" onClick=${() => send('manual_answer', { choice: 'ok' })} style="flex:1;${promptBtn};background:var(--grn);color:#fff">Yes</span>
+        <span class="hv-b" onClick=${() => send('manual_answer', { choice: 'no' })} style="flex:1;${promptBtn};background:var(--red);color:#fff">No</span>
+        <span class="hv" onClick=${() => send('manual_answer', { choice: 'cancel' })} style="${promptBtn};border:1px solid var(--inp);color:var(--mid)">Cancel</span>`}
+      ${kind === 'adjust' && html`
+        <span class="hv-b" onClick=${() => send('manual_answer', { choice: 'ok', value: val })} style="flex:1;${promptBtn};background:var(--grn);color:#fff">Write ✓</span>
+        <span class="hv" onClick=${() => send('manual_answer', { choice: 'cancel' })} style="${promptBtn};border:1px solid var(--inp);color:var(--mid)">Cancel</span>`}
     </div>
   </div>`;
 }

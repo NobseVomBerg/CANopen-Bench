@@ -11,6 +11,7 @@ from canopen.objectdictionary.eds import import_eds
 from conftest import SEED_EDS, connect_and_scan, write_seed_eds_files
 
 import canopen_bench.core as core_mod
+import canopen_bench.testcases as tclib
 from canopen_bench.bus.canopen_bus import CanopenBus, _decode_cob
 from canopen_bench.bus.interface import NO_SERIAL
 from canopen_bench.core import Bench, normalize_identity, trace_class, trace_node
@@ -941,10 +942,19 @@ def test_fav_read_all_skips_write_only_objects(bench, monkeypatch):
 
 def test_pad_hex_normalizes_to_object_width():
     assert Bench._pad_hex("0x42", 2) == "0x0042"
-    assert Bench._pad_hex("42", 4) == "0x00000042"  # bare hex digits work too
     assert Bench._pad_hex("0x12345", 2) == "0x12345"  # longer than width: never truncated
     assert Bench._pad_hex("hello", 4) == "hello"  # non-numeric passes through
     assert Bench._pad_hex("0x42", 0) == "0x42"  # unknown width: unchanged
+
+
+def test_a_typed_value_is_hex_only_when_it_says_so():
+    """This box used to read every number as hex, so typing 30 wrote
+    forty-eight and nothing on screen admitted it. A field that quietly
+    means something other than it says is worse on a bench than one that
+    refuses, so hex now needs its 0x."""
+    assert Bench._pad_hex("30", 4) == "0x0000001E"   # thirty, not forty-eight
+    assert Bench._pad_hex("0x30", 4) == "0x00000030"
+    assert Bench._pad_hex("1E", 4) == "1E"           # ambiguous: not a decimal number
 
 
 def test_obj_write_pads_value_to_eds_width(connected_bench, monkeypatch):
@@ -2568,6 +2578,158 @@ def test_real_testcases_win_regardless_of_adapter(bench, tmp_path):
     assert ids == ["0001"]
 
 
+# -- catalog row shape: [id, name, tools, est, err, grade, variants, file, errmsg] --
+
+def test_catalog_row_carries_grade_variants_and_empty_errmsg_for_a_valid_case(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_valid.yaml").write_text(
+        'id: "0001"\nname: "valid"\ngrade: automated\nvariants: ["820", "920"]\n'
+        'steps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    row = next(r for r in snap["tests"]["catalog"] if r[0] == "0001")
+    tid, name, tools, est, err, grade, variants, file, errmsg = row
+    assert err is False
+    assert grade == "automated"
+    assert variants == ["820", "920"]
+    assert file == "TC0001_valid.yaml"
+    assert errmsg == ""
+
+
+def test_catalog_row_for_a_broken_file_carries_err_file_and_errmsg(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0002_broken.yaml").write_text(
+        'id: "0002"\nname: "broken"\nexpekt: "typo"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    # the top-level schema error (unknown key "expekt") is caught before id
+    # parsing, so the catalog falls back to the filename as the row's id —
+    # find the row by file instead
+    row = next(r for r in snap["tests"]["catalog"] if r[7] == "TC0002_broken.yaml")
+    tid, name, tools, est, err, grade, variants, file, errmsg = row
+    assert err is True
+    assert file == "TC0002_broken.yaml"
+    assert errmsg  # the UI shows this instead of "see file"
+
+
+def test_grades_and_variants_dropdowns_only_list_what_the_folder_has(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_a.yaml").write_text(
+        'id: "0001"\nname: "a"\ngrade: automated\nvariants: ["820"]\nsteps:\n  - log: "hi"\n')
+    (tc_dir / "TC0002_b.yaml").write_text(
+        'id: "0002"\nname: "b"\ngrade: manual\nvariants: ["920"]\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    assert snap["tests"]["grades"] == ["automated", "manual"]
+    assert snap["tests"]["variants"] == ["820", "920"]
+
+
+def test_grades_and_variants_dropdowns_empty_when_folder_declares_none(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_plain.yaml").write_text(
+        'id: "0001"\nname: "plain"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    assert snap["tests"]["grades"] == []
+    assert snap["tests"]["variants"] == []
+
+
+# -- act_tc_open: hands a test case to the system's file opener --------------
+
+def test_tc_open_happy_path_opens_the_resolved_absolute_path(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_min.yaml").write_text('id: "0001"\nname: "minimal"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "0001"})
+
+    assert opened == [tc_dir / "TC0001_min.yaml"]
+    assert any("opening TC0001_min.yaml in the system editor" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_unknown_id_opens_nothing_and_logs(bench, monkeypatch):
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "does-not-exist"})
+
+    assert opened == []
+    assert any("no such test case" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_case_with_no_file_logs_no_such_test_case(bench, monkeypatch):
+    bench.testcases["x"] = tclib.TestCase(id="x", name="in-memory only", file="")
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "x"})
+
+    assert opened == []
+    assert any("no such test case" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_missing_file_on_disk_opens_nothing_and_logs(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_min.yaml").write_text('id: "0001"\nname: "minimal"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    (tc_dir / "TC0001_min.yaml").unlink()  # the catalog still knows it; the disk does not
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "0001"})
+
+    assert opened == []
+    assert any("CFG  open" in ln["msg"] and "TC0001_min.yaml" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_editor_oserror_is_logged_and_swallowed(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_min.yaml").write_text('id: "0001"\nname: "minimal"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    def boom(path):
+        raise OSError("no application registered")
+    monkeypatch.setattr(core_mod, "_open_in_editor", boom)
+
+    bench.dispatch("tc_open", {"id": "0001"})  # must not raise
+
+    assert any("CFG  open" in ln["msg"] and "no application registered" in ln["msg"]
+               for ln in bench.logs)
+    assert bench.logs[-1]["type"] == "emcy0"
+
+
+def test_tc_open_path_traversal_guard_refuses_to_escape_the_folder(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    (tmp_path / "outside.yaml").write_text("steps: []\n")  # a real file, just outside the folder
+    bench.testcases["esc"] = tclib.TestCase(id="esc", name="escape", file="../outside.yaml")
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "esc"})
+
+    assert opened == []
+    assert any("CFG  open" in ln["msg"] for ln in bench.logs)
+
+
 # -- live bus statistics + version/workspace snapshot fields ------------------
 
 def test_frontend_fetches_nothing_from_the_internet():
@@ -3131,3 +3293,67 @@ def test_cyclic_loop_sends_sync_frames_repeatedly(connected_bench):
     hits = [f for f in frames if f.cob_id == "0x080"]
     assert len(hits) >= 3
     assert all(f.decoded == "SYNC" for f in hits)
+
+
+# -- _hexstr_width: byte width of an sdo_read answer (core.core._hexstr_width) --
+# `adjust` uses this to size an operator-typed value against the object the
+# device just answered for, instead of a hardcoded 4 bytes.
+
+def test_hexstr_width_reads_digit_count_from_the_answer():
+    assert core_mod._hexstr_width("0x001E") == 2
+    assert core_mod._hexstr_width("0x0000001E") == 4
+    assert core_mod._hexstr_width("0x1E") == 1
+    assert core_mod._hexstr_width("42") == 0       # no 0x prefix: not this shape
+    assert core_mod._hexstr_width("0x") == 0        # 0x with no digits
+    assert core_mod._hexstr_width("hello") == 0
+
+
+# -- _variant_matches: numeric-vs-numeric and label comparison (core.core) --
+# Already has one coverage test in test_executor.py
+# (test_a_variant_matches_however_the_two_sides_spell_the_number); this is
+# the focused unit test for the helper itself.
+
+def test_variant_matches_decimal_declared_against_hex_actual():
+    assert core_mod._variant_matches(["820"], "0x334") is True  # 0x334 == 820
+
+
+def test_variant_matches_hex_declared_against_decimal_actual():
+    assert core_mod._variant_matches(["0x334"], "820") is True
+
+
+def test_variant_matches_a_genuine_numeric_mismatch():
+    assert core_mod._variant_matches(["820"], "0x335") is False  # 0x335 == 821
+
+
+def test_variant_matches_non_numeric_label_case_insensitively():
+    # an EDS variant map can answer a label instead of a number
+    assert core_mod._variant_matches(["Rev-A"], "rev-a") is True
+
+
+def test_variant_matches_number_declared_against_non_numeric_actual_mismatches():
+    assert core_mod._variant_matches(["820"], "not-a-number") is False
+
+
+# -- _open_in_editor: never shares the running server's own stdin/session ---
+# (core.core._open_in_editor). A Popen call that inherits the server's
+# stdin/session can suspend the server the moment the launched app tries to
+# read from stdin, or tie the child to the server's own process group.
+
+def test_open_in_editor_does_not_share_the_servers_stdin(tmp_path, monkeypatch):
+    import subprocess
+    import sys as sys_mod
+    if sys_mod.platform == "win32":
+        pytest.skip("win32 uses os.startfile, not subprocess.Popen")
+    calls = []
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return object()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    core_mod._open_in_editor(tmp_path / "case.yaml")
+
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["start_new_session"] is True

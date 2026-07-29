@@ -22,7 +22,13 @@ _BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send dat
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
 _HEAD_KEYS = {"id", "name", "desc", "grade", "tools", "est", "dut",
-              "preconditions", "steps"}
+              "variants", "on_fail", "preconditions", "steps"}
+#: what a failed expectation does to the rest of the case. "stop" (the
+#: default) ends it there. "continue" records the failure and keeps
+#: going, which is what a case needs when its last steps put the bench
+#: back the way it found it — a run that fails at 12 V and stops has left
+#: the device at 12 V.
+_ON_FAIL = {"stop", "continue"}
 #: how much of the case runs without a person at the bench — catalog and
 #: report show it; "" when the file does not say
 _GRADES = {"automated", "semi", "manual", "production"}
@@ -36,6 +42,8 @@ _STEP_FIELDS = {
     "sdo_write": ({"index", "sub", "value"}, {"size", "expect_abort", "node"}),
     "expect_emcy": ({"code"}, {"mask", "node", "timeout"}),
     "psu": (set(), {"ch", "volt", "curr", "output"}),
+    "rand": ({"to"}, {"min", "max"}),
+    "adjust": ({"index", "sub"}, {"text", "size", "node", "timeout"}),
 }
 
 
@@ -73,6 +81,12 @@ class TestCase:
     tools: list[str] = field(default_factory=list)
     est: str = ""
     dut: object = "selected"  # "selected" | {"code": "<DUT code>"}
+    on_fail: str = "stop"     # "stop" | "continue" — see _ON_FAIL
+    #: hardware variants this case applies to, as the device reports them
+    #: ("820", "920"). Empty means every variant. Declared rather than
+    #: checked in preconditions so the catalog can filter on it without
+    #: running anything, and so a case states its scope in one place.
+    variants: list[str] = field(default_factory=list)
     preconditions: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     file: str = ""
@@ -107,8 +121,22 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         return None  # value is ignored ("- end:")
     if key == "emcy_clear":
         return None  # value is ignored ("- emcy_clear:")
-    if key == "label" or key == "jump":
+    if key in ("label", "jump", "jump_on_error"):
         return None if isinstance(val, str) and val else f"{key}: needs a name"
+    if key == "ask":
+        # a three-way question to the person at the bench: yes carries on,
+        # no is a FAIL with the question as the reason, cancel is a SKIP.
+        # Two-way `manual` cannot express "the operator looked and it was
+        # wrong", which is a verdict, not an aborted run.
+        if isinstance(val, str):
+            return None if val else "ask: needs a text"
+        if not isinstance(val, dict):
+            return "ask: needs a text"
+        if unknown := set(val) - {"text", "title", "timeout"}:
+            return f"ask: unknown field(s) {sorted(unknown)}"
+        if "timeout" in val and not isinstance(val["timeout"], (int, float)):
+            return "ask: timeout must be a duration in seconds"
+        return None if val.get("text") else "ask: needs a text"
     if key in _ARITH:
         if not isinstance(val, dict) or set(val) != {"to", "value"}:
             return f"{key}: needs {{to, value}}"
@@ -138,8 +166,10 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         data = val["data"]
         if data == "$session":
             return None
-        if not isinstance(data, list) or not data:
-            return "can_send: data must be a non-empty byte list or $session"
+        # an empty list is a frame with no data, which is a real thing to
+        # send: a CiA-301 SYNC carries none unless a counter is configured
+        if not isinstance(data, list):
+            return "can_send: data must be a byte list or $session"
         for b in data:
             if b != "$session" and not _is_value(b):  # "$session" expands in place
                 return f"can_send: invalid data byte {b!r}"
@@ -201,6 +231,19 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
                 return f"sdo_write: invalid value {val['value']!r}"
             if "size" in val and val["size"] not in (1, 2, 4):
                 return "sdo_write: size must be 1, 2 or 4"
+        if key == "rand":
+            for name in ("min", "max"):
+                if name in val and not _is_value(val[name]):
+                    return f"rand: {name} must be a value or a register"
+            if val["to"] not in REGISTERS:
+                return f"rand: to must be a register R0–R15, got {val['to']!r}"
+        if key == "adjust":
+            if "size" in val and val["size"] not in (1, 2, 4):
+                return "adjust: size must be 1, 2 or 4"
+            if "timeout" in val and not isinstance(val["timeout"], (int, float)):
+                return "adjust: timeout must be a duration in seconds"
+            if "text" in val and not (isinstance(val["text"], str) and val["text"]):
+                return "adjust: text must say what the operator is adjusting"
         if key == "psu":
             if not set(val) & {"volt", "curr", "output"}:
                 return "psu: needs at least one of volt, curr, output"
@@ -238,7 +281,7 @@ def _check_labels(steps: list) -> str | None:
         if not (isinstance(step, dict) and len(step) == 1):
             continue
         key, val = next(iter(step.items()))
-        if key == "jump":
+        if key in ("jump", "jump_on_error"):
             target = val
         elif key in _COND_JUMPS and isinstance(val, dict):
             target = val.get("to")
@@ -304,6 +347,10 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     tc.tools = [str(t) for t in doc.get("tools") or []]
     tc.est = str(doc.get("est") or "")
     tc.dut = doc.get("dut") or "selected"
+    tc.on_fail = str(doc.get("on_fail") or "stop")
+    raw_variants = doc.get("variants") or []
+    tc.variants = ([str(v) for v in raw_variants]
+                   if isinstance(raw_variants, list) else [])
     tc.preconditions = doc.get("preconditions") or []
     tc.steps = doc.get("steps") or []
 
@@ -320,6 +367,10 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
         problems.append('dut must be "selected" or {code: ...}')
     if tc.grade and tc.grade not in _GRADES:
         problems.append(f'grade must be one of {sorted(_GRADES)}, got "{tc.grade}"')
+    if not isinstance(doc.get("variants") or [], list):
+        problems.append("variants must be a list of variant names")
+    if tc.on_fail not in _ON_FAIL:
+        problems.append(f'on_fail must be one of {sorted(_ON_FAIL)}, got "{tc.on_fail}"')
     for group_name, group in (("preconditions", tc.preconditions), ("steps", tc.steps)):
         if not isinstance(group, list):
             problems.append(f"{group_name} must be a list")
