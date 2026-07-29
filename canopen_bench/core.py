@@ -28,6 +28,7 @@ from canopen.objectdictionary import ODVariable
 from canopen.objectdictionary.eds import import_eds
 
 from . import __version__, data, instruments
+from . import report as reportlib
 from . import testcases as tclib
 from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
@@ -293,6 +294,24 @@ def _resolve_num(value, regs: dict, builtins: dict) -> float:
     return float(_resolve(value, regs, builtins))
 
 
+def _slug(text: str) -> str:
+    """A file-name-safe version of a case name, in the shape the previous
+    tool used: words joined by underscores, nothing exotic left."""
+    keep = [ch if ch.isalnum() else " " for ch in text]
+    return "_".join("".join(keep).split()) or "case"
+
+
+def _bench_user() -> str:
+    """Who ran it, for the report header. Best effort: on a bench machine
+    this is a login name, and where the environment does not say, an empty
+    field beats a made-up one."""
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return ""
+
+
 def _bytes_str(data: bytes) -> str:
     return "0x" + data.hex().upper()
 
@@ -462,6 +481,10 @@ class Bench:
         self.running = False
         self.run_order: list[str] = []
         self.run_idx = 0
+        # what the run writes into the results folder at the end
+        self._run_cases: list[reportlib.CaseRecord] = []
+        self._run_record: reportlib.CaseRecord | None = None
+        self._run_started = ""
         self.results: dict[str, str] = {}
         self.run_prog: dict | None = None       # {tid, step, of, text} while executing
         self.manual_prompt: dict | None = None  # {tid, text} while waiting for the operator
@@ -760,10 +783,44 @@ class Bench:
             self._push_report(self.run_order)
 
     def _push_report(self, order: list[str]) -> None:
+        """End of a run: write the files, then show the run in the list.
+
+        The list used to be the whole thing — a name that looked like a
+        file and a score, with nothing on disk behind it. A run nobody can
+        open a week later is not a record of anything.
+        """
         passed = sum(1 for tid in order if self.results.get(tid) == "PASS")
-        name = datetime.now().strftime("run_%m%d_%H%M.html")
+        cases = [c for c in self._run_cases if c.id in order]
+        run = reportlib.RunRecord(
+            started=self._run_started or datetime.now().isoformat(timespec="seconds"),
+            finished=datetime.now().isoformat(timespec="seconds"),
+            user=_bench_user(), workspace=self.workspace_name,
+            tool=f"canopen-bench {__version__}", cases=cases)
+        name = self._write_report(run)
         self.reports = [{"name": name, "score": f"{passed}/{len(order)}",
                          "ok": passed == len(order)}] + self.reports[:4]
+
+    def _write_report(self, run: reportlib.RunRecord) -> str:
+        """One file per case, one summary, one JSON beside it. Returns the
+        summary's file name — that is what the UI links to."""
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = Path(self.paths.get("res") or (self.db.path.parent / "results"))
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            for case in run.cases:
+                case.file = f"{stamp}__{case.id}__{_slug(case.name)}.html"
+                (folder / case.file).write_text(reportlib.case_html(case), encoding="utf-8")
+            summary = f"{stamp}__summary.html"
+            (folder / summary).write_text(reportlib.summary_html(run), encoding="utf-8")
+            (folder / f"{stamp}__summary.json").write_text(
+                reportlib.summary_json(run), encoding="utf-8")
+        except OSError as exc:
+            # never let a full disk or a bad path swallow the run itself —
+            # the verdicts are already in the log and on screen
+            self.log(f"RUN  report not written — {exc}", "emcy0")
+            return f"{stamp}__summary.html"
+        self.log(f"RUN  report {summary} ({len(run.cases)} case(s)) in {folder}")
+        return summary
 
     # ------------------------------------------------------------------
     # actions (dispatched from the API layer)
@@ -2614,6 +2671,8 @@ class Bench:
 
     # -- step executor (real test-case files, see docs/ablaeufe/A-04) --------
     async def _run_task(self) -> None:
+        self._run_cases = []
+        self._run_started = datetime.now().isoformat(timespec="seconds")
         try:
             for i, tid in enumerate(self.run_order):
                 self.run_idx = i
@@ -2622,6 +2681,8 @@ class Bench:
                     self._push_report(self.run_order[:i])
                     return
                 verdict, reason = await self._exec_case(tid)
+                if self._run_record is not None:
+                    self._run_cases.append(self._run_record)
                 self.results[tid] = verdict
                 suffix = f" ({reason})" if reason else ""
                 if verdict == "PASS":
@@ -2655,13 +2716,28 @@ class Bench:
 
     async def _exec_case(self, tid: str) -> tuple[str, str]:
         tc = self.testcases.get(tid)
+        started = time.time()
+        rec = reportlib.CaseRecord(id=tid, started=datetime.now().isoformat(timespec="seconds"),
+                                   user=_bench_user())
+        self._run_record = rec
         if tc is None:
-            return "ERROR", "unknown test case"
+            rec.verdict, rec.reason = "ERROR", "unknown test case"
+            rec.seconds = time.time() - started
+            return rec.verdict, rec.reason
+        rec.name, rec.desc, rec.grade, rec.tools = tc.name, tc.desc, tc.grade, list(tc.tools)
         if tc.error:
-            return "ERROR", f"invalid test file: {tc.error}"
+            rec.verdict, rec.reason = "ERROR", f"invalid test file: {tc.error}"
+            rec.seconds = time.time() - started
+            return rec.verdict, rec.reason
         node = self._resolve_dut(tc)
         if node is None:
-            return "ERROR", "no target device"
+            rec.verdict, rec.reason = "ERROR", "no target device"
+            rec.seconds = time.time() - started
+            return rec.verdict, rec.reason
+        dev = next((d for d in self.devices if d["node"] == node), None)
+        if dev is not None:
+            rec.device, rec.variant = dev.get("name", ""), dev.get("variant", "")
+            rec.sn, rec.node = dev.get("sn", ""), node
         regs = {name: 0 for name in tclib.REGISTERS}
         sess = self.mc.get("session") or ""  # "" until an addressing run distributed one
         builtins = {"node": node, "expected": int(self.mc.get("expected") or 0),
@@ -2675,23 +2751,29 @@ class Bench:
         def stop() -> bool:
             return self._run_stop_requested
 
+        def done(verdict: str, why: str = "") -> tuple[str, str]:
+            rec.verdict, rec.reason = verdict, why
+            rec.seconds = time.time() - started
+            return verdict, why
+
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
-                                              builtins, 0, on_step, stop)
+                                              builtins, 0, on_step, stop, rec.steps)
         if status in ("fail", "skip"):
-            return "SKIP", f"precondition: {why}"
+            return done("SKIP", f"precondition: {why}")
         if status == "error":
-            return "ERROR", why
+            return done("ERROR", why)
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
-                                              len(tc.preconditions), on_step, stop)
+                                              len(tc.preconditions), on_step, stop,
+                                              rec.steps)
         if status == "ok":
-            return "PASS", ""
+            return done("PASS")
         if status == "skip":
-            return "SKIP", why
-        return ("FAIL" if status == "fail" else "ERROR"), why
+            return done("SKIP", why)
+        return done("FAIL" if status == "fail" else "ERROR", why)
 
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
                            regs: dict, builtins: dict, base: int,
-                           on_step, should_stop) -> tuple[str, str]:
+                           on_step, should_stop, record: list | None = None) -> tuple[str, str]:
         """Program-counter loop over one step list (format v2: labels, jumps,
         registers). Returns ("ok" | "fail" | "error", reason)."""
         labels = {step["label"]: i for i, step in enumerate(steps)
@@ -2707,9 +2789,19 @@ class Bench:
             if should_stop():
                 return "error", "aborted"
             key, val = next(iter(steps[pc].items()))
-            on_step(base + pc + 1, self._label_step(key, val))
+            text = self._label_step(key, val)
+            on_step(base + pc + 1, text)
             status, info = await self._exec_one(tc, key, val, node, regs,
                                                 builtins, should_stop)
+            if record is not None:
+                # a note (log step) is neither pass nor fail — it is the
+                # sentence somebody wrote to make the report readable
+                state = "note" if key == "log" else {
+                    "jump": "ok", "end": "ok"}.get(status, status)
+                record.append(reportlib.StepRecord(
+                    line=base + pc + 1, text=text, state=state,
+                    detail=info if status in ("fail", "error", "skip") else "",
+                    ts=datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]))
             if status == "jump":
                 pc = labels[info]
                 continue
