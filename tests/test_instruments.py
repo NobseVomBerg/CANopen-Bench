@@ -267,7 +267,24 @@ def test_releasing_hands_the_port_back(tmp_path):
 
 # -- measured values, where the unit answers for them ------------------------
 
-MEAS = {"*IDN?": IDN, "*LRN?": LRN, "MEAS:VOLT?": "4.98", "MEAS:CURR?": "0.12"}
+MEAS = {"*IDN?": IDN, "*LRN?": LRN, ":MEAS:VOLT?;CURR?": "4.98;0.12"}
+
+
+def test_both_measurements_come_back_in_one_round_trip():
+    """The manufacturer's own library chains them into a single query, and
+    it is worth copying: an unanswered query costs the read timeout, and
+    this unit is known not to accept every SCPI command."""
+    port = FakePort(MEAS)
+    Toellner8952(SerialLink("COM6", opener=opener_for(port))).state()
+    assert port.written.count(":MEAS:VOLT?;CURR?") == 2      # one per channel
+
+
+def test_a_half_answer_still_gives_what_it_gave():
+    """Nothing here insists on getting both numbers to accept either."""
+    port = FakePort({**MEAS, ":MEAS:VOLT?;CURR?": "4.98"})
+    st = Toellner8952(SerialLink("COM6", opener=opener_for(port))).state()
+    assert st.channels[0].meas_volt == 4.98
+    assert st.channels[0].meas_curr is None
 
 
 def test_measured_values_are_read_when_the_unit_answers():
@@ -290,11 +307,54 @@ def test_a_unit_that_ignores_the_query_is_asked_once_and_then_left_alone():
     st = psu.state()
     assert st.channels[0].meas_volt is None
     assert psu.measures is False
-    asked = port.written.count("MEAS:VOLT?")
+    asked = port.written.count(":MEAS:VOLT?;CURR?")
     psu.state()
-    assert port.written.count("MEAS:VOLT?") == asked   # not asked again
+    assert port.written.count(":MEAS:VOLT?;CURR?") == asked   # not asked again
 
 
 def test_the_measurement_never_stands_in_for_the_setting():
     st = Toellner8952(SerialLink("COM6", opener=opener_for(FakePort(MEAS)))).state()
     assert st.channels[1].volt == 57.0           # from *LRN?, unchanged
+
+
+# -- a unit that speaks the other language ----------------------------------
+# These supplies stay in service for decades and the same model number
+# covers units with different command sets. The driver settles on the one
+# it is answered in rather than assuming from the type plate.
+
+SCPI_ANSWERS = {
+    "*IDN?": IDN,
+    "*LRN?": "",                       # this unit does not know the short form
+    ":VOLT?;CURR?": "12.00;1.500",
+    ":OUTP?": "1",
+    ":MEAS:VOLT?;CURR?": "11.97;0.31",
+}
+
+
+def test_a_scpi_only_unit_still_reports_its_channels():
+    port = FakePort(SCPI_ANSWERS)
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    st = psu.state()
+    assert psu.dialect == "scpi"
+    assert [c.volt for c in st.channels] == [12.0, 12.0]   # both channels answer
+    assert st.output is True
+
+
+def test_writes_follow_the_language_the_unit_answered_in():
+    port = FakePort(SCPI_ANSWERS)
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu.state()
+    port.written.clear()
+    psu.set_voltage(2, 26)
+    psu.set_output(False)
+    assert port.written == [":INST OUT2;:VOLT 26.00", ":OUTP 0"]
+
+
+def test_a_unit_that_answers_the_short_form_is_left_in_it():
+    """No language switching: that would change the device for every other
+    tool on the bench, including the operator's own scripts."""
+    port = FakePort()
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu.state()
+    assert psu.dialect == "short"
+    assert not any("SYST:LANG" in w for w in port.written)

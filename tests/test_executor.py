@@ -563,7 +563,7 @@ def test_a_case_can_drive_the_power_supply(tc_bench):
     # what the case asked for, without the driver's own housekeeping
     # (identity, settings readback, the one-off measurement probe)
     commands = [w for w in port.written
-                if not w.startswith(("*", "MEAS")) and ";" in w or w.startswith("EX")]
+                if ";V " in w or ";C " in w or w.startswith("EX")]
     assert commands == ["SEL 2;V 26.00", "EX 1", "SEL 2;V 57.50",
                         "SEL 2;C 2.000", "EX 0"]
 
