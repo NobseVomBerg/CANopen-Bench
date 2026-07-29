@@ -560,8 +560,12 @@ def test_a_case_can_drive_the_power_supply(tc_bench):
     _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
     run_selected(tc_bench, {"0017"})
     assert tc_bench.results == {"0017": "PASS"}
-    assert [w for w in port.written if not w.startswith("*")] == [
-        "SEL 2;V 26.00", "EX 1", "SEL 2;V 57.50", "SEL 2;C 2.000", "EX 0"]
+    # what the case asked for, without the driver's own housekeeping
+    # (identity, settings readback, the one-off measurement probe)
+    commands = [w for w in port.written
+                if not w.startswith(("*", "MEAS")) and ";" in w or w.startswith("EX")]
+    assert commands == ["SEL 2;V 26.00", "EX 1", "SEL 2;V 57.50",
+                        "SEL 2;C 2.000", "EX 0"]
 
 
 def test_without_a_supply_the_case_errors_rather_than_blaming_the_device(tc_bench):
