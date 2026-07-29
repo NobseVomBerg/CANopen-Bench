@@ -831,47 +831,70 @@ class Bench:
             cyclic.cancel()
 
     async def _tick_loop_body(self) -> None:
+        """The loop everything on screen comes from — trace, bus load,
+        heartbeats, every state push.
+
+        So one bad tick must not end it. It used to have no guard at all:
+        an exception anywhere inside, including out of the notifier that
+        pushes state to the browsers, killed the loop for good. Nothing
+        closed the WebSocket, so the screen simply stopped changing while
+        looking connected, and a run that had long finished still read
+        "Running…". A repeat of the same failure is logged once, so a
+        persistent fault says so without filling the log every 0.8 s.
+        """
+        last_error = ""
         while True:
             await asyncio.sleep(TICK_S)
-            dirty = False
-            if self.connected and not self.trace_paused:
-                frames = self.bus.poll_frames(4096)
-                rows = [{"time": f.time or now_us_str(), "dir": f.direction,
-                         "cob": f.cob_id, "len": f.length, "data": f.data,
-                         "dec": f.decoded, "flag": f.flag,
-                         "cls": trace_class(f.decoded),
-                         "node": trace_node(f.cob_id),
-                         "obj": "", "val": ""} for f in frames]
-                for row in rows:
-                    self._annotate_sdo(row)
-                    self._annotate_pdo(row)
-                    self._annotate_emcy(row)
-                    # last: a matching vendor decoder overrides generic decode
-                    self._annotate_plugin(row)
-                    if row["cls"] == "HB" and row["node"] is not None:
-                        self._hb_seen[row["node"]] = time.monotonic()
-                    key = (row["cls"], row["node"])
-                    self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
-                # also with zero rows: load, rate window and history must
-                # decay on an idle bus instead of freezing at the last value
-                self._update_bus_stats(rows)
-                self._check_heartbeats()
-                if rows:
-                    self.trace += rows
-                    cut = len(self.trace) - TRACE_CAP
-                    if cut > 0:
-                        for old in self.trace[:cut]:
-                            self._trace_counts[(old["cls"], old["node"])] -= 1
-                        del self.trace[:cut]
-                dirty = True  # stats/load move every tick while draining
-            if self.running and self._run_mode == "sim":
-                self._run_step()
-                dirty = True
-            if self.swdl_run:
-                self._swdl.step(self)
-                dirty = True
-            if dirty and self._notify:
-                await self._notify()
+            try:
+                await self._tick_once()
+            except Exception as exc:
+                text = f"{type(exc).__name__}: {exc}"
+                if text != last_error:
+                    last_error = text
+                    self.log(f"APP  tick failed — {text}", "emcy0")
+                continue
+            last_error = ""
+
+    async def _tick_once(self) -> None:
+        dirty = False
+        if self.connected and not self.trace_paused:
+            frames = self.bus.poll_frames(4096)
+            rows = [{"time": f.time or now_us_str(), "dir": f.direction,
+                     "cob": f.cob_id, "len": f.length, "data": f.data,
+                     "dec": f.decoded, "flag": f.flag,
+                     "cls": trace_class(f.decoded),
+                     "node": trace_node(f.cob_id),
+                     "obj": "", "val": ""} for f in frames]
+            for row in rows:
+                self._annotate_sdo(row)
+                self._annotate_pdo(row)
+                self._annotate_emcy(row)
+                # last: a matching vendor decoder overrides generic decode
+                self._annotate_plugin(row)
+                if row["cls"] == "HB" and row["node"] is not None:
+                    self._hb_seen[row["node"]] = time.monotonic()
+                key = (row["cls"], row["node"])
+                self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
+            # also with zero rows: load, rate window and history must
+            # decay on an idle bus instead of freezing at the last value
+            self._update_bus_stats(rows)
+            self._check_heartbeats()
+            if rows:
+                self.trace += rows
+                cut = len(self.trace) - TRACE_CAP
+                if cut > 0:
+                    for old in self.trace[:cut]:
+                        self._trace_counts[(old["cls"], old["node"])] -= 1
+                    del self.trace[:cut]
+            dirty = True  # stats/load move every tick while draining
+        if self.running and self._run_mode == "sim":
+            self._run_step()
+            dirty = True
+        if self.swdl_run:
+            self._swdl.step(self)
+            dirty = True
+        if dirty and self._notify:
+            await self._notify()
 
     # -- test runner -------------------------------------------------------
     def _run_step(self) -> None:
