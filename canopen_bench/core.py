@@ -196,6 +196,23 @@ def _as_int(value) -> int | None:
         return None
 
 
+def _open_in_editor(path: Path) -> None:
+    """Hand a file to whatever the machine opens it with.
+
+    Three platforms, three commands, none of them a shell: the path is
+    passed as an argument, so a file name with a space or a quote in it
+    is a file name and not a second command.
+    """
+    import subprocess
+    if sys.platform == "win32":
+        import os
+        os.startfile(str(path))          # noqa: S606 — the platform's own opener
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen([opener, str(path)],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def _typed_number(text: str) -> int | None:
     """A number as a person at the bench writes it: "0x1E" is hex, "30" is
     thirty.
@@ -1525,6 +1542,38 @@ class Bench:
 
     def act_tc_rescan(self, p: dict) -> None:
         self._load_testcases()
+
+    def act_tc_open(self, p: dict) -> None:
+        """Open a test case in whatever the machine opens .yaml with.
+
+        The bench does not edit test cases — they are files, and people
+        already have an editor they like. This only hands one to the
+        system, which is also why it is the *server's* system: the browser
+        cannot, and this tool runs on the bench it is looking at.
+
+        Only files inside the configured TestCases folder are opened, and
+        only ones the catalog knows. A path arriving from the outside is
+        not a path this resolves.
+        """
+        tc = self.testcases.get(str(p.get("id") or ""))
+        if tc is None or not tc.file:
+            self.log("CFG  open — no such test case", "emcy0")
+            return
+        folder = Path(self.paths.get("tc") or "").resolve()
+        try:
+            target = (folder / tc.file).resolve()
+            target.relative_to(folder)          # no escaping the folder
+            if not target.is_file():
+                raise FileNotFoundError(target)
+        except (OSError, ValueError) as exc:
+            self.log(f"CFG  open {tc.file} — {exc}", "emcy0")
+            return
+        try:
+            _open_in_editor(target)
+        except OSError as exc:
+            self.log(f"CFG  open {tc.file} — {exc}", "emcy0")
+            return
+        self.log(f"CFG  opening {tc.file} in the system editor")
 
     # -- workspaces --------------------------------------------------------
     _WS_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,49}$")
@@ -3781,10 +3830,12 @@ class Bench:
             "sync": {"run": self.sync_run, "ms": self.sync_ms},
             "tests": {
                 "catalog": ([[tc.id, tc.name, ", ".join(tc.tools) or "—",
-                              tc.est or "—", bool(tc.error), tc.grade, tc.variants]
+                              tc.est or "—", bool(tc.error), tc.grade, tc.variants,
+                              tc.file, tc.error or ""]
                              for tc in sorted(self.testcases.values(), key=lambda t: t.id)]
                             if self.testcases
-                            else [list(t) + ["", []] for t in data.TESTS] if demo else []),
+                            else [list(t) + ["", [], "", ""] for t in data.TESTS]
+                            if demo else []),
                 #: what the two catalog filters can offer, from what is
                 #: actually in the folder — an empty dropdown is better
                 #: than one listing grades no case has

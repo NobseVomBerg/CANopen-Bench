@@ -11,6 +11,7 @@ from canopen.objectdictionary.eds import import_eds
 from conftest import SEED_EDS, connect_and_scan, write_seed_eds_files
 
 import canopen_bench.core as core_mod
+import canopen_bench.testcases as tclib
 from canopen_bench.bus.canopen_bus import CanopenBus, _decode_cob
 from canopen_bench.bus.interface import NO_SERIAL
 from canopen_bench.core import Bench, normalize_identity, trace_class, trace_node
@@ -2566,6 +2567,158 @@ def test_real_testcases_win_regardless_of_adapter(bench, tmp_path):
     snap = bench.snapshot()
     ids = [row[0] for row in snap["tests"]["catalog"]]
     assert ids == ["0001"]
+
+
+# -- catalog row shape: [id, name, tools, est, err, grade, variants, file, errmsg] --
+
+def test_catalog_row_carries_grade_variants_and_empty_errmsg_for_a_valid_case(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_valid.yaml").write_text(
+        'id: "0001"\nname: "valid"\ngrade: automated\nvariants: ["820", "920"]\n'
+        'steps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    row = next(r for r in snap["tests"]["catalog"] if r[0] == "0001")
+    tid, name, tools, est, err, grade, variants, file, errmsg = row
+    assert err is False
+    assert grade == "automated"
+    assert variants == ["820", "920"]
+    assert file == "TC0001_valid.yaml"
+    assert errmsg == ""
+
+
+def test_catalog_row_for_a_broken_file_carries_err_file_and_errmsg(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0002_broken.yaml").write_text(
+        'id: "0002"\nname: "broken"\nexpekt: "typo"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    # the top-level schema error (unknown key "expekt") is caught before id
+    # parsing, so the catalog falls back to the filename as the row's id —
+    # find the row by file instead
+    row = next(r for r in snap["tests"]["catalog"] if r[7] == "TC0002_broken.yaml")
+    tid, name, tools, est, err, grade, variants, file, errmsg = row
+    assert err is True
+    assert file == "TC0002_broken.yaml"
+    assert errmsg  # the UI shows this instead of "see file"
+
+
+def test_grades_and_variants_dropdowns_only_list_what_the_folder_has(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_a.yaml").write_text(
+        'id: "0001"\nname: "a"\ngrade: automated\nvariants: ["820"]\nsteps:\n  - log: "hi"\n')
+    (tc_dir / "TC0002_b.yaml").write_text(
+        'id: "0002"\nname: "b"\ngrade: manual\nvariants: ["920"]\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    assert snap["tests"]["grades"] == ["automated", "manual"]
+    assert snap["tests"]["variants"] == ["820", "920"]
+
+
+def test_grades_and_variants_dropdowns_empty_when_folder_declares_none(bench, tmp_path):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_plain.yaml").write_text(
+        'id: "0001"\nname: "plain"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    snap = bench.snapshot()
+    assert snap["tests"]["grades"] == []
+    assert snap["tests"]["variants"] == []
+
+
+# -- act_tc_open: hands a test case to the system's file opener --------------
+
+def test_tc_open_happy_path_opens_the_resolved_absolute_path(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_min.yaml").write_text('id: "0001"\nname: "minimal"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "0001"})
+
+    assert opened == [tc_dir / "TC0001_min.yaml"]
+    assert any("opening TC0001_min.yaml in the system editor" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_unknown_id_opens_nothing_and_logs(bench, monkeypatch):
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "does-not-exist"})
+
+    assert opened == []
+    assert any("no such test case" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_case_with_no_file_logs_no_such_test_case(bench, monkeypatch):
+    bench.testcases["x"] = tclib.TestCase(id="x", name="in-memory only", file="")
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "x"})
+
+    assert opened == []
+    assert any("no such test case" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_missing_file_on_disk_opens_nothing_and_logs(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_min.yaml").write_text('id: "0001"\nname: "minimal"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    (tc_dir / "TC0001_min.yaml").unlink()  # the catalog still knows it; the disk does not
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "0001"})
+
+    assert opened == []
+    assert any("CFG  open" in ln["msg"] and "TC0001_min.yaml" in ln["msg"] for ln in bench.logs)
+
+
+def test_tc_open_editor_oserror_is_logged_and_swallowed(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_min.yaml").write_text('id: "0001"\nname: "minimal"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    def boom(path):
+        raise OSError("no application registered")
+    monkeypatch.setattr(core_mod, "_open_in_editor", boom)
+
+    bench.dispatch("tc_open", {"id": "0001"})  # must not raise
+
+    assert any("CFG  open" in ln["msg"] and "no application registered" in ln["msg"]
+               for ln in bench.logs)
+    assert bench.logs[-1]["type"] == "emcy0"
+
+
+def test_tc_open_path_traversal_guard_refuses_to_escape_the_folder(bench, tmp_path, monkeypatch):
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    (tmp_path / "outside.yaml").write_text("steps: []\n")  # a real file, just outside the folder
+    bench.testcases["esc"] = tclib.TestCase(id="esc", name="escape", file="../outside.yaml")
+
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("tc_open", {"id": "esc"})
+
+    assert opened == []
+    assert any("CFG  open" in ln["msg"] for ln in bench.logs)
 
 
 # -- live bus statistics + version/workspace snapshot fields ------------------

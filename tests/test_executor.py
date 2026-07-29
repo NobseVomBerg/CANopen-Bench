@@ -14,6 +14,7 @@ from conftest import connect_and_scan, write_seed_eds_files
 
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
+from canopen_bench.plugin import BenchPlugin
 
 PASS_TC = """\
 id: "0001"
@@ -678,3 +679,84 @@ def test_literal_expect_is_unaffected_by_register_resolution(tc_bench):
     _add_tc(tc_bench, "TC0024_literal_expect.yaml", LITERAL_EXPECT_REGRESSION_TC)
     run_selected(tc_bench, {"0024"})
     assert tc_bench.results == {"0024": "PASS"}
+
+
+# -- `variants:` header enforcement (docs/ablaeufe/testfall-format.md) -------
+# A case can declare which hardware variants it applies to. _exec_case skips
+# it against a device reporting a different one, runs it against a matching
+# one, and — because an unread variant is not a mismatch — still runs it
+# against a device that never reported a variant at all: refusing to run
+# over a number the bench could not read is how coverage disappears without
+# a trace.
+
+class _VariantSeedPlugin(BenchPlugin):
+    """Seeds one EDS row carrying a variant config, so a scan fills the
+    device's variant field — same plugin-seeded-variant approach as
+    tests/test_plugins.py."""
+    name = "variantseed"
+
+    def __init__(self, row: dict):
+        self._row = row
+
+    def seed_eds(self) -> list[dict]:
+        return [self._row]
+
+
+VARIANT_MATCH_TC = """\
+id: "0030"
+name: "runs for its declared variant"
+variants: ["820"]
+steps:
+  - log: "ran"
+"""
+
+VARIANT_MISMATCH_TC = """\
+id: "0031"
+name: "skipped for a variant it does not cover"
+variants: ["920"]
+steps:
+  - fail: "should not run"
+"""
+
+
+@pytest.fixture()
+def variant_bench(tmp_path):
+    """A single DUT whose scanned variant is "820" — the seed EDS's 0x2050
+    object defaults to 0, which reads back as "0x00" and is mapped to "820"
+    here, same as the seeded-variant tests in tests/test_plugins.py."""
+    row = {"file": "variant_dev.eds", "dev": "VARIANT_DEV", "ident": "0x4D2·0x1150",
+           "code": "VAR", "enabled": True,
+           "variant": {"index": "0x2050", "sub": "00", "map": {"0x00": "820"}}}
+    bench = Bench(Db(tmp_path / "v.db"), plugins=[_VariantSeedPlugin(row)])
+    write_seed_eds_files(bench)
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    return bench
+
+
+def test_variants_header_skips_a_device_reporting_a_different_variant(variant_bench):
+    dev = next(d for d in variant_bench.devices if d["node"] == 1)
+    assert dev["variant"] == "820"
+    _add_tc(variant_bench, "TC0031_mismatch.yaml", VARIANT_MISMATCH_TC)
+    run_selected(variant_bench, {"0031"})
+    assert variant_bench.results == {"0031": "SKIP"}
+    assert any("920" in ln["msg"] and "820" in ln["msg"] for ln in variant_bench.logs)
+
+
+def test_variants_header_runs_a_matching_device(variant_bench):
+    _add_tc(variant_bench, "TC0030_match.yaml", VARIANT_MATCH_TC)
+    run_selected(variant_bench, {"0030"})
+    assert variant_bench.results == {"0030": "PASS"}
+
+
+def test_variants_header_still_runs_against_an_unreported_variant(tc_bench):
+    # tc_bench's DUTs never scan a variant (no variant config seeded), so
+    # rec.variant stays "". This must still RUN, not SKIP.
+    dev = next(d for d in tc_bench.devices if d["node"] == 1)
+    assert dev["variant"] == ""
+    _add_tc(tc_bench, "TC0030_match.yaml", VARIANT_MATCH_TC)
+    run_selected(tc_bench, {"0030"})
+    assert tc_bench.results == {"0030": "PASS"}

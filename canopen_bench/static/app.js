@@ -940,7 +940,10 @@ function TestsPage({ s, ui, setUi }) {
     }));
   if (t.running && runningId) runLog.push({ line: runningId + ' running…', fg: 'var(--acc)' });
   const anyFail = Object.values(t.results).includes('FAIL');
-  const cols = '34px 64px 1fr 110px 90px 80px';
+  // every column is capped and clipped: a broken file's "id" is its whole
+  // filename, which used to run straight through the next two columns
+  const cols = '34px 72px minmax(160px,1fr) 110px 90px 76px 28px';
+  const cell = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   const repInp = (which, value) => html`
     <${SyncInput} value=${String(value)} onCommit=${(v) => send('set_repeat', { which, n: parseInt(v, 10) || 1 })}
       style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:4px 8px;font:12px ${MONO};text-align:right;outline:none" />`;
@@ -964,7 +967,7 @@ function TestsPage({ s, ui, setUi }) {
   <div style="flex:1;display:flex;min-height:0">
     <div style="flex:1;min-width:0;display:flex;flex-direction:column">
       <div style="display:grid;grid-template-columns:${cols};padding:7px 0;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel2)">
-        <span></span><span>ID</span><span>Test case</span><span>Tools</span><span>Result</span><span style="text-align:right;padding-right:16px">Ø time</span>
+        <span></span><span>ID</span><span>Test case</span><span>Tools</span><span>Result</span><span style="text-align:right">Ø time</span><span></span>
       </div>
       <div style="flex:1;min-height:0;overflow:auto">
         ${!t.catalog.length && html`
@@ -975,19 +978,27 @@ function TestsPage({ s, ui, setUi }) {
               format spec: <span style="font-family:${MONO}">docs/ablaeufe/testfall-format.md</span> ·
               ready-to-copy examples: <span style="font-family:${MONO}">examples/testcases/</span></div>
           </div>`}
-        ${shown.map(([id, name, tools, time, err]) => {
+        ${shown.map(([id, name, tools, time, err, , , file, errMsg]) => {
           const sel = t.sel.includes(id);
           const res = t.results[id] || t.lastRes[id] || '—';
           const isRun = id === runningId;
           return html`
           <div class=${err ? '' : 'hv'} onClick=${err ? null : () => send('test_toggle', { id })}
-            style="display:grid;grid-template-columns:${cols};align-items:center;padding:6px 0;border-bottom:1px solid var(--bd2);background:${isRun ? 'var(--acc-soft)' : sel ? 'var(--sel)' : 'transparent'};cursor:${err ? 'default' : 'pointer'};opacity:${err ? '.65' : '1'}">
+            style="display:grid;grid-template-columns:${cols};align-items:center;padding:6px 0;border-bottom:1px solid var(--bd2);background:${isRun ? 'var(--acc-soft)' : sel ? 'var(--sel)' : 'transparent'};cursor:${err ? 'default' : 'pointer'};opacity:${err ? '.8' : '1'}">
             <span style="display:grid;place-items:center">${err ? html`<span style="color:var(--red);font-weight:700">!</span>` : Cb(sel)}</span>
-            <span style="font:11.5px ${MONO};color:${err ? 'var(--red)' : 'var(--acc)'}">${id}</span>
-            <span style="color:${err ? 'var(--red)' : 'var(--tx)'}">${err ? name + ' — schema error, see file' : name}</span>
-            <span style="font:10.5px ${MONO};color:var(--faint)">${tools}</span>
-            <span style="font-weight:600;font-size:11px;color:${isRun ? 'var(--acc)' : res === 'PASS' ? 'var(--grn)' : res === 'FAIL' || res === 'ERROR' ? 'var(--red)' : 'var(--faint)'}">${isRun ? 'RUN…' : res}</span>
-            <span style="text-align:right;padding-right:16px;font:11px ${MONO};color:var(--faint)">${time}</span>
+            <span style="${cell};font:11.5px ${MONO};color:${err ? 'var(--red)' : 'var(--acc)'}" title=${id}>${err ? '—' : id}</span>
+            ${err
+              ? html`<span style="min-width:0;color:var(--red)" title=${`${file}\n${errMsg}`}>
+                  <div style="font:11px ${MONO};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${file}</div>
+                  <div style="font-size:11px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${errMsg || 'schema error'}</div>
+                </span>`
+              : html`<span style="${cell};color:var(--tx)" title=${name}>${name}</span>`}
+            <span style="${cell};font:10.5px ${MONO};color:var(--faint)">${err ? '' : tools}</span>
+            <span style="${cell};font-weight:600;font-size:11px;color:${isRun ? 'var(--acc)' : res === 'PASS' ? 'var(--grn)' : res === 'FAIL' || res === 'ERROR' ? 'var(--red)' : 'var(--faint)'}">${err ? '' : isRun ? 'RUN…' : res}</span>
+            <span style="${cell};text-align:right;font:11px ${MONO};color:var(--faint)">${err ? '' : time}</span>
+            <span class="hv-white" title="Open in the system's editor"
+              onClick=${(e) => { e.stopPropagation(); send('tc_open', { id }); }}
+              style="text-align:center;color:var(--faint);cursor:pointer;font-size:12px">✎</span>
           </div>`;
         })}
       </div>

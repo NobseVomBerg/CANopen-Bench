@@ -30,6 +30,9 @@ tools: [PSU]                # optional; benötigte Zusatzgeräte, [] = keine
 est: "8.4 s"                # optional; erwartete Dauer, nur Anzeige
 dut: selected               # optional; Zielgerät der Bus-Schritte:
                             #   selected (Default) | {code: "D28"}
+variants: ["820", "920"]    # optional; HW-Varianten, für die der Fall gilt,
+                            #   so wie das Gerät sie meldet. [] = alle
+on_fail: stop               # optional; stop (Default) | continue
 preconditions: []           # optional; Schritte; Fehlschlag → SKIP
 steps: []                   # Pflicht; die eigentliche Sequenz
 ```
@@ -40,6 +43,32 @@ Bus-Schritt darf per `node:` ein anderes Gerät ansprechen: ein Fall
 handelt von einem Prüfling, aber am Bus hängt manchmal mehr — ein zweites
 Gerät, das Material verbraucht, ein Gateway. Ohne diese Angabe ließe sich
 so ein Fall gar nicht aufschreiben.
+
+### `variants` — für welche Hardware der Fall gilt
+
+Die Varianten, wie das Gerät sie selbst meldet (Scan liest sie aus dem
+Objekt, das der EDS-Eintrag dafür benennt). Leer heißt: für alle.
+
+Einmal im Kopf, nicht als Vorbedingung aus Sprüngen: der Katalog kann
+danach filtern, ohne irgendetwas auszuführen, und der Executor
+überspringt eine Abweichung von selbst (Verdikt **SKIP** mit
+Begründung). **Nur eine bekannte Abweichung überspringt** — meldet das
+Gerät keine Variante, läuft der Fall. Nicht zu prüfen, weil eine Zahl
+nicht gelesen werden konnte, ließe Abdeckung lautlos verschwinden.
+
+### `on_fail` — ob der Fall seinen eigenen Fehlschlag überlebt
+
+`stop` (Default) beendet den Fall beim ersten verfehlten Erwartungs-Schritt.
+Das ist richtig für fast alles — und genau falsch für einen Fall, dessen
+letzte Schritte den Prüfstand wieder herrichten: ein Lauf, der bei 12 V
+fehlschlägt und stehen bleibt, lässt das Gerät bei 12 V stehen.
+
+`continue` merkt sich den ersten Fehlschlag (er bleibt die Begründung des
+Verdikts **FAIL**) und läuft weiter, damit `jump_on_error` ins Aufräumen
+springen kann. Technische Fehler (ERROR) brechen weiterhin ab — durch
+einen Verbindungsverlust lässt sich nicht hindurchlaufen. Für
+`preconditions` gilt `on_fail` nicht: dort heißt Fehlschlag SKIP, und es
+gibt nichts rückgängig zu machen.
 
 ## Register und Werte (v2)
 
@@ -86,9 +115,11 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `sdo_write` | `{index, sub, value, size?, expect_abort?, node?}` | SDO-Download; `value` darf Register/Builtin sein — dann bestimmt `size` (1/2/4 Bytes, Default 4) die Breite; literale Hex-Strings behalten ihre eigene Breite | Abort/Timeout ohne `expect_abort` → FAIL; mit `expect_abort` (wie bei `sdo_read`) muss **genau dieser** Abort-Code kommen — ein erfolgreicher Write oder ein anderer Code → FAIL |
 | `wait` | `wait: 1.5` | Sekunden warten | — |
 | `wait_for` | `{heartbeat: <zustand>, timeout, node?, on_timeout?}` **oder** `{cob: <wert> \| [<wert>, …], timeout, data?: "00" \| [...], into?: Rn, on_timeout?}` | auf Heartbeat-Zustand warten oder (v2) auf einen Frame mit dieser COB-ID, optional mit Datenpräfix. `cob`/`data` als **Liste** racen mehrere (COB, Präfix)-Paare **gleichzeitig in einem Wait** (nicht nacheinander) — mit `into: Rn` landet der Index des zuerst getroffenen Paars in diesem Register (ohne `into` wird kein Register beschrieben); damit lässt sich ein Nebensignal (z. B. Addr-End) nicht mehr verpassen, während auf das Hauptsignal gewartet wird — kein blindes Zeitfenster zwischen zwei getrennten Polls mehr nötig. Mit `on_timeout: <label>` wird bei Timeout dorthin **gesprungen** statt FAIL | Timeout → FAIL (ohne `on_timeout`) |
-| `can_send` | `{cob: <wert>, data: [<byte-werte>] \| $session}` | (v2) rohen CAN-Frame senden; Listeneinträge liefern je 1 Byte (Register: Low-Byte); `$session` als Eintrag expandiert zu seinen Bytes. Ohne installierten Addressing-Provider (Vendor-Plugin) gibt es keine Session-Identität — ein Schritt mit `$session` schlägt dann fehl | Fehler ohne Verbindung → ERROR; `$session` ohne Provider → FAIL |
+| `can_send` | `{cob: <wert>, data: [<byte-werte>] \| $session}` | (v2) rohen CAN-Frame senden; Listeneinträge liefern je 1 Byte (Register: Low-Byte); `$session` als Eintrag expandiert zu seinen Bytes. `data: []` sendet einen Frame **ohne Daten** — ein CiA-301-SYNC trägt genau dann keine, wenn kein Zähler konfiguriert ist. Ohne installierten Addressing-Provider (Vendor-Plugin) gibt es keine Session-Identität — ein Schritt mit `$session` schlägt dann fehl | Fehler ohne Verbindung → ERROR; `$session` ohne Provider → FAIL |
 | `lss_assign` | `{count: <wert>, into?: Rn}` | (v2) Standard-Adressierung nach CiA 305: unkonfigurierte Slaves (Node-ID 0xFF) einzeln per LSS-Fastscan identifizieren und auf die Node-IDs 1..count konfigurieren/speichern; genau ein bereits konfiguriertes Gerät wird per globalem State-Switching umadressiert. Die Anzahl tatsächlich zugewiesener Nodes landet in `into` (Default `R0`) — auf echter LSS-Hardware bislang **ungetestet** (A-03) | Fehler nur ohne Verbindung → ERROR; Unterzahl per `jump_lt`/`fail` im Ablauf behandeln |
 | `manual` | `manual: "Text"` bzw. `{text, timeout?}` | Bedieneranweisung, wartet auf Bestätigung (Default 120 s) | Abbruch/Timeout → ERROR |
+| `ask` | `ask: "Frage?"` bzw. `{text, title?, timeout?}` | Frage an den Bediener mit **drei** Antworten. Ja läuft weiter, Nein ist eine Aussage über das Gerät (kein Abbruch), Abbrechen heißt „gilt hier nicht" | Nein → FAIL mit der Frage als Begründung; Abbrechen → SKIP; Timeout → ERROR |
+| `adjust` | `{index, sub, text?, size?, node?}` | Objekt lesen, dem Bediener zum Ändern anbieten, den eingetippten Wert zurückschreiben (Ersatz für eine Mini-Form im Altwerkzeug). **Die Eingabe ist dezimal, außer sie beginnt mit `0x`** — anders als überall sonst im Format, weil hier ein Mensch neben einem Messgerät tippt. Der geschriebene Wert landet in `R0` | Lese-/Schreib-Abort → FAIL; Abbrechen → SKIP; Timeout oder keine Zahl → ERROR |
 | `psu` | `{ch?, volt?, curr?, output?}` | Labornetzteil stellen (`canopen_bench/instruments/`): Spannung/Strom eines Kanals (`ch`, Default 1) und/oder Ausgang `on`/`off`. Mindestens eines von `volt`/`curr`/`output`. Volt/Ampere dürfen Kommazahlen sein | kein Netzteil verbunden oder Fehler am Gerät → ERROR (Prüfmittel fehlt, das ist kein Fehlverhalten des DUT) |
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
 | `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
@@ -102,6 +133,8 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `add` / `sub` / `mul` / `div` / `and` / `or` / `xor` | `{to: Rn, value: <wert>}` | Rn := Rn OP value (32-bit-Wrap); `div` ist ganzzahlig, Division durch 0 → ERROR |
 | `label` | `label: <name>` | Sprungmarke (eindeutig je Schrittliste) |
 | `jump` | `jump: <name>` | unbedingter Sprung |
+| `jump_on_error` | `jump_on_error: <name>` | springt, wenn der Fall bereits fehlgeschlagen ist. Nur mit `on_fail: continue` überhaupt erreichbar — sonst wäre der Lauf am Fehlschlag schon beendet |
+| `rand` | `{to: Rn, min?, max?}` | Zufallszahl im Bereich (inklusive), Default 0…2³²−1 |
 | `jump_eq` / `jump_ne` / `jump_gt` / `jump_lt` / `jump_ge` / `jump_le` | `{a: <wert>, b: <wert>, to: <name>}` | Sprung, wenn a == / ≠ / > / < / ≥ / ≤ b |
 | `fail` | `fail: "Text"` | Fall sofort mit **FAIL** beenden (typisches Sprungziel) |
 | `skip` | `skip: "Text"` | Fall sofort mit **SKIP** beenden — „gilt hier nicht", etwa für eine Gerätevariante, die der Fall nicht abdeckt. Kein Fehler, färbt einen Lauf nicht rot |
