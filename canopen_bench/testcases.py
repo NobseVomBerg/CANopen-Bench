@@ -153,20 +153,20 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return "ask: timeout must be a duration in seconds"
         return None if val.get("text") else "ask: needs a text"
     if key in _ARITH:
-        if not isinstance(val, dict) or set(val) != {"to", "value"}:
+        if not isinstance(val, dict) or set(val) - _NOTE != {"to", "value"}:
             return f"{key}: needs {{to, value}}"
         if val["to"] not in REGISTERS:
             return f"{key}: to must be a register R0–R15, got {val['to']!r}"
         return None if _is_value(val["value"]) else f"{key}: invalid value {val['value']!r}"
     if key in _COND_JUMPS:
-        if not isinstance(val, dict) or set(val) != {"a", "b", "to"}:
+        if not isinstance(val, dict) or set(val) - _NOTE != {"a", "b", "to"}:
             return f"{key}: needs {{a, b, to}}"
         for operand in ("a", "b"):
             if not _is_value(val[operand]):
                 return f"{key}: invalid operand {val[operand]!r}"
         return None if isinstance(val["to"], str) and val["to"] else f"{key}: needs a target label"
     if key == "lss_assign":
-        if not isinstance(val, dict) or not {"count"} <= set(val) <= {"count", "into"}:
+        if not isinstance(val, dict) or not {"count"} <= set(val) - _NOTE <= {"count", "into"}:
             return "lss_assign: needs {count, into?}"
         if not _is_value(val["count"]):
             return f"lss_assign: invalid count {val['count']!r}"
