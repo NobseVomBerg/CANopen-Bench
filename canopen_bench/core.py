@@ -225,6 +225,24 @@ def _judge_read(spec: dict, res: SdoResult) -> tuple[str, str]:
     return "fail", f"{where} = {res.value}, expected {_hexstr(spec['expect'])}{detail}"
 
 
+def _with_registers(spec: dict, regs: dict) -> dict:
+    """``expect``/``mask`` named as a register, replaced by its value.
+
+    A case that works out what it expects — read the variant, derive the
+    screen code from it, then compare — writes ``expect: R11``, which the
+    format has always allowed. Without this the name reached the
+    comparison as the literal string "R11", matched nothing, and the step
+    could only fail.
+    """
+    if not any(spec.get(k) in regs for k in ("expect", "mask")):
+        return spec
+    out = dict(spec)
+    for key in ("expect", "mask"):
+        if out.get(key) in regs:
+            out[key] = regs[out[key]]
+    return out
+
+
 def _step_text(key: str, val) -> str:
     """Human-readable step line for the run progress ("step 3/9 <text>")."""
     if key == "manual":
@@ -2930,9 +2948,13 @@ class Bench:
         if key == "sdo_read":
             res = await asyncio.to_thread(
                 bus.sdo_read, node, _hexstr(val["index"]), _hexstr(val["sub"]))
+            # resolved *before* the result is stored: `into` defaults to R0,
+            # so an `expect: R0` resolved afterwards would compare the value
+            # against itself and pass no matter what the device answered
+            spec = _with_registers(val, regs)
             if res.ok:  # the result is always available for further processing
                 regs[val.get("into", "R0")] = (_as_int(res.value) or 0) & 0xFFFFFFFF
-            return _judge_read(val, res)
+            return _judge_read(spec, res)
         if key == "psu":
             if self.psu is None:
                 # equipment the case needs is not there — that is not the

@@ -574,3 +574,107 @@ def test_without_a_supply_the_case_errors_rather_than_blaming_the_device(tc_benc
     _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
     run_selected(tc_bench, {"0017"})
     assert tc_bench.results == {"0017": "ERROR"}
+
+
+# -- sdo_read expect/mask as a register reference (docs/ablaeufe/testfall-format.md:49) --
+# A case that derives what it expects — read the variant, work out the
+# screen code, then compare — writes `expect: R<n>` / `mask: R<n>`. Before
+# the fix `_judge_read` got the literal string "R1", which could never equal
+# a numeric SDO value, so such a case could only ever FAIL.
+
+EXPECT_FROM_REGISTER_PASS_TC = """\
+id: "0020"
+name: "expect resolves from a computed register"
+steps:
+  - mov: {to: R1, value: "0x26"}
+  - mul: {to: R1, value: "0x10000"}
+  - add: {to: R1, value: 1}
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: R1}
+"""
+
+EXPECT_FROM_REGISTER_FAIL_TC = """\
+id: "0021"
+name: "expect resolves from a computed register but the arithmetic is wrong"
+steps:
+  - mov: {to: R1, value: "0x26"}
+  - mul: {to: R1, value: "0x10000"}
+  - add: {to: R1, value: 2}
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: R1}
+"""
+
+MASK_FROM_REGISTER_TC = """\
+id: "0022"
+name: "mask resolves from a register too"
+steps:
+  - mov: {to: R2, value: "0xFF"}
+  - sdo_read: {index: "0x2040", sub: "0x01", mask: R2, expect: "0x01"}
+"""
+
+EXPECT_R0_SELF_COMPARE_TC = """\
+id: "0023"
+name: "expect R0 compares against what the device answers, not against itself"
+steps:
+  - mov: {to: R0, value: "0x99"}
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: R0}
+"""
+
+LITERAL_EXPECT_REGRESSION_TC = """\
+id: "0024"
+name: "plain literal expect and non-numeric literal expect are unaffected"
+steps:
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x1008", sub: "0x00", expect: "DUT_ALPHA"}
+"""
+
+
+def test_sdo_read_expect_resolves_from_a_computed_register(tc_bench):
+    # R1 is computed to exactly 0x00260001 — the value 0x2040:01 actually
+    # holds — so this only PASSes if `expect: R1` was resolved to that
+    # number before the comparison, not left as the literal string "R1".
+    _add_tc(tc_bench, "TC0020_expect_register.yaml", EXPECT_FROM_REGISTER_PASS_TC)
+    run_selected(tc_bench, {"0020"})
+    assert tc_bench.results == {"0020": "PASS"}
+
+
+def test_sdo_read_expect_from_register_fails_on_wrong_arithmetic(tc_bench):
+    # Same shape, but R1 comes out to 0x260002 — one off from the device's
+    # real 0x260001 — so the step must FAIL, and the message must show the
+    # resolved number (proving the register was actually read), not the
+    # bare register name "R1".
+    _add_tc(tc_bench, "TC0021_expect_register_wrong.yaml", EXPECT_FROM_REGISTER_FAIL_TC)
+    run_selected(tc_bench, {"0021"})
+    assert tc_bench.results == {"0021": "FAIL"}
+    fail_lines = [ln["msg"] for ln in tc_bench.logs if "0x260002" in ln["msg"]]
+    assert fail_lines, tc_bench.logs
+    assert not any("R1" in ln for ln in fail_lines)
+
+
+def test_sdo_read_mask_resolves_from_a_register(tc_bench):
+    # 0x2040:01 is 0x00260001, so "expect 0x01" only holds under a mask
+    # that keeps the low byte. An unresolved "0xFF" would leave the mask
+    # None and compare the whole word, which does not match — so this
+    # PASSes only if the register really became 0xFF.
+    _add_tc(tc_bench, "TC0022_mask_register.yaml", MASK_FROM_REGISTER_TC)
+    run_selected(tc_bench, {"0022"})
+    assert tc_bench.results == {"0022": "PASS"}
+
+
+def test_expect_r0_compares_against_the_device_not_against_itself(tc_bench):
+    """Regression for the ordering bug: R0 is preloaded to 0x99 before the
+    read, and `into` defaults to R0 too. Resolving `expect: R0` *after*
+    storing the read result would compare the value against itself and
+    PASS unconditionally; resolving it first (against the preloaded 0x99)
+    correctly FAILs since the device answers 0x260001."""
+    _add_tc(tc_bench, "TC0023_expect_r0_self_compare.yaml", EXPECT_R0_SELF_COMPARE_TC)
+    run_selected(tc_bench, {"0023"})
+    assert tc_bench.results == {"0023": "FAIL"}
+
+
+def test_literal_expect_is_unaffected_by_register_resolution(tc_bench):
+    """Regression: a plain hex literal (numeric compare path) and a
+    non-numeric literal like a device name (string compare path in
+    `_judge_read`) must behave exactly as before — neither one is a
+    register name, so `_with_registers` must leave them untouched."""
+    _add_tc(tc_bench, "TC0024_literal_expect.yaml", LITERAL_EXPECT_REGRESSION_TC)
+    run_selected(tc_bench, {"0024"})
+    assert tc_bench.results == {"0024": "PASS"}
