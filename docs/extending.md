@@ -38,7 +38,7 @@ only what you provide.
 |---|---|---|
 | `adapters()` | `list[dict]` | Extra adapter cards on the Setup page (listed before the built-ins) |
 | `adapter_backends()` | `dict` | Adapter key → (python-can interface, default channel) for those cards; the python-can driver itself ships via python-can's own `can.interface` group |
-| `seed_eds()` | `list[dict]` | EDS registry rows seeded once into an empty workspace |
+| `seed_eds()` | `list[dict]` | EDS registry rows seeded once into an empty workspace; a row may bring its `commands` and its `variant` (`{index, sub, map?}` — where this family keeps its variant number) instead of the operator configuring both by hand |
 | `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits |
 | `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables; seeded into the workspace like flows |

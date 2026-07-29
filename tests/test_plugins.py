@@ -82,6 +82,68 @@ def test_plugin_seeds_eds_once(tmp_path):
     assert {e["file"] for e in again.db.eds_list()} == {"fake_dev.eds"}  # not duplicated
 
 
+# -- seeded variant detection (Bench.__init__ seed_eds loop, "variant" key) -
+
+class _VariantSeedPlugin(BenchPlugin):
+    """Seeds one EDS row carrying an optional ``variant`` key — the plugin
+    already knows where its device family keeps its variant number, so the
+    operator should not have to configure it by hand in the EDS panel
+    afterwards."""
+
+    def __init__(self, name: str, row: dict):
+        self.name = name
+        self._row = row
+
+    def seed_eds(self) -> list[dict]:
+        return [self._row]
+
+
+def test_seeded_variant_populates_registry_fields(tmp_path):
+    row = {"file": "variant_dev.eds", "dev": "VARIANT_DEV",
+           "ident": "0x4D2·0x1150", "code": "VAR", "enabled": True,
+           "variant": {"index": "0x2050", "sub": "00", "map": {"0x00": "HV"}}}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_VariantSeedPlugin("variantfake", row)])
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "variant_dev.eds")
+    assert (entry["variant_index"], entry["variant_sub"], entry["variant_map"]) == \
+        ("0x2050", "00", {"0x00": "HV"})
+
+
+def test_seeded_row_without_variant_key_leaves_variant_fields_empty(tmp_path):
+    """Regression: "variant" is optional — a plugin that never mentions it
+    must keep seeding exactly as before."""
+    row = {"file": "plain_dev.eds", "dev": "PLAIN_DEV",
+           "ident": "0x4D2·0x1151", "code": "PLN", "enabled": True}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_VariantSeedPlugin("novariant", row)])
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "plain_dev.eds")
+    assert (entry["variant_index"], entry["variant_sub"], entry["variant_map"]) == ("", "", {})
+
+
+def test_seeded_variant_without_map_key_defaults_to_empty_map(tmp_path):
+    """"map" itself is optional on the variant dict — must not crash and
+    must store {} rather than None."""
+    row = {"file": "nomap_dev.eds", "dev": "NOMAP_DEV",
+           "ident": "0x4D2·0x1152", "code": "NOM", "enabled": True,
+           "variant": {"index": "0x2050", "sub": "00"}}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_VariantSeedPlugin("nomap", row)])
+    entry = next(e for e in bench.db.eds_list() if e["file"] == "nomap_dev.eds")
+    assert (entry["variant_index"], entry["variant_sub"], entry["variant_map"]) == ("0x2050", "00", {})
+
+
+def test_seeded_variant_fills_device_variant_on_scan(tmp_path):
+    """End to end: a plugin-seeded variant config is enough for a scan to
+    fill in the device's variant column without any manual EDS-panel setup
+    — 0x2050:00 is the seed EDS's "Variant id" object (see conftest.SEED_EDS)
+    and reads back as "0x00", which the map here translates to a label."""
+    row = {"file": "scan_variant_dev.eds", "dev": "SCAN_VARIANT_DEV",
+           "ident": "0x4D2·0x1150", "code": "SVD", "enabled": True,
+           "variant": {"index": "0x2050", "sub": "00", "map": {"0x00": "HV"}}}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_VariantSeedPlugin("scanvariant", row)])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    dev = next(d for d in bench.devices if d["eds"] == "scan_variant_dev.eds")
+    assert dev["variant"] == "HV"
+
+
 def test_plugin_flow_seeded_and_not_overwritten(tmp_path):
     flow_src = tmp_path / "flow_src"
     flow_src.mkdir()
