@@ -515,6 +515,8 @@ class Bench:
         self.repeat_case = 1
         self.repeat_run = 1
         self.reports: list[dict] = []  # demo seeds are injected per snapshot, demo adapter only
+        #: the last overview across runs, once one was asked for
+        self.overview: dict | None = None
         # expected/found/last/result start empty — they only carry values
         # once a state was adopted and a verify actually ran
         self.mc: dict = {"enabled": False, "session": "", "expected": 0, "found": 0,
@@ -847,6 +849,35 @@ class Bench:
             return f"{stamp}__summary.html"
         self.log(f"RUN  report {summary} ({len(run.cases)} case(s)) in {folder}")
         return summary
+
+    def _results_dir(self) -> Path:
+        return Path(self.paths.get("res") or (self.db.path.parent / "results"))
+
+    def act_report_overview(self, p: dict) -> None:
+        """Fold the last so many days of runs into one page per hardware
+        variant. Written on request rather than after every run: it reads
+        the whole results folder, and most runs are one more data point in
+        a picture nobody is looking at right now.
+        """
+        days = max(1, min(90, int(p.get("days") or 7)))
+        folder = self._results_dir()
+        try:
+            runs = reportlib.load_runs(folder, days)
+            variants = reportlib.collect_overview(runs)
+            reportlib.write_stylesheet(folder)
+            generated = datetime.now().isoformat(timespec="seconds")
+            (folder / reportlib.OVERVIEW).write_text(
+                reportlib.overview_html(variants, days, generated), encoding="utf-8")
+        except OSError as exc:
+            self.log(f"RUN  overview not written — {exc}", "emcy0")
+            return
+        self.overview = {"name": reportlib.OVERVIEW, "days": days, "runs": len(runs),
+                         "variants": [{"key": v.key, "runs": v.runs,
+                                       "passed": v.passed, "of": v.executions,
+                                       "verdict": v.verdict} for v in variants]}
+        what = (f"{len(runs)} run(s), {len(variants)} variant(s)" if runs
+                else f"no runs in the last {days} day(s)")
+        self.log(f"RUN  overview {reportlib.OVERVIEW} — {what} in {folder}")
 
     # ------------------------------------------------------------------
     # actions (dispatched from the API layer)
@@ -3643,6 +3674,7 @@ class Bench:
                 "repeatRun": self.repeat_run,
                 "fileCount": len(self.testcases),
                 "reports": self.reports or (list(data.SEED_REPORTS) if demo else []),
+                "overview": self.overview,
                 "suites": sorted(self.suites),
                 "activeSuite": self.active_suite,
             },

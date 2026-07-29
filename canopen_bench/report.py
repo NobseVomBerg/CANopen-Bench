@@ -18,15 +18,23 @@ Three decisions worth stating:
   because a duplicated id is the kind of thing that works until some
   reader decides it does not.
 * **A machine-readable sibling is written next to the summary.** The
-  numbers a later overview needs — variant, verdict, timestamps — are in
-  a JSON file, so that overview reads data instead of scraping the HTML
-  it is meant to link to.
+  numbers the overview needs — variant, verdict, timestamps — are in a
+  JSON file, so the overview reads data instead of scraping the HTML it
+  is meant to link to.
+
+The overview itself is the last part: ``collect_overview`` folds the
+runs of the last so many days into one line per hardware variant, and
+``overview_html`` writes that out with a collapsible section per
+variant. It answers the question a summary of a single run cannot —
+"is the 820 fine and only the 920 broken, or is it all of them?" —
+which is why it groups by variant rather than by run.
 """
 from __future__ import annotations
 
 import html
 import json
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 
 #: Verdicts, in the vocabulary the runner produces.
 PASS, FAIL, ERROR, SKIP = "PASS", "FAIL", "ERROR", "SKIP"
@@ -243,7 +251,7 @@ def summary_html(run: RunRecord) -> str:
 
 
 def summary_json(run: RunRecord) -> str:
-    """The same run as data. Written beside the summary so that a later
+    """The same run as data. Written beside the summary so that the
     overview — per hardware variant, over the last so many days — reads
     this instead of parsing the HTML it wants to link to."""
     doc = asdict(run)
@@ -251,3 +259,189 @@ def summary_json(run: RunRecord) -> str:
     for case in doc["cases"]:
         case.pop("steps", None)      # the steps live in the case's own file
     return json.dumps(doc, indent=1, ensure_ascii=False)
+
+
+# -- the overview across runs ------------------------------------------------
+
+#: what a run's JSON is called, so the overview knows what to read
+SUMMARY_GLOB = "*__summary.json"
+#: and what the overview itself is called, so it never reads itself
+OVERVIEW = "__overview.html"
+
+
+@dataclass
+class CaseStats:
+    """One test case as seen across every run of one variant."""
+    id: str = ""
+    name: str = ""
+    runs: int = 0
+    passed: int = 0
+    last_verdict: str = ""
+    last_started: str = ""
+    last_file: str = ""      # the newest report for this case, to link to
+
+    @property
+    def rate(self) -> str:
+        return f"{self.passed}/{self.runs}"
+
+
+@dataclass
+class VariantStats:
+    """One hardware variant, and every case that ran against it."""
+    key: str = ""            # the variant, or the device name when there is none
+    device: str = ""         # a device name seen under this key
+    runs: int = 0            # how many *runs* touched this variant
+    last_started: str = ""   # when the newest of those runs started
+    #: the verdicts of that newest run's cases, and nothing else — see
+    #: verdict() for why this is not just "every case's latest"
+    last_verdicts: list[str] = field(default_factory=list)
+    cases: list[CaseStats] = field(default_factory=list)
+
+    @property
+    def executions(self) -> int:
+        return sum(c.runs for c in self.cases)
+
+    @property
+    def passed(self) -> int:
+        return sum(c.passed for c in self.cases)
+
+    @property
+    def verdict(self) -> str:
+        """The variant's newest word on itself: how the most recent run
+        that touched it ended.
+
+        Not an average over the window — "12 of 14 passed" says nothing
+        about whether the thing works today. And not "every case's own
+        latest verdict" either: a case that failed a week ago and has not
+        been run since would then keep the variant red forever, long
+        after the run that would clear it stopped including it.
+        """
+        if any(v in (FAIL, ERROR) for v in self.last_verdicts):
+            return FAIL
+        return PASS if any(v == PASS for v in self.last_verdicts) else SKIP
+
+
+def _parse_ts(text: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def load_runs(folder, days: int, now: datetime | None = None) -> list[dict]:
+    """Every run summary in ``folder`` from the last ``days`` days.
+
+    Filtered on the run's own ``started``, not on the file's timestamp: a
+    results folder gets copied, synced and restored, and mtime survives
+    none of that. A file whose timestamp cannot be read is kept rather
+    than dropped — an unreadable date is a reason to look, not to hide.
+    """
+    from pathlib import Path
+
+    now = now or datetime.now()
+    cutoff = now - timedelta(days=max(1, int(days)))
+    runs = []
+    for path in sorted(Path(folder).glob(SUMMARY_GLOB)):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue                      # half-written or not ours
+        if not isinstance(doc, dict):
+            continue
+        started = _parse_ts(doc.get("started"))
+        if started is not None and started < cutoff:
+            continue
+        runs.append(doc)
+    return runs
+
+
+def collect_overview(runs: list[dict]) -> list[VariantStats]:
+    """Fold runs into one entry per hardware variant.
+
+    Grouped by the variant a scan read from the device. A device that
+    does not report one is grouped under its own name instead — that is
+    still a hardware distinction, and dropping those cases would make the
+    overview quietly incomplete.
+    """
+    groups: dict[str, VariantStats] = {}
+    for run in runs:
+        run_started = str(run.get("started") or "")
+        touched: set[str] = set()
+        for case in run.get("cases") or []:
+            if not isinstance(case, dict):
+                continue
+            key = str(case.get("variant") or case.get("device") or "unknown")
+            group = groups.setdefault(key, VariantStats(key=key))
+            group.device = group.device or str(case.get("device") or "")
+            verdict = str(case.get("verdict") or "")
+            if key not in touched:
+                touched.add(key)
+                group.runs += 1
+                # a newer run replaces what "last" means for this variant;
+                # runs are read in file-name order, and a results folder
+                # merged from two benches does not come out chronological
+                if run_started > group.last_started:
+                    group.last_started, group.last_verdicts = run_started, []
+            if run_started == group.last_started:
+                group.last_verdicts.append(verdict)
+            stat = next((c for c in group.cases if c.id == case.get("id")), None)
+            if stat is None:
+                stat = CaseStats(id=str(case.get("id") or ""),
+                                 name=str(case.get("name") or ""))
+                group.cases.append(stat)
+            stat.runs += 1
+            if verdict == PASS:
+                stat.passed += 1
+            started = str(case.get("started") or run_started)
+            if started >= stat.last_started:
+                stat.last_started, stat.last_verdict = started, verdict
+                stat.last_file = str(case.get("file") or "")
+    for group in groups.values():
+        group.cases.sort(key=lambda c: (c.id, c.name))
+    return sorted(groups.values(), key=lambda g: g.key)
+
+
+def overview_html(variants: list[VariantStats], days: int, generated: str = "") -> str:
+    """The overview page: one collapsible section per hardware variant.
+
+    Collapsed by default, because the point is to see the variants first
+    and only then the case that is red in one of them.
+    """
+    body = "<table>\n"
+    body += _row("Overview by hardware variant", f"last {int(days)} day(s)", "testCaseName")
+    if generated:
+        body += _row("Generated", _e(generated))
+    body += _row("Variants", _e(len(variants)) if variants else "none — no runs in this window")
+    body += "<tr><th colspan=3 class='emptyColumn'></th></tr>\n"
+    body += "<tr><th>Variant</th><th>Runs · cases passed</th><th>Last result</th></tr>\n"
+    for group in variants:
+        cls = _RESULT_CLASS.get(group.verdict, "")
+        body += (f"<tr><td>{_e(_group_text(group))}</td>"
+                 f"<td>{group.runs} run(s) · {group.passed}/{group.executions} passed</td>"
+                 f"<td class='{cls}'>{_e(group.verdict)}</td></tr>\n")
+    body += "</table>\n"
+    for group in variants:
+        body += _variant_details(group)
+    return _page(f"Overview — last {int(days)} day(s)", body)
+
+
+def _group_text(group: VariantStats) -> str:
+    if group.device and group.device != group.key:
+        return f"{group.key} · {group.device}"
+    return group.key
+
+
+def _variant_details(group: VariantStats) -> str:
+    out = (f"<details><summary>{_e(_group_text(group))} — {group.runs} run(s), "
+           f"{group.passed}/{group.executions} passed, last {_e(group.verdict)}"
+           "</summary>\n<table>\n")
+    out += ("<tr><th>Case</th><th>Runs · passed</th><th>Last result</th>"
+            "<th>Last run</th></tr>\n")
+    for case in group.cases:
+        link = (f"<a href='{_e(case.last_file)}'>{_e(case.id)} · {_e(case.name)}</a>"
+                if case.last_file else f"{_e(case.id)} · {_e(case.name)}")
+        ccls = _RESULT_CLASS.get(case.last_verdict, "")
+        out += (f"<tr><td>{link}</td><td>{case.rate}</td>"
+                f"<td class='{ccls}'>{_e(case.last_verdict)}</td>"
+                f"<td>{_e(case.last_started)}</td></tr>\n")
+    return out + "</table>\n</details>\n"

@@ -7,6 +7,7 @@ which device, which step failed and why — rather than about markup.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from conftest import connect_and_scan, write_seed_eds_files
@@ -14,11 +15,16 @@ from conftest import connect_and_scan, write_seed_eds_files
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.report import (
+    OVERVIEW,
     STYLESHEET,
+    SUMMARY_GLOB,
     CaseRecord,
     RunRecord,
     StepRecord,
     case_html,
+    collect_overview,
+    load_runs,
+    overview_html,
     summary_html,
     summary_json,
     write_stylesheet,
@@ -214,3 +220,187 @@ def test_an_unwritable_results_folder_does_not_lose_the_run(tmp_path):
     _run_all(bench)
     assert bench.results.get("0101") == "PASS"
     assert any("report not written" in row["msg"] for row in bench.logs)
+
+
+# -- the overview across runs ------------------------------------------------
+
+def _write_run(folder: Path, name: str, doc: dict | str) -> None:
+    text = doc if isinstance(doc, str) else json.dumps(doc)
+    (folder / f"{name}{SUMMARY_GLOB[1:]}").write_text(text, encoding="utf-8")
+
+
+def _case_doc(**kw) -> dict:
+    base = dict(id="0042", name="Power off handling", variant="V2", device="DUT_ALPHA",
+                verdict="PASS", started="2026-07-29T09:13:30", file="a.html")
+    return {**base, **kw}
+
+
+def test_load_runs_keeps_the_window_and_skips_what_it_cannot_read(tmp_path):
+    """A run outside the window is noise, a corrupt file must not blow up
+    the overview, and a run whose own timestamp cannot be read is kept —
+    an unreadable date is a reason to look, not to hide."""
+    now = datetime(2026, 7, 29, 12, 0, 0)
+    old = {"started": (now - timedelta(days=10)).isoformat(), "cases": []}
+    recent = {"started": (now - timedelta(days=1)).isoformat(), "cases": []}
+    unparseable = {"started": "not-a-date", "cases": []}
+    _write_run(tmp_path, "old__", old)
+    _write_run(tmp_path, "recent__", recent)
+    _write_run(tmp_path, "unparseable__", unparseable)
+    _write_run(tmp_path, "corrupt__", "{ this is not json")
+    runs = load_runs(tmp_path, days=7, now=now)
+    started = {r["started"] for r in runs}
+    assert old["started"] not in started
+    assert recent["started"] in started
+    assert "not-a-date" in started
+    assert len(runs) == 2
+
+
+def test_grouping_splits_by_variant_and_falls_back_to_device(tmp_path):
+    """Two variants in one run are two groups; a case with no variant
+    still has to show up somewhere, so it groups under its device name."""
+    run = {"started": "2026-07-28T10:00:00", "cases": [
+        _case_doc(id="01", variant="V1", device="D1"),
+        _case_doc(id="02", variant="V2", device="D2"),
+        _case_doc(id="03", variant="", device="D3"),
+    ]}
+    variants = collect_overview([run])
+    keys = {v.key for v in variants}
+    assert keys == {"V1", "V2", "D3"}
+    for group in variants:
+        assert group.runs == 1
+
+
+def test_a_runs_worth_of_cases_counts_as_one_run_not_three(tmp_path):
+    """The overview answers "how many times was this touched", not "how
+    many cases ran" — three cases of the same variant in one run must not
+    look like three separate runs of it."""
+    run = {"started": "2026-07-28T10:00:00", "cases": [
+        _case_doc(id="01", variant="V1"),
+        _case_doc(id="02", variant="V1"),
+        _case_doc(id="03", variant="V1"),
+    ]}
+    (variant,) = collect_overview([run])
+    assert variant.runs == 1
+    assert variant.executions == 3
+
+
+def test_verdict_is_the_newest_run_not_an_average_over_the_window():
+    """The whole point of the feature: a variant that failed three days
+    ago and passed yesterday must read PASS today, and the other way
+    around must read FAIL — not "2 of 2 passed" hiding a live failure."""
+    old_fail = {"started": "2026-07-26T08:00:00",
+                "cases": [_case_doc(id="01", variant="V1", verdict="FAIL")]}
+    new_pass = {"started": "2026-07-28T08:00:00",
+                "cases": [_case_doc(id="01", variant="V1", verdict="PASS")]}
+    (variant,) = collect_overview([old_fail, new_pass])
+    assert variant.verdict == "PASS"
+
+    old_pass = {"started": "2026-07-26T08:00:00",
+                "cases": [_case_doc(id="01", variant="V1", verdict="PASS")]}
+    new_fail = {"started": "2026-07-28T08:00:00",
+                "cases": [_case_doc(id="01", variant="V1", verdict="FAIL")]}
+    (variant,) = collect_overview([old_pass, new_fail])
+    assert variant.verdict == "FAIL"
+
+
+def test_a_cases_last_file_is_the_newest_report_not_the_first_seen():
+    """The link in the overview must point at the latest report for that
+    case — a reader chasing a failure does not want yesterday's file."""
+    older = {"started": "2026-07-28T08:00:00", "cases": [
+        _case_doc(id="01", variant="V1", started="2026-07-28T08:00:00", file="old.html"),
+    ]}
+    newer = {"started": "2026-07-29T08:00:00", "cases": [
+        _case_doc(id="01", variant="V1", started="2026-07-29T08:00:00", file="new.html"),
+    ]}
+    # fed newest-first, so a naive "first wins" implementation would fail
+    (variant,) = collect_overview([newer, older])
+    (case,) = variant.cases
+    assert case.last_file == "new.html"
+
+
+def test_overview_html_has_one_details_per_variant_and_escapes_names():
+    """Every case with a file links to it, markup in a name cannot break
+    out of the page, and the stylesheet is linked rather than inlined."""
+    run = {"started": "2026-07-28T08:00:00", "cases": [
+        _case_doc(id="01", name="a <script>alert(1)</script> case", variant="V1",
+                  file="v1.html"),
+        _case_doc(id="02", name="no file yet", variant="V2", file=""),
+    ]}
+    variants = collect_overview([run])
+    doc = overview_html(variants, days=7)
+    assert doc.count("<details>") == 2
+    assert "href='v1.html'" in doc
+    assert "<script>" not in doc and "&lt;script&gt;" in doc
+    assert f"href='{STYLESHEET}'" in doc
+    assert "<style>" not in doc
+
+
+def _bench_res(tmp_path) -> Bench:
+    bench = Bench(Db(tmp_path / "r.db"))
+    res = tmp_path / "res"
+    res.mkdir()
+    bench.dispatch("set_path", {"which": "res", "value": str(res)})
+    return bench
+
+
+def test_report_overview_end_to_end_through_the_bench(tmp_path):
+    """The action folds the seeded runs into the overview page and into
+    the snapshot the frontend reads, and clamps the day window."""
+    bench = _bench_res(tmp_path)
+    folder = Path(bench.paths["res"])
+    run = {"started": "2026-07-28T08:00:00", "cases": [
+        _case_doc(id="01", name="power off", variant="V1", verdict="PASS", file="a.html"),
+        _case_doc(id="02", name="wrong expect", variant="V2", verdict="FAIL", file="b.html"),
+    ]}
+    _write_run(folder, "20260728_080000__", run)
+
+    bench.dispatch("report_overview", {"days": 7})
+
+    assert (folder / OVERVIEW).exists()
+    overview = bench.snapshot()["tests"]["overview"]
+    assert overview["runs"] == 1
+    variants = {v["key"]: v for v in overview["variants"]}
+    assert variants["V1"]["verdict"] == "PASS"
+    assert variants["V2"]["verdict"] == "FAIL"
+
+    # days=0 falls back to the 7-day default: the run above (28 Jul) is
+    # inside a 7-day window from "now", so it still shows up
+    bench.dispatch("report_overview", {"days": 0})
+    assert bench.snapshot()["tests"]["overview"]["runs"] == 1
+
+    # days=999 clamps to 90 rather than raising or being taken at face value
+    bench.dispatch("report_overview", {"days": 999})
+    assert bench.snapshot()["tests"]["overview"]["days"] == 90
+
+
+def test_overview_is_none_until_asked_for(tmp_path):
+    bench = _bench_res(tmp_path)
+    assert bench.snapshot()["tests"]["overview"] is None
+
+
+def test_an_unwritable_results_folder_leaves_the_overview_alone(tmp_path):
+    """Same contract as a single report: a folder that cannot be written
+    to is a log line, not a crash, and the last good overview stays put."""
+    bench = _bench_res(tmp_path)
+    bench.dispatch("set_path", {"which": "res", "value": "/proc/nope/results"})
+    bench.dispatch("report_overview", {"days": 7})
+    assert bench.snapshot()["tests"]["overview"] is None
+    assert any("overview not written" in row["msg"] for row in bench.logs)
+
+
+def test_a_case_that_was_not_re_run_does_not_hold_the_variant_red():
+    """The variant's verdict is the newest *run*, not every case's own
+    latest verdict. A case that failed a week ago and has not been run
+    since would otherwise keep the variant red forever — long after the
+    run that would have cleared it stopped including that case."""
+    older = {"started": "2026-07-26T08:00:00", "cases": [
+        _case_doc(id="4857", name="Yarn breakage", verdict="FAIL",
+                  started="2026-07-26T08:00:00")]}
+    newest = {"started": "2026-07-28T08:00:00", "cases": [
+        _case_doc(id="4602", name="Power off", verdict="PASS",
+                  started="2026-07-28T08:00:00")]}
+    (group,) = collect_overview([older, newest])
+    assert group.verdict == "PASS"
+    # the failure is not hidden — it is still in the case's own line
+    failing = next(c for c in group.cases if c.id == "4857")
+    assert failing.last_verdict == "FAIL" and failing.rate == "0/1"
