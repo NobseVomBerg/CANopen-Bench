@@ -103,8 +103,14 @@ def write_seed_eds_files(bench: Bench) -> None:
             bench.db.eds_write_file(e["file"], SEED_EDS)
 
 
-def connect_and_scan(bench: Bench) -> None:
-    """Connect + scan with the scan delay shrunk so tests stay fast."""
+def connect_and_scan(bench: Bench, timeout: float = 10.0) -> None:
+    """Connect + scan with the scan delay shrunk so tests stay fast.
+
+    Waits for the scan to actually finish (bench.scan_busy) rather than
+    sleeping a fixed span: a loaded CI runner is slower than a laptop, and
+    a fixed wait turns that into "no devices found" in a test that has
+    nothing to do with timing.
+    """
     if not bench.connected:
         bench.dispatch("connect_toggle", {})
     orig = core_mod.SCAN_DELAY_S
@@ -112,7 +118,13 @@ def connect_and_scan(bench: Bench) -> None:
     try:
         async def run():
             bench.dispatch("scan", {})
-            await asyncio.sleep(0.15)
+            # wait on the task the dispatch spawned, not on the clock:
+            # scan_busy is set inside the coroutine, so polling it right
+            # after the dispatch races the scheduler
+            pending = set(bench._tasks)
+            if pending:
+                done, still = await asyncio.wait(pending, timeout=timeout)
+                assert not still, "scan did not finish in time"
         asyncio.run(run())
     finally:
         core_mod.SCAN_DELAY_S = orig
