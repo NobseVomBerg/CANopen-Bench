@@ -893,3 +893,56 @@ def test_adjust_value_that_does_not_fit_is_an_error_not_a_truncation(tc_bench):
     assert tc_bench.results == {"0053": "ERROR"}
     assert any("does not fit" in ln["msg"] and "1 byte" in ln["msg"] for ln in tc_bench.logs)
     assert not any("should not be reached" in ln["msg"] for ln in tc_bench.logs)
+
+
+# -- "no EMCY expected", which expect_emcy cannot express at all ------------
+
+NO_EMCY_TC = """\
+id: "0050"
+name: "nothing may have gone wrong"
+steps:
+  - emcy_clear:
+  - expect_no_emcy: {}
+"""
+
+NO_EMCY_VIOLATED_TC = """\
+id: "0051"
+name: "something did go wrong"
+steps:
+  - expect_no_emcy: {}
+"""
+
+NO_EMCY_FILTERED_TC = """\
+id: "0052"
+name: "that particular error may not have happened"
+steps:
+  - expect_no_emcy: {code: "0x99", mask: "0x00FF"}
+"""
+
+
+def test_expect_no_emcy_passes_on_a_quiet_bus(tc_bench):
+    """The opposite assertion to expect_emcy, and not expressible as one:
+    "nothing arrived" cannot be written as a code to match."""
+    _add_tc(tc_bench, "TC0050_no_emcy.yaml", NO_EMCY_TC)
+    run_selected(tc_bench, {"0050"})
+    assert tc_bench.results == {"0050": "PASS"}
+
+
+def test_expect_no_emcy_fails_and_names_what_it_saw(tc_bench):
+    _emcy(tc_bench, code=0x1234)
+    _add_tc(tc_bench, "TC0051_no_emcy_violated.yaml", NO_EMCY_VIOLATED_TC)
+    run_selected(tc_bench, {"0051"})
+    assert tc_bench.results == {"0051": "FAIL"}
+    # naming the code is the difference between "something happened" and a
+    # line somebody can act on
+    assert any("expected no EMCY, saw 0x1234" in ln["msg"] for ln in tc_bench.logs), \
+        [ln["msg"] for ln in tc_bench.logs]
+
+
+def test_expect_no_emcy_with_a_code_ignores_a_different_one(tc_bench):
+    """"this error did not happen" is a narrower claim than "nothing
+    happened", and an EMCY with another code must not fail it."""
+    _emcy(tc_bench, code=0x7100)      # a real EMCY, but not the one asked about
+    _add_tc(tc_bench, "TC0052_no_emcy_filtered.yaml", NO_EMCY_FILTERED_TC)
+    run_selected(tc_bench, {"0052"})
+    assert tc_bench.results == {"0052": "PASS"}
