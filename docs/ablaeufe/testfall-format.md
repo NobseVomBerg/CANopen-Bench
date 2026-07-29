@@ -157,6 +157,7 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `psu` | `{ch?, volt?, curr?, output?}` | Labornetzteil stellen (`canopen_bench/instruments/`): Spannung/Strom eines Kanals (`ch`, Default 1) und/oder Ausgang `on`/`off`. Mindestens eines von `volt`/`curr`/`output`. Volt/Ampere dürfen Kommazahlen sein | kein Netzteil verbunden oder Fehler am Gerät → ERROR (Prüfmittel fehlt, das ist kein Fehlverhalten des DUT) |
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
 | `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
+| `expect_no_emcy` | `{code?, mask?, node?}` | prüft, dass **keine** passende EMCY kam — ohne `code`: gar keine. Wartet nicht: kein Warten beweist, dass nichts mehr kommt; geprüft wird dasselbe Fenster wie bei `expect_emcy`, also alles seit dem letzten `emcy_clear` | passende EMCY vorhanden → FAIL, mit ihrem Code in der Begründung |
 | `expect_emcy` | `{code, mask?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. `mask` vergleicht nur einen Teil des Codes, für Geräte, deren Klassenbyte nicht dokumentiert ist | keine passende EMCY → FAIL |
 
 ### Variablen, Arithmetik, Sprünge (v2)

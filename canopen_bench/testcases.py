@@ -53,6 +53,9 @@ _STEP_FIELDS = {
     "sdo_read": ({"index", "sub"}, {"expect", "expect_abort", "mask", "into", "node"}),
     "sdo_write": ({"index", "sub", "value"}, {"size", "expect_abort", "node"}),
     "expect_emcy": ({"code"}, {"mask", "node", "timeout"}),
+    #: the opposite assertion, and not expressible as expect_emcy with
+    #: anything: "nothing arrived" cannot be written as a code to match
+    "expect_no_emcy": (set(), {"code", "mask", "node"}),
     "psu": (set(), {"ch", "volt", "curr", "output"}),
     "rand": ({"to"}, {"min", "max"}),
     "adjust": ({"index", "sub"}, {"text", "size", "node", "timeout"}),
@@ -271,12 +274,12 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             # file wants to spell this — both spellings are the same thing
             if "output" in val and val["output"] not in (True, False, "on", "off"):
                 return "psu: output must be on or off"
-        if key == "expect_emcy":
+        if key in ("expect_emcy", "expect_no_emcy"):
             for name in ("code", "mask", "node"):
                 if name in val and not _is_value(val[name]):
                     return f"expect_emcy: invalid {name} {val[name]!r}"
             if "timeout" in val and not isinstance(val["timeout"], (int, float)):
-                return "expect_emcy: timeout must be a duration in seconds"
+                return f"{key}: timeout must be a duration in seconds"
         if "node" in val and not _is_value(val["node"]):
             return f"{key}: invalid node {val['node']!r}"
         return None

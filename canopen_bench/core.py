@@ -359,7 +359,14 @@ def _step_text(key: str, val) -> str:
             bits += ["output " + ("on" if val["output"] in (True, "on") else "off")]
         return "supply " + ", ".join(bits)
     if key == "expect_emcy":
+        # mask 0 compares nothing, which is how "any EMCY at all" is
+        # written — saying "expect EMCY 0x00" for that would be a lie
+        if "mask" in val and _as_int(val["mask"]) == 0:
+            return "expect any EMCY"
         return f"expect EMCY {_hexstr(val['code'])}"
+    if key == "expect_no_emcy":
+        return ("expect no EMCY" if "code" not in val
+                else f"expect no EMCY {_hexstr(val['code'])}")
     if key == "emcy_clear":
         return "clear EMCY list"
     if key in ("fail", "skip"):
@@ -3299,6 +3306,21 @@ class Bench:
             if mask != 0xFFFF:
                 where += f" (mask {_hexstr(val['mask'])})"
             return "fail", f"{where} — none seen within {timeout:g}s"
+        if key == "expect_no_emcy":
+            # the opposite of expect_emcy, and it cannot wait: no amount of
+            # waiting proves nothing will arrive. It asks what expect_emcy
+            # asks — of the same window, everything since the last
+            # emcy_clear — and fails if anything in it matches.
+            mask = _resolve(val["mask"], regs, builtins) if "mask" in val else 0xFFFF
+            code = _resolve(val["code"], regs, builtins) if "code" in val else None
+            want_node = _resolve(val["node"], regs, builtins) if "node" in val else None
+            hits = [(n, c) for n, c in self.emcy_seen
+                    if want_node in (None, n)
+                    and (code is None or c & mask == code & mask)]
+            if not hits:
+                return "ok", ""
+            what = ", ".join(f"0x{c:04X} from node {n:02d}" for n, c in hits[-3:])
+            return "fail", f"expected no EMCY, saw {what}"
         if key == "wait_for":
             timeout = float(val["timeout"])
             loop = asyncio.get_running_loop()
