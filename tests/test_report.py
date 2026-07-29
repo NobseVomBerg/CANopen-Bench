@@ -14,12 +14,14 @@ from conftest import connect_and_scan, write_seed_eds_files
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.report import (
+    STYLESHEET,
     CaseRecord,
     RunRecord,
     StepRecord,
     case_html,
     summary_html,
     summary_json,
+    write_stylesheet,
 )
 
 PASS_TC = """\
@@ -75,12 +77,13 @@ def test_a_log_step_reads_as_a_note_not_as_a_verdict():
     assert "testStepComment" in doc
 
 
-def test_the_file_carries_its_own_stylesheet():
-    """A report gets copied into a ticket or mailed on. One that loses its
-    look on the way is worth less than one that is a few kB larger."""
+def test_the_style_is_linked_not_copied_into_every_file():
+    """Inlining it would repeat the same block in every report of every
+    run — and make restyling impossible, which is the one thing a
+    stylesheet is for."""
     doc = case_html(_case())
-    assert "<style>" in doc and "prefers-color-scheme" in doc
-    assert "<link" not in doc
+    assert "href='testReportStyle.css'" in doc
+    assert "<style>" not in doc
 
 
 def test_markup_is_escaped():
@@ -174,6 +177,23 @@ def test_the_written_report_names_the_device_and_the_failing_step(tmp_path):
     assert "DUT_ALPHA" in doc          # which device it ran against
     assert "expected" in doc           # why the step failed
     assert "resultNok" in doc
+
+
+def test_the_run_puts_the_stylesheet_beside_the_reports(tmp_path):
+    bench = _bench(tmp_path)
+    bench.stop_on_err = False
+    _run_all(bench)
+    assert (Path(bench.paths["res"]) / STYLESHEET).exists()
+
+
+def test_an_edited_stylesheet_survives_the_next_run(tmp_path):
+    """It is there to be changed. A run that restored the shipped look
+    would throw that away every time."""
+    folder = tmp_path / "styled"
+    folder.mkdir()
+    (folder / STYLESHEET).write_text("body { color: hotpink; }")
+    write_stylesheet(folder)
+    assert (folder / STYLESHEET).read_text() == "body { color: hotpink; }"
 
 
 def test_the_summary_in_the_list_is_a_file_that_exists(tmp_path):

@@ -6,10 +6,13 @@ device, which step said what, and how it ended.
 
 Three decisions worth stating:
 
-* **The files are self-contained.** The stylesheet is written into every
-  file rather than linked. A report gets copied into a ticket, mailed,
-  or dropped on a share, and one that loses its look on the way is worth
-  less than one that is slightly larger.
+* **One stylesheet, next to the files, linked.** ``testReportStyle.css``
+  is written into the results folder once and every report links it. It
+  is not copied into each file: that would repeat the same block a
+  thousand times over a year of runs, and it would make restyling
+  impossible — the point of a stylesheet is that changing it changes the
+  reports that already exist. An existing file is never overwritten, so
+  edits to it survive.
 * **Markup is generated with classes, not repeated ids.** The look is
   the one this bench is used to; the mechanics behind it are valid HTML,
   because a duplicated id is the kind of thing that works until some
@@ -34,6 +37,9 @@ _RESULT_CLASS = {PASS: "resultOk", FAIL: "resultNok", ERROR: "resultNok",
 #: step outcome -> row class
 _ROW_CLASS = {"ok": "testStepOk", "fail": "testStepNok", "error": "testStepNok",
               "skip": "testStepCanceled", "note": "testStepComment", "": ""}
+
+#: written next to the reports as this file, and linked from them
+STYLESHEET = "testReportStyle.css"
 
 CSS = """\
 @media (prefers-color-scheme: dark) {
@@ -140,13 +146,27 @@ class RunRecord:
         return PASS if any(c.verdict == PASS for c in self.cases) else SKIP
 
 
+def write_stylesheet(folder) -> None:
+    """Put the stylesheet next to the reports, once.
+
+    Never overwrites: the file is there to be edited, and a run that
+    silently restored the shipped look would make every change to it
+    disappear on the next run.
+    """
+    from pathlib import Path
+    target = Path(folder) / STYLESHEET
+    if not target.exists():
+        target.write_text(CSS, encoding="utf-8")
+
+
 def _e(text: object) -> str:
     return html.escape(str(text), quote=False)
 
 
 def _page(title: str, body: str) -> str:
     return ("<!doctype html>\n<html lang='en'>\n<head><meta charset='utf-8'>"
-            f"<title>{_e(title)}</title>\n<style>\n{CSS}</style></head>\n"
+            f"<title>{_e(title)}</title>"
+            f"<link rel='stylesheet' href='{STYLESHEET}'></head>\n"
             f"<body>\n{body}</body>\n</html>\n")
 
 

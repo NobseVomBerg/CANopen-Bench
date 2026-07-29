@@ -807,6 +807,7 @@ class Bench:
         folder = Path(self.paths.get("res") or (self.db.path.parent / "results"))
         try:
             folder.mkdir(parents=True, exist_ok=True)
+            reportlib.write_stylesheet(folder)
             for case in run.cases:
                 case.file = f"{stamp}__{case.id}__{_slug(case.name)}.html"
                 (folder / case.file).write_text(reportlib.case_html(case), encoding="utf-8")
