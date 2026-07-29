@@ -32,7 +32,7 @@ dut: selected               # optional; Zielgerät der Bus-Schritte:
                             #   selected (Default) | {code: "D28"}
 variants: ["820", "920"]    # optional; HW-Varianten, für die der Fall gilt,
                             #   so wie das Gerät sie meldet. [] = alle
-on_fail: stop               # optional; stop (Default) | continue
+on_fail: continue           # optional; continue (Default) | stop
 preconditions: []           # optional; Schritte; Fehlschlag → SKIP
 steps: []                   # Pflicht; die eigentliche Sequenz
 ```
@@ -58,17 +58,51 @@ nicht gelesen werden konnte, ließe Abdeckung lautlos verschwinden.
 
 ### `on_fail` — ob der Fall seinen eigenen Fehlschlag überlebt
 
-`stop` (Default) beendet den Fall beim ersten verfehlten Erwartungs-Schritt.
-Das ist richtig für fast alles — und genau falsch für einen Fall, dessen
-letzte Schritte den Prüfstand wieder herrichten: ein Lauf, der bei 12 V
-fehlschlägt und stehen bleibt, lässt das Gerät bei 12 V stehen.
+`continue` (**Default**) merkt sich den ersten Fehlschlag — er bleibt die
+Begründung des Verdikts **FAIL** — und läuft weiter. Zwei Gründe, warum
+das die Vorgabe ist: die letzten Schritte eines Falls richten oft den
+Prüfstand wieder her, und ein Lauf, der bei 12 V stehen bleibt, lässt das
+Gerät bei 12 V stehen. Und ein Fall, der von vier kaputten Dingen
+berichten könnte, berichtet von einem — man repariert es, startet neu,
+findet das nächste.
 
-`continue` merkt sich den ersten Fehlschlag (er bleibt die Begründung des
-Verdikts **FAIL**) und läuft weiter, damit `jump_on_error` ins Aufräumen
-springen kann. Technische Fehler (ERROR) brechen weiterhin ab — durch
-einen Verbindungsverlust lässt sich nicht hindurchlaufen. Für
-`preconditions` gilt `on_fail` nicht: dort heißt Fehlschlag SKIP, und es
-gibt nichts rückgängig zu machen.
+`stop` beendet den Fall beim ersten verfehlten Erwartungs-Schritt, für
+die Fälle, in denen danach ohnehin nichts mehr aussagekräftig ist.
+
+Ein explizites `fail:` beendet den Fall **immer** — es ist der Abbruch,
+den jemand hingeschrieben hat, kein verfehlter Vergleich. Technische
+Fehler (ERROR) brechen ebenfalls weiterhin ab: durch einen
+Verbindungsverlust lässt sich nicht hindurchlaufen. Für `preconditions`
+gilt `on_fail` nicht — dort heißt Fehlschlag SKIP, und es gibt nichts
+rückgängig zu machen.
+
+`jump_on_error` ist nur mit `continue` erreichbar; mit `stop` wäre der
+Fall am Fehlschlag schon beendet.
+
+### `note` — der Satz daneben
+
+Jeder Schritt mit einer Mapping-Form darf ein `note: "…"` tragen. Es
+landet im Report unter dem Schritt, in einer eigenen Zeile:
+
+```yaml
+- sdo_write: {index: "0x1F51", sub: "0x02", value: 2, size: 1, note: "Reboot DUT"}
+```
+
+```
+14   write 0x1F51:0x02 = 2  (Program control)
+     Reboot DUT
+     Response: wrote 0x02
+```
+
+Der Report zeigt je Schritt bis zu drei Zeilen: **was lief** (mit dem
+Objektnamen aus dem EDS, wenn er bekannt ist), **warum** (`note`) und
+**was zurückkam** — auch im Gutfall, samt Enum-Bedeutung, wo ein Plugin
+das Objekt beschreibt. Eine Zeile pro Schritt ist kompakt und eine Woche
+später nicht mehr nachvollziehbar.
+
+In `note` und `log` sind einfache Formatierungs-Tags erlaubt (`<b>`,
+`<i>`, `<u>`, `<em>`, `<strong>`, `<code>`, `<small>`, `<sub>`, `<sup>`,
+`<br>`, `<hr>`) — alles andere wird escaped.
 
 ## Register und Werte (v2)
 

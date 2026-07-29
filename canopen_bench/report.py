@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
@@ -108,11 +109,17 @@ summary         { cursor: pointer; font-weight: bold; padding: 2px 0; }
 
 @dataclass
 class StepRecord:
-    """One executed step, as the report shows it."""
+    """One executed step, as the report shows it.
+
+    Up to three lines: what ran, the sentence the case author wrote next
+    to it, and what came back. One line each is compact and unreadable a
+    week later; the note is usually the only part that says *why*.
+    """
     line: int = 0
     text: str = ""
     state: str = ""          # ok | fail | error | skip | note | ""
-    detail: str = ""         # why it failed, when it did
+    note: str = ""           # the case author's own words for this step
+    detail: str = ""         # what came back, or why it failed
     ts: str = ""             # "20260729_091330.922", like the bench's own log
 
 
@@ -171,6 +178,25 @@ def _e(text: object) -> str:
     return html.escape(str(text), quote=False)
 
 
+#: formatting a case author may use in a note or a log line. Everything
+#: else is escaped: these files are written by people who want a heading
+#: to stand out, not a place to inject markup into a shared report.
+_SIMPLE_TAGS = ("b", "i", "u", "em", "strong", "code", "small", "sub", "sup",
+                "br", "hr")
+_TAG = re.compile(r"&lt;(/?)(" + "|".join(_SIMPLE_TAGS) + r")\s*/?&gt;", re.I)
+
+
+def _rich(text: object) -> str:
+    """Escaped, then the handful of plain formatting tags let back in.
+
+    ``<b>--- Common Objects ---</b>`` in a case's own comment is somebody
+    formatting their report, and escaping it prints the angle brackets at
+    them. Anything outside the list stays escaped, so this stays a
+    whitelist rather than "trust the input".
+    """
+    return _TAG.sub(lambda m: f"<{m.group(1)}{m.group(2).lower()}>", _e(text))
+
+
 def _page(title: str, body: str) -> str:
     return ("<!doctype html>\n<html lang='en'>\n<head><meta charset='utf-8'>"
             f"<title>{_e(title)}</title>"
@@ -205,9 +231,11 @@ def case_html(case: CaseRecord) -> str:
              "<th>Step Action and Comment</th></tr>\n")
     for step in case.steps:
         cls = _ROW_CLASS.get(step.state, "")
-        text = _e(step.text)
+        text = _rich(step.text)
+        if step.note:
+            text += f"<br />{_rich(step.note)}"
         if step.detail:
-            text += f"<br /><i>{_e(step.detail)}</i>"
+            text += f"<br /><i>{_rich(step.detail)}</i>"
         head += (f"<tr class='{cls}'><td>{_e(step.ts)}</td>"
                  f"<td>{step.line}</td><td>{text}</td></tr>\n")
     return _page(f"{case.id} · {case.name}", head + "</table>\n")

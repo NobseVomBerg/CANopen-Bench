@@ -279,7 +279,7 @@ def _judge_read(spec: dict, res: SdoResult) -> tuple[str, str]:
             return "fail", f"{where} expected abort {_hexstr(spec['expect_abort'])}, got {res.value}"
         code = _as_int(res.abort.split()[0]) if res.abort else None
         if code is not None and code == _as_int(spec["expect_abort"]):
-            return "ok", ""
+            return "ok", f"Response: abort {res.abort} — expected"
         return "fail", f"{where} expected abort {_hexstr(spec['expect_abort'])}, got {res.abort}"
     if not res.ok:
         return "fail", f"{where} abort {res.abort}"
@@ -591,7 +591,10 @@ class Bench:
         self._manual_value = ""          # what an `adjust` prompt was given
         self._run_stop_requested = False
         self._run_mode = "sim"  # "exec" once a run uses real test-case files
-        self.stop_on_err = True
+        # off by default: one failing case is a result, not a reason to
+        # stop finding out about the rest. The option is on the Tests page
+        # for the runs where the first failure invalidates what follows.
+        self.stop_on_err = False
         self.tool_filter = True
         self.repeat_case = 1
         self.repeat_run = 1
@@ -963,9 +966,33 @@ class Bench:
     # ------------------------------------------------------------------
     # actions (dispatched from the API layer)
     def _label_step(self, key: str, val) -> str:
-        """Progress text for one step — plugin step types label themselves."""
+        """Progress text for one step — plugin step types label themselves.
+
+        Object steps get the EDS name of what they touch appended. A line
+        reading "write 0x1F51:0x02 = 2" is a line somebody has to go and
+        look up before they can say whether the run did the right thing;
+        the name is already in the registry, so it belongs in the report.
+        """
         ext = self._step_types.get(key)
-        return ext.label(val) if ext else _step_text(key, val)
+        if ext:
+            return ext.label(val)
+        text = _step_text(key, val)
+        if key in ("sdo_read", "sdo_write", "adjust") and isinstance(val, dict):
+            name = self._object_label(_hexstr(val["index"]), _hexstr(val["sub"]))
+            if name:
+                text += f"  ({name})"
+        return text
+
+    def _value_note(self, idx: str, sub: str, value: object) -> str:
+        """A value as the report should show it: what came back, and what
+        it means where the device's own headers say so."""
+        fields = self._object_fields.get(f"{idx}:{sub}", [])
+        number = _as_int(value)
+        if fields and number is not None:
+            meaning = describe(number, fields, self.symbols)
+            if meaning:
+                return f"{value} — {meaning}"
+        return str(value)
 
     def dispatch(self, action: str, p: dict[str, Any]) -> None:
         fn = self._plugin_actions.get(action)  # namespaced "<plugin>.<name>"
@@ -2422,10 +2449,19 @@ class Bench:
         self.db.set("favorites", self.favorites)
 
     def _object_label(self, idx: str, sub: str) -> str:
+        """The EDS name of an object, or "".
+
+        Matched numerically. The catalog writes a sub-index as "04" and a
+        step writes it "0x04" — comparing the text found nothing, silently,
+        for every caller that did not happen to use the catalog's spelling.
+        """
+        want = (_as_int(idx), _as_int(sub))
+        if want[0] is None:
+            return ""
         catalog, _groups, _hint = self._object_catalog()
         for rows in catalog.values():
             for r in rows:
-                if r[0] == idx and r[1] == sub:
+                if (_as_int(r[0]), _as_int(r[1])) == want:
                     return r[2]
         return ""
 
@@ -3017,7 +3053,10 @@ class Bench:
                     "jump": "ok", "end": "ok"}.get(status, status)
                 record.append(reportlib.StepRecord(
                     line=base + pc + 1, text=text, state=state,
-                    detail=info if status in ("fail", "error", "skip") else "",
+                    note=val.get("note", "") if isinstance(val, dict) else "",
+                    # on the passing path this is what came back, not a
+                    # reason — both belong in the file for the same reason
+                    detail=info,
                     ts=datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]))
             if status == "jump":
                 pc = labels[info]
@@ -3165,19 +3204,26 @@ class Bench:
                     return "fail", f"{where} expected abort {_hexstr(val['expect_abort'])}, wrote ok"
                 code = _as_int(res.abort.split()[0]) if res.abort else None
                 if code is not None and code == _as_int(val["expect_abort"]):
-                    return "ok", ""
+                    return "ok", f"Response: abort {res.abort} — expected"
                 return "fail", f"{where} expected abort {_hexstr(val['expect_abort'])}, got {res.abort}"
-            return ("ok", "") if res.ok else ("fail", f"{where} abort {res.abort}")
+            return (("ok", f"Response: wrote {value_str}") if res.ok
+                    else ("fail", f"{where} abort {res.abort}"))
         if key == "sdo_read":
-            res = await asyncio.to_thread(
-                bus.sdo_read, node, _hexstr(val["index"]), _hexstr(val["sub"]))
+            index_s, sub_s = _hexstr(val["index"]), _hexstr(val["sub"])
+            res = await asyncio.to_thread(bus.sdo_read, node, index_s, sub_s)
             # resolved *before* the result is stored: `into` defaults to R0,
             # so an `expect: R0` resolved afterwards would compare the value
             # against itself and pass no matter what the device answered
             spec = _with_registers(val, regs)
             if res.ok:  # the result is always available for further processing
                 regs[val.get("into", "R0")] = (_as_int(res.value) or 0) & 0xFFFFFFFF
-            return _judge_read(spec, res)
+            status, info = _judge_read(spec, res)
+            if status == "ok" and res.ok:
+                # what came back, on the passing path too: a report that
+                # only records failures cannot answer "what did it read
+                # last Tuesday", which is most of why anybody keeps them
+                info = f"Response: {self._value_note(index_s, sub_s, res.value)}"
+            return status, info
         if key == "psu":
             if self.psu is None:
                 # equipment the case needs is not there — that is not the
