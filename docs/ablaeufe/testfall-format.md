@@ -89,6 +89,7 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `can_send` | `{cob: <wert>, data: [<byte-werte>] \| $session}` | (v2) rohen CAN-Frame senden; Listeneinträge liefern je 1 Byte (Register: Low-Byte); `$session` als Eintrag expandiert zu seinen Bytes. Ohne installierten Addressing-Provider (Vendor-Plugin) gibt es keine Session-Identität — ein Schritt mit `$session` schlägt dann fehl | Fehler ohne Verbindung → ERROR; `$session` ohne Provider → FAIL |
 | `lss_assign` | `{count: <wert>, into?: Rn}` | (v2) Standard-Adressierung nach CiA 305: unkonfigurierte Slaves (Node-ID 0xFF) einzeln per LSS-Fastscan identifizieren und auf die Node-IDs 1..count konfigurieren/speichern; genau ein bereits konfiguriertes Gerät wird per globalem State-Switching umadressiert. Die Anzahl tatsächlich zugewiesener Nodes landet in `into` (Default `R0`) — auf echter LSS-Hardware bislang **ungetestet** (A-03) | Fehler nur ohne Verbindung → ERROR; Unterzahl per `jump_lt`/`fail` im Ablauf behandeln |
 | `manual` | `manual: "Text"` bzw. `{text, timeout?}` | Bedieneranweisung, wartet auf Bestätigung (Default 120 s) | Abbruch/Timeout → ERROR |
+| `psu` | `{ch?, volt?, curr?, output?}` | Labornetzteil stellen (`canopen_bench/instruments/`): Spannung/Strom eines Kanals (`ch`, Default 1) und/oder Ausgang `on`/`off`. Mindestens eines von `volt`/`curr`/`output`. Volt/Ampere dürfen Kommazahlen sein | kein Netzteil verbunden oder Fehler am Gerät → ERROR (Prüfmittel fehlt, das ist kein Fehlverhalten des DUT) |
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
 | `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
 | `expect_emcy` | `{code, mask?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. `mask` vergleicht nur einen Teil des Codes, für Geräte, deren Klassenbyte nicht dokumentiert ist | keine passende EMCY → FAIL |
@@ -139,8 +140,8 @@ primitive") — gewollt, damit Vendor-Abläufe nicht stumm falsch laufen.
 
 ## Abgrenzung
 
-- **Keine PSU-/Prüfmittel-Primitive:** Aktionen an Zusatzgeräten laufen
-  als `manual`-Schritt, bis ein Gerät fernsteuerbar ist.
+- **Prüfmittel nur, soweit fernsteuerbar:** für Labornetzteile gibt es
+  `psu` (siehe oben). Alles andere läuft weiter als `manual`-Schritt.
 - **Keine PDO-Primitive** in dieser Ausbaustufe.
 
 ## Anforderungen an die Engine — umgesetzt

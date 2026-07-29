@@ -80,6 +80,65 @@ const btn = {
   ghost: 'border:1px solid var(--inp);color:var(--mid);font-weight:600;',
 };
 
+// Bench power supply (canopen_bench/instruments): shown once one has been
+// found. Channel count comes from the instrument — the same model line
+// exists with one output and with two — so the row is drawn from the data,
+// never from a fixed pair of boxes. Values are the supply's *set* values;
+// the label says so, because a set voltage is not a measurement.
+function PsuBox({ psu }) {
+  const fieldStyle = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);font:11px ${MONO};border-radius:5px;padding:4px 7px;outline:none;width:64px`;
+  const head = (t) => html`<span style="font-size:10.5px;color:var(--dim);font-weight:600">${t}</span>`;
+  if (!psu) {
+    return html`
+    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px">
+      <span style="font-weight:600;font-size:12px;flex:none">Power supply</span>
+      <span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>
+      <span class="hv" onClick=${() => send('psu_search')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;flex:none">Search…</span>
+      <span style="font-size:10.5px;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        Only ports whose description a driver recognises are opened — a serial port might be the CAN adapter.</span>
+    </div>`;
+  }
+  const on = psu.output;
+  return html`
+  <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0">
+      <span style="font-weight:600;font-size:12px;flex:none">Power supply</span>
+      <span title=${psu.raw || ''} style="flex:none;font:600 11px ${MONO};color:var(--tx)">${psu.model || psu.name}</span>
+      <span style="flex:none;font:10.5px ${MONO};color:var(--faint)">${psu.port}${psu.sn ? ` · SN ${psu.sn}` : ''}${psu.fw ? ` · ${psu.fw}` : ''}</span>
+      <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
+        style="${on ? btn.acc : btn.ghost}font-size:11.5px;padding:4px 12px;border-radius:6px;cursor:pointer;flex:none">
+        Output ${on === null ? '?' : on ? 'on' : 'off'}</span>
+      <span class="hv-white" title="Read the supply — nothing here polls" onClick=${() => send('psu_refresh')} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
+      <span class="hv" onClick=${() => send('psu_release')} title="Hand the serial port back to the system"
+        style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none;margin-left:auto">Release</span>
+    </div>
+    ${psu.error && html`<div style="font-size:11px;color:var(--red)">${psu.error}</div>`}
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      ${(psu.channels || []).map((c, i) => html`
+        <div style="display:flex;align-items:center;gap:8px">
+          ${head(`CH ${i + 1}`)}
+          <${SyncInput} value=${String(c.volt)} style=${fieldStyle} title=${`set voltage${c.limit ? ` · the supply reports a limit of ${c.limit} V` : ''}`}
+            onCommit=${(v) => send('psu_set', { ch: i + 1, volt: v })} />
+          <span style="font-size:11px;color:var(--dim)">V</span>
+          <${SyncInput} value=${String(c.curr)} style=${fieldStyle} title="set current"
+            onCommit=${(v) => send('psu_set', { ch: i + 1, curr: v })} />
+          <span style="font-size:11px;color:var(--dim)">A</span>
+        </div>`)}
+      <span style="font-size:10.5px;color:var(--faint);align-self:center">set values, read from the supply</span>
+    </div>
+    ${(psu.channels || []).some((c) => c.mvolt !== null && c.mvolt !== undefined) && html`
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+      ${(psu.channels || []).map((c, i) => html`
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:10.5px;color:var(--dim);font-weight:600">CH ${i + 1}</span>
+          <span style="font:11px ${MONO};color:var(--tx)">${c.mvolt ?? '—'} V</span>
+          <span style="font:11px ${MONO};color:var(--tx)">${c.mcurr ?? '—'} A</span>
+        </div>`)}
+      <span style="font-size:10.5px;color:var(--faint)">measured at the terminals</span>
+    </div>
+  </div>`;
+}
+
 // Plugin-contributed sidebar panel (canopen_bench/plugin.py, DevicePanel):
 // a declarative box the core renders without knowing the device family it
 // belongs to. Every part is optional — buttons without a canvas, LEDs
@@ -491,6 +550,8 @@ function SetupPage({ s }) {
           style="padding:8px 11px;color:var(--acc);font-weight:600;font-size:11.5px;cursor:pointer">+ Add EDS file…</div>
       </div>
     </div>
+
+    <${PsuBox} psu=${s.psu} />
 
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;flex-direction:column;gap:10px">
       <div style="display:flex;align-items:center;gap:10px;min-width:0">

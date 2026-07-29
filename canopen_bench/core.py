@@ -27,7 +27,8 @@ from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ODVariable
 from canopen.objectdictionary.eds import import_eds
 
-from . import __version__, data
+from . import __version__, data, instruments
+from . import report as reportlib
 from . import testcases as tclib
 from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
@@ -253,6 +254,12 @@ def _step_text(key: str, val) -> str:
         return f"{key} {val}"
     if key in tclib._COND_JUMPS:
         return f"{key} {val['a']} {val['b']} → {val['to']}"
+    if key == "psu":
+        bits = [f"channel {val['ch']}"] if "ch" in val else []
+        bits += [f"{val[k]} {u}" for k, u in (("volt", "V"), ("curr", "A")) if k in val]
+        if "output" in val:
+            bits += ["output " + ("on" if val["output"] in (True, "on") else "off")]
+        return "supply " + ", ".join(bits)
     if key == "expect_emcy":
         return f"expect EMCY {_hexstr(val['code'])}"
     if key == "emcy_clear":
@@ -276,6 +283,33 @@ def _resolve(value, regs: dict, builtins: dict) -> int:
     if s == "$expected":
         return int(builtins["expected"])
     return int(s, 16)
+
+
+def _resolve_num(value, regs: dict, builtins: dict) -> float:
+    """Like _resolve, but volts and amps are not integers — a supply set to
+    26.5 V is an ordinary thing to ask for. Registers stay whole numbers;
+    they hold values read from a device."""
+    if isinstance(value, float):
+        return value
+    return float(_resolve(value, regs, builtins))
+
+
+def _slug(text: str) -> str:
+    """A file-name-safe version of a case name, in the shape the previous
+    tool used: words joined by underscores, nothing exotic left."""
+    keep = [ch if ch.isalnum() else " " for ch in text]
+    return "_".join("".join(keep).split()) or "case"
+
+
+def _bench_user() -> str:
+    """Who ran it, for the report header. Best effort: on a bench machine
+    this is a login name, and where the environment does not say, an empty
+    field beats a made-up one."""
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return ""
 
 
 def _bytes_str(data: bytes) -> str:
@@ -434,10 +468,23 @@ class Bench:
         #: never clears must not grow without bound)
         self.emcy_seen: deque[tuple[int, int]] = deque(maxlen=200)
         self.obj_vals: dict[str, str] = {}
+        # bench instruments beside the bus (canopen_bench/instruments): the
+        # port that once answered is remembered, so a restart reconnects to
+        # that one instead of writing *IDN? to every serial port it finds
+        self.psu: instruments.PowerSupply | None = None
+        self.psu_error = ""
+        self._psu_state: instruments.SupplyState | None = None
+        self._psu_opener = None            # tests inject a fake serial port
+        self._psu_ports = None
+        self._psu_connect(str(db.get("psu_port") or ""), announce=False)
         self.test_sel: set[str] = set(data.DEFAULT_TEST_SEL)
         self.running = False
         self.run_order: list[str] = []
         self.run_idx = 0
+        # what the run writes into the results folder at the end
+        self._run_cases: list[reportlib.CaseRecord] = []
+        self._run_record: reportlib.CaseRecord | None = None
+        self._run_started = ""
         self.results: dict[str, str] = {}
         self.run_prog: dict | None = None       # {tid, step, of, text} while executing
         self.manual_prompt: dict | None = None  # {tid, text} while waiting for the operator
@@ -736,10 +783,45 @@ class Bench:
             self._push_report(self.run_order)
 
     def _push_report(self, order: list[str]) -> None:
+        """End of a run: write the files, then show the run in the list.
+
+        The list used to be the whole thing — a name that looked like a
+        file and a score, with nothing on disk behind it. A run nobody can
+        open a week later is not a record of anything.
+        """
         passed = sum(1 for tid in order if self.results.get(tid) == "PASS")
-        name = datetime.now().strftime("run_%m%d_%H%M.html")
+        cases = [c for c in self._run_cases if c.id in order]
+        run = reportlib.RunRecord(
+            started=self._run_started or datetime.now().isoformat(timespec="seconds"),
+            finished=datetime.now().isoformat(timespec="seconds"),
+            user=_bench_user(), workspace=self.workspace_name,
+            tool=f"canopen-bench {__version__}", cases=cases)
+        name = self._write_report(run)
         self.reports = [{"name": name, "score": f"{passed}/{len(order)}",
                          "ok": passed == len(order)}] + self.reports[:4]
+
+    def _write_report(self, run: reportlib.RunRecord) -> str:
+        """One file per case, one summary, one JSON beside it. Returns the
+        summary's file name — that is what the UI links to."""
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = Path(self.paths.get("res") or (self.db.path.parent / "results"))
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            reportlib.write_stylesheet(folder)
+            for case in run.cases:
+                case.file = f"{stamp}__{case.id}__{_slug(case.name)}.html"
+                (folder / case.file).write_text(reportlib.case_html(case), encoding="utf-8")
+            summary = f"{stamp}__summary.html"
+            (folder / summary).write_text(reportlib.summary_html(run), encoding="utf-8")
+            (folder / f"{stamp}__summary.json").write_text(
+                reportlib.summary_json(run), encoding="utf-8")
+        except OSError as exc:
+            # never let a full disk or a bad path swallow the run itself —
+            # the verdicts are already in the log and on screen
+            self.log(f"RUN  report not written — {exc}", "emcy0")
+            return f"{stamp}__summary.html"
+        self.log(f"RUN  report {summary} ({len(run.cases)} case(s)) in {folder}")
+        return summary
 
     # ------------------------------------------------------------------
     # actions (dispatched from the API layer)
@@ -1940,6 +2022,126 @@ class Bench:
             else:
                 self.log("MC   startup scan skipped — connect the interface, then scan & verify")
 
+    # -- bench instruments (power supply) ------------------------------------
+    # A supply the tool can set is what keeps an under-voltage case
+    # automated: without it the case degrades to "operator, turn the knob".
+    # Nothing here polls — the box reads when the operator asks and after
+    # it has changed something itself.
+    def _psu_connect(self, port: str, announce: bool = True) -> bool:
+        """Reconnect to a remembered port. No probing of other ports —
+        writing to a serial port that might be the CAN adapter is not a
+        way to look around."""
+        if not port:
+            return False
+        try:
+            found = instruments.connect(port, opener=self._psu_opener)
+        except Exception as exc:
+            self.psu_error = str(exc)
+            found = None
+        if found is None:
+            if announce:
+                self.log(f"PSU  nothing answered on {port}", "emcy0")
+            return False
+        self.psu, idn = found
+        self.psu_error = ""
+        self.db.set("psu_port", port)
+        self._psu_read()
+        if announce:
+            self.log(f"PSU  {self.psu.name} on {port} — {idn}")
+        return True
+
+    def _psu_read(self) -> None:
+        if self.psu is None:
+            return
+        try:
+            self._psu_state = self.psu.state()
+            self.psu_error = ""
+        except Exception as exc:      # the port can vanish mid-session
+            self.psu_error = str(exc)
+            self._psu_state = None
+
+    def _psu_data(self) -> dict | None:
+        """Snapshot form. Values are the instrument's *set* values, which
+        is why the UI labels them that way — a set voltage is not a
+        measurement of what the terminals are doing."""
+        if self.psu is None:
+            return {"found": False, "error": self.psu_error} if self.psu_error else None
+        st = self._psu_state
+        if st is None:
+            return {"found": True, "name": self.psu.name, "error": self.psu_error,
+                    "port": self.psu.link.port, "channels": []}
+        return {"found": True, "name": self.psu.name, "error": self.psu_error,
+                "model": st.model, "sn": st.serial, "fw": st.firmware,
+                "port": st.port, "output": st.output, "raw": st.raw,
+                "channels": [{"volt": ch.volt, "curr": ch.curr, "limit": ch.limit,
+                              "mvolt": ch.meas_volt, "mcurr": ch.meas_curr,
+                              "extra": ch.extra} for ch in st.channels]}
+
+    def act_psu_search(self, p: dict) -> None:
+        try:
+            found = instruments.discover(opener=self._psu_opener, ports=self._psu_ports)
+        except Exception as exc:
+            self.psu_error = str(exc)
+            self.log(f"PSU  search failed — {exc}", "emcy0")
+            return
+        if found is None:
+            self.psu_error = "no known power supply found"
+            self.log("PSU  no known power supply found on the serial ports", "emcy0")
+            return
+        psu, idn = found
+        self.psu, self.psu_error = psu, ""
+        self.db.set("psu_port", psu.link.port)
+        self._psu_read()
+        self.log(f"PSU  {psu.name} on {psu.link.port} — {idn}")
+
+    def act_psu_refresh(self, p: dict) -> None:
+        self._psu_read()
+
+    def act_psu_release(self, p: dict) -> None:
+        """Hand the port back — another program on this machine may need
+        it, and holding it open would be the reason it cannot have it."""
+        if self.psu is not None:
+            self.psu.close()
+            self.log(f"PSU  released {self.psu.link.port}")
+        self.psu, self._psu_state, self.psu_error = None, None, ""
+        self.db.set("psu_port", "")
+
+    def act_psu_output(self, p: dict) -> None:
+        if self.psu is None:
+            return
+        on = bool(p.get("on"))
+        try:
+            self.psu.set_output(on)
+        except Exception as exc:
+            self.psu_error = str(exc)
+            self.log(f"PSU  output {'on' if on else 'off'} failed — {exc}", "emcy0")
+            return
+        self.log(f"PSU  output {'on' if on else 'off'}")
+        self._psu_read()
+
+    def act_psu_set(self, p: dict) -> None:
+        if self.psu is None:
+            return
+        ch = int(p.get("ch") or 1)
+        try:
+            if p.get("volt") not in (None, ""):
+                volts = float(p["volt"])
+                self.psu.set_voltage(ch, volts)
+                self.log(f"PSU  channel {ch} → {volts:g} V")
+            if p.get("curr") not in (None, ""):
+                amps = float(p["curr"])
+                self.psu.set_current(ch, amps)
+                self.log(f"PSU  channel {ch} → {amps:g} A")
+        except ValueError:
+            self.log(f'PSU  channel {ch} unchanged — "{p.get("volt") or p.get("curr")}"'
+                     " is not a number", "emcy0")
+            return
+        except Exception as exc:
+            self.psu_error = str(exc)
+            self.log(f"PSU  channel {ch} unchanged — {exc}", "emcy0")
+            return
+        self._psu_read()
+
     # -- objects -------------------------------------------------------------
     def _target_node(self) -> int:
         sel = self.sel_devices
@@ -2471,6 +2673,8 @@ class Bench:
 
     # -- step executor (real test-case files, see docs/ablaeufe/A-04) --------
     async def _run_task(self) -> None:
+        self._run_cases = []
+        self._run_started = datetime.now().isoformat(timespec="seconds")
         try:
             for i, tid in enumerate(self.run_order):
                 self.run_idx = i
@@ -2479,6 +2683,8 @@ class Bench:
                     self._push_report(self.run_order[:i])
                     return
                 verdict, reason = await self._exec_case(tid)
+                if self._run_record is not None:
+                    self._run_cases.append(self._run_record)
                 self.results[tid] = verdict
                 suffix = f" ({reason})" if reason else ""
                 if verdict == "PASS":
@@ -2512,13 +2718,28 @@ class Bench:
 
     async def _exec_case(self, tid: str) -> tuple[str, str]:
         tc = self.testcases.get(tid)
+        started = time.time()
+        rec = reportlib.CaseRecord(id=tid, started=datetime.now().isoformat(timespec="seconds"),
+                                   user=_bench_user())
+        self._run_record = rec
         if tc is None:
-            return "ERROR", "unknown test case"
+            rec.verdict, rec.reason = "ERROR", "unknown test case"
+            rec.seconds = time.time() - started
+            return rec.verdict, rec.reason
+        rec.name, rec.desc, rec.grade, rec.tools = tc.name, tc.desc, tc.grade, list(tc.tools)
         if tc.error:
-            return "ERROR", f"invalid test file: {tc.error}"
+            rec.verdict, rec.reason = "ERROR", f"invalid test file: {tc.error}"
+            rec.seconds = time.time() - started
+            return rec.verdict, rec.reason
         node = self._resolve_dut(tc)
         if node is None:
-            return "ERROR", "no target device"
+            rec.verdict, rec.reason = "ERROR", "no target device"
+            rec.seconds = time.time() - started
+            return rec.verdict, rec.reason
+        dev = next((d for d in self.devices if d["node"] == node), None)
+        if dev is not None:
+            rec.device, rec.variant = dev.get("name", ""), dev.get("variant", "")
+            rec.sn, rec.node = dev.get("sn", ""), node
         regs = {name: 0 for name in tclib.REGISTERS}
         sess = self.mc.get("session") or ""  # "" until an addressing run distributed one
         builtins = {"node": node, "expected": int(self.mc.get("expected") or 0),
@@ -2532,23 +2753,29 @@ class Bench:
         def stop() -> bool:
             return self._run_stop_requested
 
+        def done(verdict: str, why: str = "") -> tuple[str, str]:
+            rec.verdict, rec.reason = verdict, why
+            rec.seconds = time.time() - started
+            return verdict, why
+
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
-                                              builtins, 0, on_step, stop)
+                                              builtins, 0, on_step, stop, rec.steps)
         if status in ("fail", "skip"):
-            return "SKIP", f"precondition: {why}"
+            return done("SKIP", f"precondition: {why}")
         if status == "error":
-            return "ERROR", why
+            return done("ERROR", why)
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
-                                              len(tc.preconditions), on_step, stop)
+                                              len(tc.preconditions), on_step, stop,
+                                              rec.steps)
         if status == "ok":
-            return "PASS", ""
+            return done("PASS")
         if status == "skip":
-            return "SKIP", why
-        return ("FAIL" if status == "fail" else "ERROR"), why
+            return done("SKIP", why)
+        return done("FAIL" if status == "fail" else "ERROR", why)
 
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
                            regs: dict, builtins: dict, base: int,
-                           on_step, should_stop) -> tuple[str, str]:
+                           on_step, should_stop, record: list | None = None) -> tuple[str, str]:
         """Program-counter loop over one step list (format v2: labels, jumps,
         registers). Returns ("ok" | "fail" | "error", reason)."""
         labels = {step["label"]: i for i, step in enumerate(steps)
@@ -2564,9 +2791,19 @@ class Bench:
             if should_stop():
                 return "error", "aborted"
             key, val = next(iter(steps[pc].items()))
-            on_step(base + pc + 1, self._label_step(key, val))
+            text = self._label_step(key, val)
+            on_step(base + pc + 1, text)
             status, info = await self._exec_one(tc, key, val, node, regs,
                                                 builtins, should_stop)
+            if record is not None:
+                # a note (log step) is neither pass nor fail — it is the
+                # sentence somebody wrote to make the report readable
+                state = "note" if key == "log" else {
+                    "jump": "ok", "end": "ok"}.get(status, status)
+                record.append(reportlib.StepRecord(
+                    line=base + pc + 1, text=text, state=state,
+                    detail=info if status in ("fail", "error", "skip") else "",
+                    ts=datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]))
             if status == "jump":
                 pc = labels[info]
                 continue
@@ -2696,6 +2933,26 @@ class Bench:
             if res.ok:  # the result is always available for further processing
                 regs[val.get("into", "R0")] = (_as_int(res.value) or 0) & 0xFFFFFFFF
             return _judge_read(val, res)
+        if key == "psu":
+            if self.psu is None:
+                # equipment the case needs is not there — that is not the
+                # device failing, and calling it FAIL would blame the DUT
+                return "error", "no power supply connected"
+            ch = int(val.get("ch", 1))
+            try:
+                if "volt" in val:
+                    await asyncio.to_thread(self.psu.set_voltage, ch,
+                                            _resolve_num(val["volt"], regs, builtins))
+                if "curr" in val:
+                    await asyncio.to_thread(self.psu.set_current, ch,
+                                            _resolve_num(val["curr"], regs, builtins))
+                if "output" in val:      # YAML turns bare on/off into a bool
+                    await asyncio.to_thread(self.psu.set_output,
+                                            val["output"] in (True, "on"))
+            except Exception as exc:
+                return "error", f"power supply: {exc}"
+            self._psu_read()
+            return "ok", ""
         if key == "emcy_clear":
             self.emcy_seen.clear()
             return "ok", ""
@@ -3329,6 +3586,7 @@ class Bench:
                 "fmt": self._value_view(catalog),
             },
             "mirror": self._mirror_data(),
+            "psu": self._psu_data(),
             "panels": self._panel_data(),
             "favorites": {
                 "rows": self._fav_rows(),

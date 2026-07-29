@@ -326,3 +326,25 @@ def test_skip_needs_a_reason():
     text = 'id: "1"\nname: x\nsteps:\n  - skip:\n'
     tc = parse_testcase(text, "TC1_x.yaml")
     assert tc.error and "skip" in tc.error
+
+
+def test_the_psu_step_takes_volts_amps_and_the_output():
+    ok = ('id: "1"\nname: x\nsteps:\n'
+          '  - psu: {ch: 2, volt: 26.5, curr: 2}\n'
+          '  - psu: {output: on}\n'
+          '  - psu: {output: off}\n')
+    assert parse_testcase(ok, "TC1_x.yaml").error is None
+
+
+def test_a_psu_step_that_asks_for_nothing_is_a_schema_error():
+    text = 'id: "1"\nname: x\nsteps:\n  - psu: {ch: 1}\n'
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "at least one" in tc.error
+
+
+def test_volts_may_be_fractional_but_not_prose():
+    """26.5 V is an ordinary request; "high" is not."""
+    good = 'id: "1"\nname: x\nsteps:\n  - psu: {volt: 26.5}\n'
+    assert parse_testcase(good, "TC1_x.yaml").error is None
+    bad = 'id: "1"\nname: x\nsteps:\n  - psu: {volt: high}\n'
+    assert parse_testcase(bad, "TC1_x.yaml").error

@@ -58,6 +58,11 @@ and every access shows up in the Trace like real bus traffic.
 - **Tests** — declarative YAML test cases
   (`docs/ablaeufe/testfall-format.md`, examples in
   `examples/testcases/`) executed for real against the selected device.
+- **Bench instruments** — a remote-controllable lab power supply is set
+  from the Setup page and from a test case (`psu` step), which is what
+  keeps an under-voltage case automated instead of asking an operator to
+  turn a knob. Serial port, `pip install ".[serial]"`; drivers in
+  `canopen_bench/instruments/`.
 - **SWDL** — firmware download; protocols are manufacturer-specific and
   ship as vendor extension packages (see the note on the page).
 - **Trace** — live monitor with class + device filters over a 200k-frame
