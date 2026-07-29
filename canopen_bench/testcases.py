@@ -43,7 +43,7 @@ _STEP_FIELDS = {
     "expect_emcy": ({"code"}, {"mask", "node", "timeout"}),
     "psu": (set(), {"ch", "volt", "curr", "output"}),
     "rand": ({"to"}, {"min", "max"}),
-    "adjust": ({"index", "sub"}, {"text", "size", "node"}),
+    "adjust": ({"index", "sub"}, {"text", "size", "node", "timeout"}),
 }
 
 
@@ -134,6 +134,8 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return "ask: needs a text"
         if unknown := set(val) - {"text", "title", "timeout"}:
             return f"ask: unknown field(s) {sorted(unknown)}"
+        if "timeout" in val and not isinstance(val["timeout"], (int, float)):
+            return "ask: timeout must be a duration in seconds"
         return None if val.get("text") else "ask: needs a text"
     if key in _ARITH:
         if not isinstance(val, dict) or set(val) != {"to", "value"}:
@@ -238,6 +240,8 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if key == "adjust":
             if "size" in val and val["size"] not in (1, 2, 4):
                 return "adjust: size must be 1, 2 or 4"
+            if "timeout" in val and not isinstance(val["timeout"], (int, float)):
+                return "adjust: timeout must be a duration in seconds"
             if "text" in val and not (isinstance(val["text"], str) and val["text"]):
                 return "adjust: text must say what the operator is adjusting"
         if key == "psu":
@@ -344,7 +348,9 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     tc.est = str(doc.get("est") or "")
     tc.dut = doc.get("dut") or "selected"
     tc.on_fail = str(doc.get("on_fail") or "stop")
-    tc.variants = [str(v) for v in doc.get("variants") or []]
+    raw_variants = doc.get("variants") or []
+    tc.variants = ([str(v) for v in raw_variants]
+                   if isinstance(raw_variants, list) else [])
     tc.preconditions = doc.get("preconditions") or []
     tc.steps = doc.get("steps") or []
 

@@ -196,6 +196,42 @@ def _as_int(value) -> int | None:
         return None
 
 
+def _hexstr_width(value: object) -> int:
+    """Byte width of a "0x001E"-style answer, or 0 when it is not one.
+
+    The device already told us how wide the object is by how many digits
+    it sent back; that is a better default than a constant."""
+    text = str(value).strip()
+    if not text.lower().startswith("0x"):
+        return 0
+    digits = len(text) - 2
+    return (digits + 1) // 2 if digits else 0
+
+
+def _variant_matches(declared: list[str], actual: str) -> bool:
+    """Does the device's variant satisfy the ones the case names?
+
+    Compared as numbers wherever both sides are numbers, because they
+    reach here written differently: a case says ``820``, and the device's
+    answer is whatever the SDO read produced — a hex string like
+    ``"0x0334"``. Plain string equality meant every case naming a variant
+    skipped against real hardware while passing any test that happened to
+    spell the value byte for byte.
+
+    A variant that is not a number — an EDS row can map the raw answer to
+    a label — falls back to comparing text, case-insensitively.
+    """
+    got = _typed_number(actual)
+    for want in declared:
+        number = _typed_number(want)
+        if number is not None and got is not None:
+            if number == got:
+                return True
+        elif str(want).strip().lower() == str(actual).strip().lower():
+            return True
+    return False
+
+
 def _open_in_editor(path: Path) -> None:
     """Hand a file to whatever the machine opens it with.
 
@@ -209,8 +245,9 @@ def _open_in_editor(path: Path) -> None:
         os.startfile(str(path))          # noqa: S606 — the platform's own opener
         return
     opener = "open" if sys.platform == "darwin" else "xdg-open"
-    subprocess.Popen([opener, str(path)],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)  # never share this server's stdin
 
 
 def _typed_number(text: str) -> int | None:
@@ -2909,7 +2946,7 @@ class Bench:
         # says which one it is: only a real mismatch skips. An unknown
         # variant runs the case — refusing to run because the bench could
         # not read a number is how coverage disappears without a trace
-        if tc.variants and rec.variant and rec.variant not in tc.variants:
+        if tc.variants and rec.variant and not _variant_matches(tc.variants, rec.variant):
             rec.seconds = time.time() - started
             rec.verdict = "SKIP"
             rec.reason = f"for variant {', '.join(tc.variants)}, this is {rec.variant}"
@@ -2987,7 +3024,8 @@ class Bench:
                 continue
             if status == "end":
                 break
-            if status == "fail" and allow_continue and tc.on_fail == "continue":
+            if (status == "fail" and allow_continue and tc.on_fail == "continue"
+                    and key != "fail"):
                 # the case says it wants to reach its own last steps even
                 # when something failed — that is where it puts the bench
                 # back. The failure is remembered, not forgiven: the first
@@ -2997,6 +3035,11 @@ class Bench:
                 pc += 1
                 continue
             if status != "ok":
+                # a case that already failed does not get to end as SKIP
+                # because a later step was cancelled — the device failed,
+                # and that is the verdict the report has to carry
+                if status == "skip" and builtins.get("failed"):
+                    return "fail", builtins["failed"]
                 return status, info
             pc += 1
         return ("fail", builtins["failed"]) if builtins.get("failed") else ("ok", "")
@@ -3029,7 +3072,7 @@ class Bench:
             hi = _resolve(val.get("max", 0xFFFFFFFF), regs, builtins)
             if lo > hi:
                 return "error", f"rand {val['to']}: min {lo} above max {hi}"
-            regs[val["to"]] = random.randint(lo, hi)
+            regs[val["to"]] = random.randint(lo, hi) & 0xFFFFFFFF
             return "ok", ""
         if key in tclib._COND_JUMPS:
             a = _resolve(val["a"], regs, builtins)
@@ -3279,7 +3322,7 @@ class Bench:
             answer = await self._prompt(
                 {"tid": tc.id, "kind": "adjust", "text": str(val.get("text", "")),
                  "index": index, "sub": sub, "value": str(res.value)},
-                tclib.MANUAL_TIMEOUT_S)
+                float(val.get("timeout", tclib.MANUAL_TIMEOUT_S)))
             if answer is None:
                 return "error", "adjust step timed out"
             if should_stop():
@@ -3290,14 +3333,22 @@ class Bench:
             if number is None:
                 return "error", (f"adjust {index}:{sub}: "
                                  f"{self._manual_value!r} is not a number")
-            # width travels in the literal, the way the sdo_write step does it
-            size = int(val.get("size", 4))
-            masked = number & ((1 << (size * 8)) - 1)
+            # width travels in the literal, the way the sdo_write step does
+            # it. Default it from the value the device just answered rather
+            # than from 4: this step read the object a moment ago, so its
+            # width is known, and widening a U16 to four bytes is an abort
+            # the operator would have to guess the cause of.
+            size = int(val.get("size", 0)) or _hexstr_width(res.value) or 4
+            if number.bit_length() > size * 8 or number < 0:
+                # truncating what somebody typed while watching a meter
+                # writes a different value than they read back
+                return "error", (f"adjust {index}:{sub}: {number} does not fit "
+                                 f"in {size} byte(s)")
             wres = await asyncio.to_thread(bus.sdo_write, node_, index, sub,
-                                           f"0x{masked:0{size * 2}X}")
+                                           f"0x{number:0{size * 2}X}")
             if not wres.ok:
                 return "fail", f"adjust {index}:{sub} write abort {wres.abort}"
-            regs["R0"] = number & 0xFFFFFFFF
+            regs["R0"] = number
             return "ok", ""
         return "error", f"unknown step {key!r}"
 

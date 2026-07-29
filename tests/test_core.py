@@ -3293,3 +3293,67 @@ def test_cyclic_loop_sends_sync_frames_repeatedly(connected_bench):
     hits = [f for f in frames if f.cob_id == "0x080"]
     assert len(hits) >= 3
     assert all(f.decoded == "SYNC" for f in hits)
+
+
+# -- _hexstr_width: byte width of an sdo_read answer (core.core._hexstr_width) --
+# `adjust` uses this to size an operator-typed value against the object the
+# device just answered for, instead of a hardcoded 4 bytes.
+
+def test_hexstr_width_reads_digit_count_from_the_answer():
+    assert core_mod._hexstr_width("0x001E") == 2
+    assert core_mod._hexstr_width("0x0000001E") == 4
+    assert core_mod._hexstr_width("0x1E") == 1
+    assert core_mod._hexstr_width("42") == 0       # no 0x prefix: not this shape
+    assert core_mod._hexstr_width("0x") == 0        # 0x with no digits
+    assert core_mod._hexstr_width("hello") == 0
+
+
+# -- _variant_matches: numeric-vs-numeric and label comparison (core.core) --
+# Already has one coverage test in test_executor.py
+# (test_a_variant_matches_however_the_two_sides_spell_the_number); this is
+# the focused unit test for the helper itself.
+
+def test_variant_matches_decimal_declared_against_hex_actual():
+    assert core_mod._variant_matches(["820"], "0x334") is True  # 0x334 == 820
+
+
+def test_variant_matches_hex_declared_against_decimal_actual():
+    assert core_mod._variant_matches(["0x334"], "820") is True
+
+
+def test_variant_matches_a_genuine_numeric_mismatch():
+    assert core_mod._variant_matches(["820"], "0x335") is False  # 0x335 == 821
+
+
+def test_variant_matches_non_numeric_label_case_insensitively():
+    # an EDS variant map can answer a label instead of a number
+    assert core_mod._variant_matches(["Rev-A"], "rev-a") is True
+
+
+def test_variant_matches_number_declared_against_non_numeric_actual_mismatches():
+    assert core_mod._variant_matches(["820"], "not-a-number") is False
+
+
+# -- _open_in_editor: never shares the running server's own stdin/session ---
+# (core.core._open_in_editor). A Popen call that inherits the server's
+# stdin/session can suspend the server the moment the launched app tries to
+# read from stdin, or tie the child to the server's own process group.
+
+def test_open_in_editor_does_not_share_the_servers_stdin(tmp_path, monkeypatch):
+    import subprocess
+    import sys as sys_mod
+    if sys_mod.platform == "win32":
+        pytest.skip("win32 uses os.startfile, not subprocess.Popen")
+    calls = []
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return object()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    core_mod._open_in_editor(tmp_path / "case.yaml")
+
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["start_new_session"] is True

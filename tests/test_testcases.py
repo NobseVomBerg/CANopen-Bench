@@ -357,3 +357,44 @@ def test_volts_may_be_fractional_but_not_prose():
     assert parse_testcase(good, "TC1_x.yaml").error is None
     bad = 'id: "1"\nname: x\nsteps:\n  - psu: {volt: high}\n'
     assert parse_testcase(bad, "TC1_x.yaml").error
+
+
+# -- a scalar `variants:` is a schema error, not a crash (parse_testcase) ---
+# `doc.get("variants") or []` is truthy for a bare int, so iterating it to
+# build tc.variants raised TypeError before this was guarded — a parse bug
+# in one file must not be able to raise out of parse_testcase.
+
+def test_parse_rejects_a_scalar_variants_instead_of_crashing():
+    text = 'id: "1"\nname: x\nvariants: 820\nsteps:\n  - end:\n'
+    tc = parse_testcase(text, "TC1_x.yaml")  # must not raise
+    assert tc.error and "variants must be a list" in tc.error
+
+
+def test_load_catalog_survives_a_bad_scalar_variants_file_next_to_a_good_one(tmp_path):
+    """Before the fix the TypeError from the scalar `variants:` escaped
+    load_catalog entirely — it only catches OSError — so one bad file lost
+    every other case in the folder, not just its own entry."""
+    (tmp_path / "TC0001_ok.yaml").write_text(VALID)
+    (tmp_path / "TC0002_bad.yaml").write_text(
+        'id: "0002"\nname: x\nvariants: 820\nsteps:\n  - end:\n')
+    catalog = load_catalog(tmp_path)  # must not raise
+    assert [tc.file for tc in catalog] == ["TC0001_ok.yaml", "TC0002_bad.yaml"]
+    assert catalog[0].error is None
+    assert catalog[1].error and "variants must be a list" in catalog[1].error
+
+
+# -- `ask` and `adjust` validate `timeout` (parse_testcase) -----------------
+# A non-numeric timeout used to reach `float()` in the executor and kill
+# the run task with no verdict; this must be a schema error instead.
+
+def test_ask_rejects_a_non_numeric_timeout():
+    text = 'id: "1"\nname: x\nsteps:\n  - ask: {text: "sure?", timeout: "soon"}\n'
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "timeout" in tc.error
+
+
+def test_adjust_rejects_a_non_numeric_timeout():
+    text = ('id: "1"\nname: x\nsteps:\n'
+            '  - adjust: {index: "0x2000", sub: "00", timeout: "soon"}\n')
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "timeout" in tc.error
