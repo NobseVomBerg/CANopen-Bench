@@ -35,9 +35,11 @@ they need to remove — do not leave it unmentioned.
 
 ## Model routing
 
-Delegate well-scoped, mechanical work to the specialized agents in
-`.claude/agents/` instead of doing it on the main thread — they're pinned
-to a cheaper model/effort than the default, since they don't need it:
+Main-thread default is Opus (`.claude/settings.json`) — best available
+model, for architecture-level and ambiguous work. Delegate well-scoped,
+mechanical work to the specialized agents in `.claude/agents/` instead of
+doing it on the main thread — they're pinned to Sonnet, roughly half
+Opus's cost, since they don't need the bigger model:
 
 - **test-agent** — writing/running/fixing the pytest suite (`tests/*.py`).
 - **testcase-agent** — creating/editing format-v2 YAML sequence files:
