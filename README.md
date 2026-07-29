@@ -58,6 +58,11 @@ and every access shows up in the Trace like real bus traffic.
 - **Tests** — declarative YAML test cases
   (`docs/ablaeufe/testfall-format.md`, examples in
   `examples/testcases/`) executed for real against the selected device.
+  A run leaves HTML behind: one file per case, one summary, and a JSON
+  sibling. From those, "Overview by variant" folds the last so many days
+  into one collapsible section per hardware variant — runs, successes
+  and last verdict per case — which is how you tell one broken variant
+  from a broken device family.
 - **Bench instruments** — a remote-controllable lab power supply is set
   from the Setup page and from a test case (`psu` step), which is what
   keeps an under-voltage case automated instead of asking an operator to

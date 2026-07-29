@@ -112,7 +112,50 @@ asyncio-Task pro Lauf** ersetzt (nicht durch mehr Tick-Logik):
 ## Beobachtbares Ergebnis
 
 - Ergebnis-Badges je Testfall, Fortschrittszeile `step k/n`, Lauf-Log,
-  Report-Eintrag `run_MMDD_HHMM.html` mit Score in der Historie.
+  Report-Eintrag mit Score in der Historie.
+- Kasten „Overview by variant“ auf der Tests-Seite: Zeitraum wählen,
+  erzeugen, danach je Variante Erfolgsquote und letztes Verdikt — die
+  Datei selbst liegt bei den Reports.
+
+## Reports **[Ist]**
+
+Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
+`<workspace>/results`):
+
+| Datei | Inhalt |
+|---|---|
+| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, jeder Schritt mit Zeitstempel und Begründung |
+| `<stamp>__summary.html` | der Lauf: eine Zeile je Testfall, verlinkt auf dessen Datei |
+| `<stamp>__summary.json` | derselbe Lauf als Daten — Grundlage der Übersicht unten |
+| `testReportStyle.css` | einmal geschrieben, von allen Reports verlinkt, **nie überschrieben** |
+
+Schlägt das Schreiben fehl (volle Platte, ungültiger Pfad), ist das eine
+Logzeile `RUN  report not written — …` und **kein** fehlgeschlagener
+Lauf: die Verdikte stehen bereits im Log und auf dem Schirm.
+
+### Übersicht nach HW-Varianten **[Ist]**
+
+Aktion `report_overview` mit `{days: N}` (1…90, Vorgabe 7) faltet die
+Läufe der letzten N Tage zu `__overview.html` zusammen — je
+Hardware-Variante ein aufklappbarer Abschnitt mit Läufen, Erfolgen und
+letztem Status je Testfall, verlinkt auf dessen jüngsten Einzelreport.
+Sie beantwortet die Frage, die die Zusammenfassung eines einzelnen Laufs
+nicht beantworten kann: *ist nur die 920 kaputt oder alle?*
+
+- Gelesen wird `*__summary.json`, nicht das HTML, das verlinkt werden
+  soll.
+- Gefiltert wird über das `started` des Laufs, **nicht** über die
+  Dateizeit: ein Results-Ordner wird kopiert und synchronisiert, mtime
+  überlebt das nicht.
+- Ein Gerät ohne gemeldete Variante wird unter seinem Gerätenamen
+  gruppiert statt weggelassen — sonst wäre die Übersicht unbemerkt
+  unvollständig.
+- Das Verdikt einer Variante ist das des **jüngsten** Laufs, kein
+  Mittelwert: „12 von 14 bestanden“ sagt nichts darüber, ob es heute
+  funktioniert.
+- Erzeugt wird sie auf Anforderung, nicht nach jedem Lauf: sie liest den
+  ganzen Ordner, und die meisten Läufe sind ein weiterer Datenpunkt in
+  einem Bild, das gerade niemand ansieht.
 
 ## Verifikation ohne Hardware
 

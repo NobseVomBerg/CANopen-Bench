@@ -1007,13 +1007,48 @@ function TestsPage({ s, ui, setUi }) {
           ${t.runProg && html`<div style="color:var(--acc)">TEST ${t.runProg.tid} step ${t.runProg.step}/${t.runProg.of}  ${t.runProg.text}</div>`}
         </div>
       </div>
-      <div style="font-weight:600;font-size:13px;margin-top:2px;display:flex;justify-content:space-between;align-items:baseline">Recent reports<span style="font-size:10.5px;color:var(--acc);font-weight:600;cursor:pointer">overview →</span></div>
+      <div style="font-weight:600;font-size:13px;margin-top:2px">Recent reports</div>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px">
         ${t.reports.map((rp) => html`
           <span style="display:flex;justify-content:space-between;color:var(--mid)"><span style="color:var(--acc);text-decoration:underline;cursor:pointer">${rp.name}</span><span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
       </div>
+      <${OverviewBox} ov=${t.overview} />
     </div>
   </div>`;
+}
+
+// Across runs, by hardware variant. Written on request, not after every
+// run: it reads the whole results folder, and most runs are one more data
+// point in a picture nobody is looking at right now.
+function OverviewBox({ ov }) {
+  const [days, setDays] = useState(7);
+  return html`
+    <div style="font-weight:600;font-size:13px;margin-top:6px;display:flex;justify-content:space-between;align-items:baseline">
+      Overview by variant
+      <span style="display:flex;gap:6px;align-items:baseline;font-weight:400">
+        <span style="font-size:10.5px;color:var(--faint)">last</span>
+        <select value=${String(days)} onChange=${(e) => setDays(Number(e.target.value))}
+          style="background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:5px;font:11px ${MONO};padding:1px 3px">
+          ${[1, 2, 3, 5, 7, 10, 14, 30].map((d) => html`<option value=${String(d)}>${d} d</option>`)}
+        </select>
+        <span class="hv" onClick=${() => send('report_overview', { days })}
+          style="font-size:10.5px;color:var(--acc);font-weight:600;cursor:pointer">create →</span>
+      </span>
+    </div>
+    <div style="font-size:11.5px;color:var(--mid);display:flex;flex-direction:column;gap:4px">
+      ${!ov && html`<span style="color:var(--faint)">not created yet — the file lands beside the reports</span>`}
+      ${ov && html`
+        <span style="display:flex;justify-content:space-between">
+          <span style="color:var(--acc);text-decoration:underline">${ov.name}</span>
+          <span style="color:var(--faint);font:10.5px ${MONO}">${ov.runs} run${ov.runs === 1 ? '' : 's'} · ${ov.days} d</span>
+        </span>
+        ${ov.variants.length === 0 && html`<span style="color:var(--faint)">no runs in that window</span>`}
+        ${ov.variants.map((v) => html`
+          <span style="display:flex;justify-content:space-between;font:10.5px ${MONO}">
+            <span>${v.key}</span>
+            <span style="color:var(--faint)">${v.passed}/${v.of} · <span style="color:${v.verdict === 'PASS' ? 'var(--grn)' : v.verdict === 'FAIL' ? 'var(--red)' : 'var(--amb)'};font-weight:600">${v.verdict}</span></span>
+          </span>`)}`}
+    </div>`;
 }
 
 // ------------------------------------------------------------------- swdl --
