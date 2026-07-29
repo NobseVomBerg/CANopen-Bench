@@ -23,13 +23,42 @@ labels on a screen next to real ones, and there is no way for the reader
 to tell which is which.
 
 ``*LRN?`` reports the settings in force. What the terminals are doing
-under load is a different number, and the SCPI queries for it
-(``MEAS:VOLT?``, ``MEAS:CURR?``) may or may not work on a given unit —
-this one answers ``*IDN?`` but is documented as not supporting the SCPI
-commands that have a short-command equivalent. So the driver asks once,
-believes the answer, and stops asking if nothing sensible comes back. A
-measured value is shown when there is one and left blank when there is
-not; it is never the setting wearing a different label.
+under load is a different number, and for that the unit speaks SCPI:
+
+    :MEAS:VOLT?;CURR?     measured voltage and current of the selected
+                          channel, both in one answer, separated by ";"
+
+That chained form comes from the manufacturer's own LabVIEW library
+(TOE8950_LT), which asks ``:MEAS:VOLT?;CURR?;POW?;:SENSE:AVER?`` in a
+single write. It is worth copying: a measurement per round trip costs
+the read timeout each time it is not answered, and this unit is known
+not to accept every SCPI command.
+
+Which is the catch. The 8950 series has **two command languages** — the
+short commands above and SCPI — and the library carries a
+``SYST:LANG CII`` to switch between them. This driver never switches:
+that would change the device under every other tool on the bench,
+including the operator's own scripts. It works out which language it is
+being answered in instead, and stays in it. These supplies are in
+service for decades; what a given unit accepts is not something to
+assume from its model number.
+
+So: settings are read with ``*LRN?``, and if that says nothing, the same
+question is asked in SCPI. The measurement query is tried once as it
+stands. If the unit answers, its values are shown; if not, the driver
+stops asking and the box shows settings only. A measured value is never
+the setting wearing a different label.
+
+The SCPI path is **untested against hardware** — this bench's unit
+speaks the short language, so that is the one with evidence behind it.
+
+Other commands the library uses, none of them needed here yet, but
+written down so the next question does not need this file again:
+``:INST OUT1|OUT2`` (select), ``:VOLT``/``:CURR``/``:POW`` (set),
+``:OUTP 0|1`` and ``:OUTP?``, ``:VOLT?``/``:CURR?``/``:POW?``,
+``:VOLT:PROT?`` (over-voltage), ``:VOLT:SLEW:STAT FAST|SLOW``,
+``:SENS:AVER ON|OFF``, ``:STAT:QUES:EVEN?``, ``SYST:ERR?``, ``*CLS``,
+``*RST``, ``*OPC?``.
 """
 from __future__ import annotations
 
@@ -37,6 +66,16 @@ from . import Channel, PowerSupply, SerialLink, SupplyState
 
 #: what the unit calls itself: "TOELLNER,TOE8952-60,102625,3.63-3.62"
 _VENDOR = "TOELLNER"
+
+#: measured voltage and current in one answer, values separated by ";"
+MEASURE = ":MEAS:VOLT?;CURR?"
+
+#: which language a given unit is answering in
+SHORT, SCPI = "short", "scpi"
+
+#: how many channels to look for when the unit only speaks SCPI — there is
+#: no "list your channels" query, so the driver asks and keeps what answers
+_MAX_CHANNELS = 2
 
 
 class Toellner8952(PowerSupply):
@@ -48,6 +87,8 @@ class Toellner8952(PowerSupply):
         self.idn = ""
         #: None = not tried yet, True/False = this unit answers MEAS: or not
         self.measures: bool | None = None
+        #: which language this unit answered in — settled on the first read
+        self.dialect = SHORT
 
     @classmethod
     def identify(cls, link: SerialLink) -> str | None:
@@ -59,44 +100,80 @@ class Toellner8952(PowerSupply):
             self.idn = self.link.ask("*IDN?")
         raw = self.link.ask("*LRN?")
         st = parse_settings(raw)
+        if not st.channels:
+            # this unit does not answer the short language — ask in SCPI
+            # instead. Which one a unit speaks is not something to assume:
+            # these supplies stay in service for decades and the command
+            # set is not the same across that span.
+            st = self._scpi_state()
+        self.dialect = SHORT if raw and parse_settings(raw).channels else SCPI
         st.port = self.link.port
         st.model, st.serial, st.firmware = _split_idn(self.idn)
         self._read_measured(st)
         return st
 
+    def _scpi_state(self) -> SupplyState:
+        """Settings read the SCPI way, one channel at a time.
+
+        There is no query for how many channels a unit has, so the driver
+        asks for each in turn and keeps the ones that answer. Untested
+        against hardware — this bench's unit speaks the short language.
+        """
+        st = SupplyState()
+        for index in range(1, _MAX_CHANNELS + 1):
+            self.link.write(f":INST OUT{index}")
+            volt, curr = _measured(self.link.ask(":VOLT?;CURR?"))
+            if volt is None and curr is None:
+                break
+            st.channels.append(Channel(volt=volt or 0.0, curr=curr or 0.0))
+        out = _number(self.link.ask(":OUTP?"))
+        st.output = None if out is None else bool(out)
+        return st
+
+    def _select(self, channel: int) -> str:
+        return (f":INST OUT{int(channel)}" if self.dialect == SCPI
+                else f"SEL {int(channel)}")
+
     def _read_measured(self, st: SupplyState) -> None:
         """Ask for the measured values, at most once per session.
 
-        A unit that does not know these queries answers nothing, and every
-        unanswered query costs the read timeout — so the first channel
-        decides for the whole session and a "no" is remembered.
+        One chained query per channel, the way the manufacturer's own
+        library does it. A unit that does not know it answers nothing, and
+        every unanswered query costs the read timeout — so the first
+        channel decides for the whole session and a "no" is remembered.
         """
         if self.measures is False:
             return
         for index, channel in enumerate(st.channels, start=1):
-            self.link.write(f"SEL {index}")
-            volt = _number(self.link.ask("MEAS:VOLT?"))
-            curr = _number(self.link.ask("MEAS:CURR?"))
+            self.link.write(self._select(index))
+            answer = self.link.ask(MEASURE)
+            volt, curr = _measured(answer)
             if volt is None and curr is None:
                 self.measures = False
                 return
             self.measures = True
             channel.meas_volt, channel.meas_curr = volt, curr
 
-    def _select(self, channel: int) -> None:
-        self.link.write(f"SEL {int(channel)}")
-
     def set_voltage(self, channel: int, volts: float) -> None:
         # one line, not two writes: the unit takes several commands
         # separated by semicolons, and a select that arrives without its
         # value would leave the wrong channel armed for whatever comes next
-        self.link.write(f"SEL {int(channel)};V {float(volts):.2f}")
+        if self.dialect == SCPI:
+            self.link.write(f":INST OUT{int(channel)};:VOLT {float(volts):.2f}")
+        else:
+            self.link.write(f"SEL {int(channel)};V {float(volts):.2f}")
 
     def set_current(self, channel: int, amps: float) -> None:
-        self.link.write(f"SEL {int(channel)};C {float(amps):.3f}")
+        if self.dialect == SCPI:
+            self.link.write(f":INST OUT{int(channel)};:CURR {float(amps):.3f}")
+        else:
+            self.link.write(f"SEL {int(channel)};C {float(amps):.3f}")
 
     def set_output(self, on: bool) -> None:
-        self.link.write(f"EX {1 if on else 0}")
+        if self.dialect == SCPI:
+            self.link.write(f":OUTP {1 if on else 0}")
+        else:
+            self.link.write(f"EX {1 if on else 0}")
 
 
 def _split_idn(idn: str) -> tuple[str, str, str]:
@@ -112,6 +189,18 @@ def _number(text: str) -> float | None:
         return float(text)
     except ValueError:
         return None
+
+
+def _measured(answer: str) -> tuple[float | None, float | None]:
+    """The chained measurement answer ("4.98;0.12") into two numbers.
+
+    A unit that does not know the query answers nothing or something that
+    is not a number, and both mean the same thing here: no measurement.
+    """
+    parts = [p.strip() for p in answer.split(";")]
+    volt = _number(parts[0]) if parts else None
+    curr = _number(parts[1]) if len(parts) > 1 else None
+    return volt, curr
 
 
 def parse_settings(raw: str) -> SupplyState:
