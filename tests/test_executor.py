@@ -533,3 +533,40 @@ def test_emcy_clear_forgets_what_came_before(tc_bench):
     _add_tc(tc_bench, "TC0016_emcy_clear.yaml", EMCY_CLEAR_TC)
     run_selected(tc_bench, {"0016"})
     assert tc_bench.results == {"0016": "FAIL"}
+
+
+# -- the bench's own equipment ----------------------------------------------
+
+PSU_TC = """\
+id: "0017"
+name: "walk the supply down and back"
+tools: [PSU]
+steps:
+  - psu: {ch: 2, volt: 26}
+  - psu: {output: on}
+  - sdo_read: {index: "0x2040", sub: "0x01"}
+  - psu: {ch: 2, volt: 57.5, curr: 2}
+  - psu: {output: off}
+"""
+
+
+def test_a_case_can_drive_the_power_supply(tc_bench):
+    """The reason this exists: an under-voltage case that has to ask an
+    operator to turn a knob is not an automated case any more."""
+    from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
+    port = FakeSupplyPort()
+    tc_bench._psu_opener = lambda device, baud, timeout: port
+    assert tc_bench._psu_connect("COM6")
+    _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
+    run_selected(tc_bench, {"0017"})
+    assert tc_bench.results == {"0017": "PASS"}
+    assert [w for w in port.written if not w.startswith("*")] == [
+        "SEL 2;V 26.00", "EX 1", "SEL 2;V 57.50", "SEL 2;C 2.000", "EX 0"]
+
+
+def test_without_a_supply_the_case_errors_rather_than_blaming_the_device(tc_bench):
+    """No instrument is a bench problem. FAIL would read as "the DUT did
+    the wrong thing", which is a different message entirely."""
+    _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
+    run_selected(tc_bench, {"0017"})
+    assert tc_bench.results == {"0017": "ERROR"}

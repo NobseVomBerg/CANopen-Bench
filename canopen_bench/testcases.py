@@ -35,6 +35,7 @@ _STEP_FIELDS = {
     "sdo_read": ({"index", "sub"}, {"expect", "expect_abort", "mask", "into", "node"}),
     "sdo_write": ({"index", "sub", "value"}, {"size", "expect_abort", "node"}),
     "expect_emcy": ({"code"}, {"mask", "node", "timeout"}),
+    "psu": (set(), {"ch", "volt", "curr", "output"}),
 }
 
 
@@ -53,6 +54,14 @@ def _is_value(v: object) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _is_number(v: object) -> bool:
+    """A value, or a plain decimal number — volts and amps are not
+    integers, and "26.5" is an ordinary thing to ask a supply for."""
+    if isinstance(v, float):
+        return True
+    return _is_value(v)
 
 
 @dataclass
@@ -192,6 +201,18 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
                 return f"sdo_write: invalid value {val['value']!r}"
             if "size" in val and val["size"] not in (1, 2, 4):
                 return "sdo_write: size must be 1, 2 or 4"
+        if key == "psu":
+            if not set(val) & {"volt", "curr", "output"}:
+                return "psu: needs at least one of volt, curr, output"
+            for name in ("volt", "curr"):
+                if name in val and not _is_number(val[name]):
+                    return f"psu: {name} must be a number or a register"
+            if "ch" in val and not isinstance(val["ch"], int):
+                return f"psu: ch must be a channel number, got {val['ch']!r}"
+            # YAML reads bare on/off as booleans, which is exactly how a
+            # file wants to spell this — both spellings are the same thing
+            if "output" in val and val["output"] not in (True, False, "on", "off"):
+                return "psu: output must be on or off"
         if key == "expect_emcy":
             for name in ("code", "mask", "node"):
                 if name in val and not _is_value(val[name]):

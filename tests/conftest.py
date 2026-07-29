@@ -116,3 +116,29 @@ def connect_and_scan(bench: Bench) -> None:
         asyncio.run(run())
     finally:
         core_mod.SCAN_DELAY_S = orig
+
+
+class FakeSupplyPort:
+    """A Töllner-like serial port for tests that need the bench to have a
+    power supply. Same answers as tests/test_instruments.py uses, kept
+    here because the executor tests need one too."""
+
+    IDN = "TOELLNER,TOE8952-60,102625,3.63-3.62"
+    LRN = "SEL 1;V 005.00;C 00.500;SEL 2;V 057.00;C 07.000;EX 1"
+
+    def __init__(self):
+        self.written: list[str] = []
+        self._pending = ""
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        cmd = data.decode("ascii").strip()
+        self.written.append(cmd)
+        self._pending = {"*IDN?": self.IDN, "*LRN?": self.LRN}.get(cmd, "")
+
+    def readline(self) -> bytes:
+        out, self._pending = self._pending, ""
+        return out.encode("ascii") + b"\n"
+
+    def close(self) -> None:
+        self.closed = True
