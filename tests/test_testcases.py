@@ -129,10 +129,19 @@ def test_parse_rejects_jump_to_unknown_label():
     assert tc.error and "unknown label" in tc.error
 
 
-def test_parse_rejects_can_send_with_empty_data():
-    text = 'id: "1"\nname: x\nsteps:\n  - can_send: {cob: "0x780", data: []}\n'
+def test_parse_accepts_can_send_without_data():
+    """A frame with no data is a real frame: a CiA-301 SYNC carries none
+    unless a counter is configured, and a test case has to be able to
+    send one."""
+    text = 'id: "1"\nname: x\nsteps:\n  - can_send: {cob: "0x80", data: []}\n'
     tc = parse_testcase(text, "TC1_x.yaml")
-    assert tc.error and "non-empty" in tc.error
+    assert tc.error is None
+
+
+def test_parse_rejects_can_send_with_data_that_is_not_a_list():
+    text = 'id: "1"\nname: x\nsteps:\n  - can_send: {cob: "0x780", data: 5}\n'
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "byte list" in tc.error
 
 
 def test_parse_rejects_wait_for_cob_without_timeout():

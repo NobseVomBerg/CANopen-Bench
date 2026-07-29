@@ -196,6 +196,22 @@ def _as_int(value) -> int | None:
         return None
 
 
+def _typed_number(text: str) -> int | None:
+    """A number as a person at the bench writes it: "0x1E" is hex, "30" is
+    thirty.
+
+    Everywhere else in this file a bare string is hex, because it comes
+    from a file somebody wrote against a datasheet. This one comes from a
+    human typing into a box while watching a meter, and there "30" meaning
+    forty-eight is a wrong value written to a real device.
+    """
+    text = str(text).strip()
+    try:
+        return int(text, 16) if text.lower().startswith(("0x", "-0x")) else int(text, 10)
+    except ValueError:
+        return None
+
+
 def _judge_read(spec: dict, res: SdoResult) -> tuple[str, str]:
     """Verdict for an sdo_read step: values compare numerically (with
     optional mask) so "0x2A" matches "0x0000002A"; non-hex values (strings
@@ -245,8 +261,15 @@ def _with_registers(spec: dict, regs: dict) -> dict:
 
 def _step_text(key: str, val) -> str:
     """Human-readable step line for the run progress ("step 3/9 <text>")."""
-    if key == "manual":
+    if key in ("manual", "ask"):
         return val if isinstance(val, str) else str(val.get("text", ""))
+    if key == "adjust":
+        where = f"{_hexstr(val['index'])}:{_hexstr(val['sub'])}"
+        return f"adjust {where}" + (f" — {val['text']}" if val.get("text") else "")
+    if key == "rand":
+        return f"rand {val['to']} in {val.get('min', 0)}..{val.get('max', '2^32-1')}"
+    if key == "jump_on_error":
+        return f"jump to {val} if the case already failed"
     if key == "nmt":
         if isinstance(val, dict):
             return f"NMT {val['cmd']}" + (" (all)" if val.get("node") == "all" else "")
@@ -507,7 +530,8 @@ class Bench:
         self.run_prog: dict | None = None       # {tid, step, of, text} while executing
         self.manual_prompt: dict | None = None  # {tid, text} while waiting for the operator
         self._manual_event: asyncio.Event | None = None
-        self._manual_result = False
+        self._manual_result = "cancel"   # "ok" | "no" | "cancel" | "abort"
+        self._manual_value = ""          # what an `adjust` prompt was given
         self._run_stop_requested = False
         self._run_mode = "sim"  # "exec" once a run uses real test-case files
         self.stop_on_err = True
@@ -2717,14 +2741,42 @@ class Bench:
             self.running = False
             self.log("RUN  stopped by user")
 
+    async def _prompt(self, prompt: dict, timeout: float) -> str | None:
+        """Put a question on the screen and wait for the person at the bench.
+
+        Returns their answer ("ok" | "no" | "cancel"), or None on timeout.
+        One waiting mechanism for all three prompt kinds — a second one
+        would be a second way to leave the run stuck with no dialog.
+        """
+        self.manual_prompt = prompt
+        self._manual_event = asyncio.Event()
+        self._manual_result, self._manual_value = "cancel", ""
+        self._changed()
+        try:
+            await asyncio.wait_for(self._manual_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self.manual_prompt = None
+            self._manual_event = None
+            self._changed()
+        return self._manual_result
+
     def act_manual_confirm(self, p: dict) -> None:
-        if self.manual_prompt and self._manual_event is not None:
-            self._manual_result = True
-            self._manual_event.set()
+        self._answer("ok", p)
 
     def act_manual_abort(self, p: dict) -> None:
+        self._answer("abort", p)
+
+    def act_manual_answer(self, p: dict) -> None:
+        """The three-way answer to `ask`, and the value typed into `adjust`."""
+        choice = str(p.get("choice") or "cancel")
+        self._answer(choice if choice in ("ok", "no", "cancel") else "cancel", p)
+
+    def _answer(self, choice: str, p: dict) -> None:
         if self.manual_prompt and self._manual_event is not None:
-            self._manual_result = False
+            self._manual_result = choice
+            self._manual_value = str(p.get("value", ""))
             self._manual_event.set()
 
     # -- step executor (real test-case files, see docs/ablaeufe/A-04) --------
@@ -2799,7 +2851,8 @@ class Bench:
         regs = {name: 0 for name in tclib.REGISTERS}
         sess = self.mc.get("session") or ""  # "" until an addressing run distributed one
         builtins = {"node": node, "expected": int(self.mc.get("expected") or 0),
-                    "session": _session_bytes(sess) if sess else None}
+                    "session": _session_bytes(sess) if sess else None,
+                    "failed": ""}   # set by a failure the case chose to survive
         total = len(tc.preconditions) + len(tc.steps)
 
         def on_step(idx: int, text: str) -> None:
@@ -2820,9 +2873,11 @@ class Bench:
             return done("SKIP", f"precondition: {why}")
         if status == "error":
             return done("ERROR", why)
+        # only the body may carry on after a failure — a precondition that
+        # fails means the case does not apply, and there is nothing to undo
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
                                               len(tc.preconditions), on_step, stop,
-                                              rec.steps)
+                                              rec.steps, allow_continue=True)
         if status == "ok":
             return done("PASS")
         if status == "skip":
@@ -2831,7 +2886,8 @@ class Bench:
 
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
                            regs: dict, builtins: dict, base: int,
-                           on_step, should_stop, record: list | None = None) -> tuple[str, str]:
+                           on_step, should_stop, record: list | None = None,
+                           allow_continue: bool = False) -> tuple[str, str]:
         """Program-counter loop over one step list (format v2: labels, jumps,
         registers). Returns ("ok" | "fail" | "error", reason)."""
         labels = {step["label"]: i for i, step in enumerate(steps)
@@ -2864,11 +2920,20 @@ class Bench:
                 pc = labels[info]
                 continue
             if status == "end":
-                return "ok", ""
+                break
+            if status == "fail" and allow_continue and tc.on_fail == "continue":
+                # the case says it wants to reach its own last steps even
+                # when something failed — that is where it puts the bench
+                # back. The failure is remembered, not forgiven: the first
+                # one is the verdict's reason, and jump_on_error can see it.
+                if not builtins.get("failed"):
+                    builtins["failed"] = info or "step failed"
+                pc += 1
+                continue
             if status != "ok":
                 return status, info
             pc += 1
-        return "ok", ""
+        return ("fail", builtins["failed"]) if builtins.get("failed") else ("ok", "")
 
     def _resolve_dut(self, tc: tclib.TestCase) -> int | None:
         if isinstance(tc.dut, dict):
@@ -2889,6 +2954,17 @@ class Bench:
             return "ok", ""
         if key == "jump":
             return "jump", val
+        if key == "jump_on_error":
+            # only ever true in a case with on_fail: continue — anywhere
+            # else the run would already have ended at the failure
+            return ("jump", val) if builtins.get("failed") else ("ok", "")
+        if key == "rand":
+            lo = _resolve(val.get("min", 0), regs, builtins)
+            hi = _resolve(val.get("max", 0xFFFFFFFF), regs, builtins)
+            if lo > hi:
+                return "error", f"rand {val['to']}: min {lo} above max {hi}"
+            regs[val["to"]] = random.randint(lo, hi)
+            return "ok", ""
         if key in tclib._COND_JUMPS:
             a = _resolve(val["a"], regs, builtins)
             b = _resolve(val["b"], regs, builtins)
@@ -3102,21 +3178,61 @@ class Bench:
             text = val if isinstance(val, str) else val["text"]
             timeout = tclib.MANUAL_TIMEOUT_S if isinstance(val, str) \
                 else float(val.get("timeout", tclib.MANUAL_TIMEOUT_S))
-            self.manual_prompt = {"tid": tc.id, "text": text}
-            self._manual_event = asyncio.Event()
-            self._manual_result = False
-            self._changed()
-            try:
-                await asyncio.wait_for(self._manual_event.wait(), timeout)
-            except asyncio.TimeoutError:
+            answer = await self._prompt(
+                {"tid": tc.id, "text": text, "kind": "confirm"}, timeout)
+            if answer is None:
                 return "error", "manual step timed out"
-            finally:
-                self.manual_prompt = None
-                self._manual_event = None
-                self._changed()
+            self._manual_result = answer
             if should_stop():
                 return "error", "aborted"
-            return ("ok", "") if self._manual_result else ("error", "manual step aborted")
+            return ("ok", "") if self._manual_result == "ok" \
+                else ("error", "manual step aborted")
+        if key == "ask":
+            text = val if isinstance(val, str) else val["text"]
+            title = "" if isinstance(val, str) else str(val.get("title", ""))
+            timeout = tclib.MANUAL_TIMEOUT_S if isinstance(val, str) \
+                else float(val.get("timeout", tclib.MANUAL_TIMEOUT_S))
+            answer = await self._prompt({"tid": tc.id, "text": text, "title": title,
+                                         "kind": "ask"}, timeout)
+            if answer is None:
+                return "error", "question timed out"
+            if should_stop():
+                return "error", "aborted"
+            # the operator looked and said no: that is a verdict about the
+            # device, not an aborted run, so it is a FAIL and the question
+            # is the reason — nobody has to guess what was answered
+            if answer == "no":
+                return "fail", text
+            return ("ok", "") if answer == "ok" else ("skip", f"cancelled: {text}")
+        if key == "adjust":
+            index, sub = _hexstr(val["index"]), _hexstr(val["sub"])
+            node_ = _resolve(val["node"], regs, builtins) if "node" in val else node
+            res = await asyncio.to_thread(bus.sdo_read, node_, index, sub)
+            if not res.ok:
+                return "fail", f"adjust {index}:{sub} abort {res.abort}"
+            answer = await self._prompt(
+                {"tid": tc.id, "kind": "adjust", "text": str(val.get("text", "")),
+                 "index": index, "sub": sub, "value": str(res.value)},
+                tclib.MANUAL_TIMEOUT_S)
+            if answer is None:
+                return "error", "adjust step timed out"
+            if should_stop():
+                return "error", "aborted"
+            if answer != "ok":
+                return "skip", f"cancelled: {val.get('text') or index}"
+            number = _typed_number(self._manual_value)
+            if number is None:
+                return "error", (f"adjust {index}:{sub}: "
+                                 f"{self._manual_value!r} is not a number")
+            # width travels in the literal, the way the sdo_write step does it
+            size = int(val.get("size", 4))
+            masked = number & ((1 << (size * 8)) - 1)
+            wres = await asyncio.to_thread(bus.sdo_write, node_, index, sub,
+                                           f"0x{masked:0{size * 2}X}")
+            if not wres.ok:
+                return "fail", f"adjust {index}:{sub} write abort {wres.abort}"
+            regs["R0"] = number & 0xFFFFFFFF
+            return "ok", ""
         return "error", f"unknown step {key!r}"
 
     # -- SWDL ---------------------------------------------------------------------

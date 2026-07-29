@@ -987,15 +987,7 @@ function TestsPage({ s, ui, setUi }) {
           style="flex:1;text-align:center;background:${t.running || !selIds.length ? 'var(--faint)' : 'var(--grn)'};color:#fff;font-weight:600;padding:8px 0;border-radius:7px;cursor:pointer">${t.running ? 'Running…' : `▶ Start ${selIds.length} tests`}</span>
         <span class="hv" onClick=${() => send('run_stop')} style="border:1px solid var(--inp);color:${t.running ? 'var(--red)' : 'var(--faint)'};font-weight:600;padding:8px 12px;border-radius:7px;cursor:pointer">■</span>
       </div>
-      ${t.manual && html`
-      <div style="border:1px solid var(--acc-bd);border-radius:8px;padding:10px 12px;background:var(--acc-soft)">
-        <div style="font-size:10.5px;color:var(--acc);font-weight:700;letter-spacing:.05em;margin-bottom:4px">OPERATOR ACTION · TEST ${t.manual.tid}</div>
-        <div style="font-size:12.5px;color:var(--tx);margin-bottom:8px">${t.manual.text}</div>
-        <div style="display:flex;gap:8px">
-          <span class="hv-b" onClick=${() => send('manual_confirm')} style="flex:1;text-align:center;background:var(--grn);color:#fff;font-weight:600;padding:6px 0;border-radius:6px;cursor:pointer">Done ✓</span>
-          <span class="hv" onClick=${() => send('manual_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Abort</span>
-        </div>
-      </div>`}
+      ${t.manual && html`<${OperatorPrompt} p=${t.manual} />`}
       <div style="border:1px solid var(--bd);border-radius:8px;padding:10px 12px;background:var(--panel2)">
         <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mid);margin-bottom:6px">
           <span>${t.running ? 'Running ' + runningId : total ? 'Idle — last run' : 'Idle'}</span>
@@ -1013,6 +1005,46 @@ function TestsPage({ s, ui, setUi }) {
           <span style="display:flex;justify-content:space-between;color:var(--mid)"><span style="color:var(--acc);text-decoration:underline;cursor:pointer">${rp.name}</span><span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
       </div>
       <${OverviewBox} ov=${t.overview} />
+    </div>
+  </div>`;
+}
+
+// The run is stopped, waiting for the person at the bench. Three shapes,
+// one box: confirm ("done / abort"), ask ("yes / no / cancel" — where no
+// is a verdict about the device, not an aborted run) and adjust, which
+// reads an object, lets it be corrected, and writes it back.
+const promptBtn = 'font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer;text-align:center';
+
+function OperatorPrompt({ p }) {
+  const [val, setVal] = useState(p.value ?? '');
+  const kind = p.kind || 'confirm';
+  const key = `${p.tid}:${p.index || ''}:${p.sub || ''}:${p.text || ''}`;
+  useEffect(() => setVal(p.value ?? ''), [key]);
+  return html`
+  <div style="border:1px solid var(--acc-bd);border-radius:8px;padding:10px 12px;background:var(--acc-soft)">
+    <div style="font-size:10.5px;color:var(--acc);font-weight:700;letter-spacing:.05em;margin-bottom:4px">
+      ${kind === 'ask' ? 'QUESTION' : kind === 'adjust' ? 'ADJUST' : 'OPERATOR ACTION'} · TEST ${p.tid}
+    </div>
+    ${p.title && html`<div style="font-size:12.5px;color:var(--tx);font-weight:600">${p.title}</div>`}
+    <div style="font-size:12.5px;color:var(--tx);margin-bottom:8px">${p.text}</div>
+    ${kind === 'adjust' && html`
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font:11px ${MONO};color:var(--dim);flex:none">${p.index}:${p.sub}</span>
+        <input value=${val} onInput=${(e) => setVal(e.target.value)}
+          style="flex:1;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--inp);border-radius:6px;font:12px ${MONO};padding:4px 8px" />
+      </div>
+      <div style="font-size:10.5px;color:var(--faint);margin:3px 0 8px 0">0x… is hex, anything else decimal</div>`}
+    <div style="display:flex;gap:8px">
+      ${kind === 'confirm' && html`
+        <span class="hv-b" onClick=${() => send('manual_confirm')} style="flex:1;${promptBtn};background:var(--grn);color:#fff">Done ✓</span>
+        <span class="hv" onClick=${() => send('manual_abort')} style="${promptBtn};border:1px solid var(--inp);color:var(--red)">Abort</span>`}
+      ${kind === 'ask' && html`
+        <span class="hv-b" onClick=${() => send('manual_answer', { choice: 'ok' })} style="flex:1;${promptBtn};background:var(--grn);color:#fff">Yes</span>
+        <span class="hv-b" onClick=${() => send('manual_answer', { choice: 'no' })} style="flex:1;${promptBtn};background:var(--red);color:#fff">No</span>
+        <span class="hv" onClick=${() => send('manual_answer', { choice: 'cancel' })} style="${promptBtn};border:1px solid var(--inp);color:var(--mid)">Cancel</span>`}
+      ${kind === 'adjust' && html`
+        <span class="hv-b" onClick=${() => send('manual_answer', { choice: 'ok', value: val })} style="flex:1;${promptBtn};background:var(--grn);color:#fff">Write ✓</span>
+        <span class="hv" onClick=${() => send('manual_answer', { choice: 'cancel' })} style="${promptBtn};border:1px solid var(--inp);color:var(--mid)">Cancel</span>`}
     </div>
   </div>`;
 }
