@@ -223,7 +223,21 @@ class BenchPlugin:
     def seed_eds(self) -> list[dict]:
         """EDS registry rows ({file, dev, ident, code, enabled}) seeded
         once into an empty workspace registry — the files themselves are
-        uploaded/copied by the user as usual."""
+        uploaded/copied by the user as usual.
+
+        Two optional keys carry what the EDS panel would otherwise have to
+        be told by hand, row by row:
+
+        ``commands``
+            The SDO commands offered for this device.
+        ``variant``
+            ``{index, sub, map?}`` — where the device keeps its variant
+            number, so a scan reads it and the run report says which
+            variant it ran against. Without ``map`` the value the device
+            answers is the variant; with it, the answer is looked up
+            there first. Every manufacturer puts this somewhere else,
+            which is why it is per-row config and not an app-wide idea.
+        """
         return []
 
     def firmware(self) -> list[dict]:

@@ -621,6 +621,13 @@ class Bench:
                 db.eds_add(e["file"], e["dev"], e["ident"], e["code"], e["enabled"])
                 if e.get("commands"):
                     db.eds_set_commands(e["file"], e["commands"])
+                if variant := e.get("variant"):
+                    # where this device family keeps its variant number. The
+                    # panel lets an operator configure it per row; a family
+                    # whose plugin already knows should not make them.
+                    db.eds_set_variant(e["file"], variant.get("index", ""),
+                                       variant.get("sub", ""),
+                                       variant.get("map") or {})
 
         if db.is_first_run:
             self._seed_demo_eds()
