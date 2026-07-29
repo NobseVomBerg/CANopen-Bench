@@ -126,6 +126,16 @@ function PsuBox({ psu }) {
         </div>`)}
       <span style="font-size:10.5px;color:var(--faint);align-self:center">set values, read from the supply</span>
     </div>
+    ${(psu.channels || []).some((c) => c.mvolt !== null && c.mvolt !== undefined) && html`
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+      ${(psu.channels || []).map((c, i) => html`
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:10.5px;color:var(--dim);font-weight:600">CH ${i + 1}</span>
+          <span style="font:11px ${MONO};color:var(--tx)">${c.mvolt ?? '—'} V</span>
+          <span style="font:11px ${MONO};color:var(--tx)">${c.mcurr ?? '—'} A</span>
+        </div>`)}
+      <span style="font-size:10.5px;color:var(--faint)">measured at the terminals</span>
+    </div>
   </div>`;
 }
 

@@ -18,10 +18,13 @@ Two rules, both learned from what a bench does to you:
   adapter, or a device that takes offence. Discovery runs when asked for,
   on ports whose description a driver recognises, and the port that
   worked is remembered so the next start opens exactly that one.
-* **Set values are not measurements.** ``*LRN?`` and its kin report what
-  the supply was *told*, which is not what its terminals are doing. The
-  values here are labelled ``set`` all the way to the screen, and a
-  driver that can read back the real thing reports it separately.
+* **Set values are not measurements.** ``*LRN?`` and its kin report the
+  settings in force, which is not what the terminals are doing under
+  load. Both are carried separately — ``volt``/``curr`` are the settings,
+  ``meas_volt``/``meas_curr`` the measured values where the instrument
+  answers for them, and None where it does not. Showing a setting as a
+  measurement is how a report ends up claiming a device was at 26 V while
+  it was current-limited at 19.
 """
 from __future__ import annotations
 
@@ -43,6 +46,10 @@ class Channel:
     """
     volt: float = 0.0
     curr: float = 0.0
+    #: what the terminals are actually doing, when the instrument can be
+    #: asked — None means it cannot, which is not the same as zero
+    meas_volt: float | None = None
+    meas_curr: float | None = None
     limit: float | None = None    # the instrument's own voltage limit, if it says
     extra: dict[str, str] = field(default_factory=dict)  # driver-specific, shown raw
 

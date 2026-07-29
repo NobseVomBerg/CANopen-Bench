@@ -263,3 +263,38 @@ def test_releasing_hands_the_port_back(tmp_path):
     bench.dispatch("psu_release", {})
     assert made["COM6"].closed
     assert bench.snapshot()["psu"] is None and bench.db.get("psu_port") == ""
+
+
+# -- measured values, where the unit answers for them ------------------------
+
+MEAS = {"*IDN?": IDN, "*LRN?": LRN, "MEAS:VOLT?": "4.98", "MEAS:CURR?": "0.12"}
+
+
+def test_measured_values_are_read_when_the_unit_answers():
+    """The setting and what the terminals do are two numbers. A supply in
+    current limit sits well below its set voltage, and a report that shows
+    the setting instead claims something that did not happen."""
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(FakePort(MEAS))))
+    st = psu.state()
+    assert st.channels[0].volt == 5.0            # the setting
+    assert st.channels[0].meas_volt == 4.98      # the measurement
+    assert st.channels[0].meas_curr == 0.12
+
+
+def test_a_unit_that_ignores_the_query_is_asked_once_and_then_left_alone():
+    """Every unanswered query costs the read timeout. This unit is
+    documented as not supporting the SCPI commands that have a short
+    equivalent, so a "no" has to stick."""
+    port = FakePort()                            # answers *IDN?/*LRN? only
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    st = psu.state()
+    assert st.channels[0].meas_volt is None
+    assert psu.measures is False
+    asked = port.written.count("MEAS:VOLT?")
+    psu.state()
+    assert port.written.count("MEAS:VOLT?") == asked   # not asked again
+
+
+def test_the_measurement_never_stands_in_for_the_setting():
+    st = Toellner8952(SerialLink("COM6", opener=opener_for(FakePort(MEAS)))).state()
+    assert st.channels[1].volt == 57.0           # from *LRN?, unchanged

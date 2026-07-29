@@ -22,9 +22,14 @@ shown as-is: guessing at what ``PV`` or ``AVM`` mean would put invented
 labels on a screen next to real ones, and there is no way for the reader
 to tell which is which.
 
-These are **set** values. What the terminals actually do is a different
-question, and this instrument's manual does not obviously answer it —
-until it does, nothing here claims to be a measurement.
+``*LRN?`` reports the settings in force. What the terminals are doing
+under load is a different number, and the SCPI queries for it
+(``MEAS:VOLT?``, ``MEAS:CURR?``) may or may not work on a given unit —
+this one answers ``*IDN?`` but is documented as not supporting the SCPI
+commands that have a short-command equivalent. So the driver asks once,
+believes the answer, and stops asking if nothing sensible comes back. A
+measured value is shown when there is one and left blank when there is
+not; it is never the setting wearing a different label.
 """
 from __future__ import annotations
 
@@ -41,6 +46,8 @@ class Toellner8952(PowerSupply):
     def __init__(self, link: SerialLink):
         super().__init__(link)
         self.idn = ""
+        #: None = not tried yet, True/False = this unit answers MEAS: or not
+        self.measures: bool | None = None
 
     @classmethod
     def identify(cls, link: SerialLink) -> str | None:
@@ -54,7 +61,27 @@ class Toellner8952(PowerSupply):
         st = parse_settings(raw)
         st.port = self.link.port
         st.model, st.serial, st.firmware = _split_idn(self.idn)
+        self._read_measured(st)
         return st
+
+    def _read_measured(self, st: SupplyState) -> None:
+        """Ask for the measured values, at most once per session.
+
+        A unit that does not know these queries answers nothing, and every
+        unanswered query costs the read timeout — so the first channel
+        decides for the whole session and a "no" is remembered.
+        """
+        if self.measures is False:
+            return
+        for index, channel in enumerate(st.channels, start=1):
+            self.link.write(f"SEL {index}")
+            volt = _number(self.link.ask("MEAS:VOLT?"))
+            curr = _number(self.link.ask("MEAS:CURR?"))
+            if volt is None and curr is None:
+                self.measures = False
+                return
+            self.measures = True
+            channel.meas_volt, channel.meas_curr = volt, curr
 
     def _select(self, channel: int) -> None:
         self.link.write(f"SEL {int(channel)}")

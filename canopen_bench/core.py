@@ -2074,6 +2074,7 @@ class Bench:
                 "model": st.model, "sn": st.serial, "fw": st.firmware,
                 "port": st.port, "output": st.output, "raw": st.raw,
                 "channels": [{"volt": ch.volt, "curr": ch.curr, "limit": ch.limit,
+                              "mvolt": ch.meas_volt, "mcurr": ch.meas_curr,
                               "extra": ch.extra} for ch in st.channels]}
 
     def act_psu_search(self, p: dict) -> None:
