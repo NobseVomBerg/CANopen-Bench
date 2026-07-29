@@ -816,7 +816,7 @@ function ObjectsPage({ s, ui, setUi }) {
             <span style="font:10.5px ${MONO};color:${acc === 'ro' ? 'var(--faint)' : acc === 'wo' ? 'var(--amb)' : 'var(--grn)'}">${acc}</span>
             ${acc !== 'ro' ? html`
               <span style="display:flex;align-items:center;gap:6px;min-width:0;padding-right:10px">
-                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + ' · type a number or a symbol name' + rangeHint}
+                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + ' · a number (hex needs 0x) or a symbol name' + rangeHint}
                   onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
                   style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;flex:none" />
                 ${sym && html`<span title=${valueTitle(key, shown)} style="font-size:10.5px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sym}</span>`}

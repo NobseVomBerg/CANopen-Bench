@@ -942,10 +942,19 @@ def test_fav_read_all_skips_write_only_objects(bench, monkeypatch):
 
 def test_pad_hex_normalizes_to_object_width():
     assert Bench._pad_hex("0x42", 2) == "0x0042"
-    assert Bench._pad_hex("42", 4) == "0x00000042"  # bare hex digits work too
     assert Bench._pad_hex("0x12345", 2) == "0x12345"  # longer than width: never truncated
     assert Bench._pad_hex("hello", 4) == "hello"  # non-numeric passes through
     assert Bench._pad_hex("0x42", 0) == "0x42"  # unknown width: unchanged
+
+
+def test_a_typed_value_is_hex_only_when_it_says_so():
+    """This box used to read every number as hex, so typing 30 wrote
+    forty-eight and nothing on screen admitted it. A field that quietly
+    means something other than it says is worse on a bench than one that
+    refuses, so hex now needs its 0x."""
+    assert Bench._pad_hex("30", 4) == "0x0000001E"   # thirty, not forty-eight
+    assert Bench._pad_hex("0x30", 4) == "0x00000030"
+    assert Bench._pad_hex("1E", 4) == "1E"           # ambiguous: not a decimal number
 
 
 def test_obj_write_pads_value_to_eds_width(connected_bench, monkeypatch):

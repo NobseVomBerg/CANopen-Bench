@@ -214,13 +214,16 @@ def _open_in_editor(path: Path) -> None:
 
 
 def _typed_number(text: str) -> int | None:
-    """A number as a person at the bench writes it: "0x1E" is hex, "30" is
-    thirty.
+    """A number the way a person types it: hex only when it says ``0x``.
 
-    Everywhere else in this file a bare string is hex, because it comes
-    from a file somebody wrote against a datasheet. This one comes from a
-    human typing into a box while watching a meter, and there "30" meaning
-    forty-eight is a wrong value written to a real device.
+    Everywhere a *file* supplies a value, a bare string is hex — it was
+    written against a datasheet and the format says so. Everywhere a
+    person types one, it is not: "30" is thirty. Guessing hex from the
+    digits means somebody watching a meter types 30 and the device gets
+    forty-eight, and nothing on screen admits it.
+
+    So the rule for typed input is one rule, in one place, and it is the
+    explicit one: write 0x or it is decimal.
     """
     text = str(text).strip()
     try:
@@ -2324,16 +2327,21 @@ class Bench:
 
     @staticmethod
     def _pad_hex(value: str, width_bytes: int) -> str:
-        """Normalize a numeric value to the object's byte width, so the SDO
+        """Normalize a typed value to the object's byte width, so the SDO
         download carries the length the EDS declares ("0x42" as U16 ->
         "0x0042" -> 2 bytes on the wire; the bus layer sizes the transfer
         from the digit count). Longer values are never truncated — the
-        device's abort is more honest than silently dropped bytes."""
-        v = str(value).strip()
-        try:
-            num = int(v, 16)
-        except (TypeError, ValueError):
-            return value
+        device's abort is more honest than silently dropped bytes.
+
+        The value is read the way a person writes one: hex only with an
+        explicit ``0x`` (see ``_typed_number``). This box used to read
+        everything as hex, so typing 30 wrote forty-eight — and a field
+        that quietly means something else than it says is worse on a bench
+        than one that refuses.
+        """
+        num = _typed_number(value)
+        if num is None:
+            return value              # a string value (device name) — untouched
         if num < 0 or width_bytes <= 0:
             return value
         digits = max(width_bytes * 2, (num.bit_length() + 3) // 4)
