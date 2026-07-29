@@ -897,11 +897,35 @@ function ObjectsPage({ s, ui, setUi }) {
 }
 
 // ------------------------------------------------------------------ tests --
+// A catalog filter, offering only what the folder actually contains — a
+// dropdown listing grades or variants no case has is a filter that can
+// only ever empty the list.
+function FilterChip({ label, value, options, empty, onPick }) {
+  const active = !!value;
+  return html`
+    <span style="display:flex;align-items:center;gap:5px;border:1px solid ${active ? 'var(--acc)' : 'var(--inp)'};background:${active ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:4px 8px;color:${active ? 'var(--acc)' : 'var(--mid)'}">
+      <span style="font-size:12px">${label}:</span>
+      <select value=${value} onChange=${(e) => onPick(e.target.value)}
+        disabled=${!options.length}
+        title=${options.length ? '' : `no case in this folder declares a ${label.toLowerCase()}`}
+        style="background:transparent;color:inherit;border:0;font:600 12px 'IBM Plex Sans';outline:none;cursor:${options.length ? 'pointer' : 'default'}">
+        <option value="">${empty}</option>
+        ${options.map((o) => html`<option value=${o}>${o}</option>`)}
+      </select>
+    </span>`;
+}
+
 function TestsPage({ s, ui, setUi }) {
   const t = s.tests;
   const filter = (ui.testFilter || '').toLowerCase();
+  // "" means no restriction for both dropdowns. A case with no variants
+  // declared runs on every variant, so it stays visible under any choice —
+  // hiding it would suggest it does not apply, which is the opposite.
   const shown = t.catalog
     .filter(([, , tools]) => t.toolFilter || tools === '—')
+    .filter(([, , , , , grade]) => !ui.gradeFilter || grade === ui.gradeFilter)
+    .filter(([, , , , , , variants]) => !ui.variantFilter || !variants.length
+      || variants.includes(ui.variantFilter))
     .filter(([id, name]) => !filter || id.includes(filter) || name.toLowerCase().includes(filter));
   const selIds = shown.map((x) => x[0]).filter((id) => t.sel.includes(id));
   const runningId = t.running ? t.runOrder[t.runIdx] : null;
@@ -923,15 +947,19 @@ function TestsPage({ s, ui, setUi }) {
 
   return html`
   <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;padding:9px 18px">
-    <span class="hv" style="border:1px solid var(--inp);border-radius:6px;padding:5px 9px;color:var(--mid);cursor:pointer">Device: <b>DUT2_800</b> ▾</span>
-    <span class="hv" style="border:1px solid var(--inp);border-radius:6px;padding:5px 9px;color:var(--mid);cursor:pointer">Category: <b>Automated</b> ▾</span>
+    <${FilterChip} label="Variant" value=${ui.variantFilter || ''} options=${t.variants || []}
+      empty="all" onPick=${(v) => setUi({ ...ui, variantFilter: v })} />
+    <${FilterChip} label="Category" value=${ui.gradeFilter || ''} options=${t.grades || []}
+      empty="all" onPick=${(v) => setUi({ ...ui, gradeFilter: v })} />
     <span onClick=${() => send('tool_filter_toggle')}
       style="border:1px solid ${t.toolFilter ? 'var(--acc)' : 'var(--inp)'};background:${t.toolFilter ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:5px 9px;color:${t.toolFilter ? 'var(--acc)' : 'var(--mid)'};font-weight:600;cursor:pointer">Tool: PSU ${t.toolFilter ? '✓' : '✕'}</span>
-    <span style="flex:1"></span>
-    <span onClick=${() => send('tests_all')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
-    <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
     <input placeholder="⌕ Filter test cases…" value=${ui.testFilter || ''} onInput=${(e) => setUi({ ...ui, testFilter: e.target.value })}
       style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:5px 10px;width:170px;outline:none;font:12px 'IBM Plex Sans'" />
+    <span style="width:10px"></span>
+    <span onClick=${() => send('tests_all')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
+    <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
+    <span style="flex:1"></span>
+    <span style="font:10.5px ${MONO};color:var(--faint)">${shown.length} of ${t.catalog.length}</span>
   </div>
   <div style="flex:1;display:flex;min-height:0">
     <div style="flex:1;min-width:0;display:flex;flex-direction:column">

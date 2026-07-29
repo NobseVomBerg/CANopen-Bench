@@ -2848,6 +2848,15 @@ class Bench:
         if dev is not None:
             rec.device, rec.variant = dev.get("name", ""), dev.get("variant", "")
             rec.sn, rec.node = dev.get("sn", ""), node
+        # a case that says which variants it is for, against a device that
+        # says which one it is: only a real mismatch skips. An unknown
+        # variant runs the case — refusing to run because the bench could
+        # not read a number is how coverage disappears without a trace
+        if tc.variants and rec.variant and rec.variant not in tc.variants:
+            rec.seconds = time.time() - started
+            rec.verdict = "SKIP"
+            rec.reason = f"for variant {', '.join(tc.variants)}, this is {rec.variant}"
+            return rec.verdict, rec.reason
         regs = {name: 0 for name in tclib.REGISTERS}
         sess = self.mc.get("session") or ""  # "" until an addressing run distributed one
         builtins = {"node": node, "expected": int(self.mc.get("expected") or 0),
@@ -3772,10 +3781,16 @@ class Bench:
             "sync": {"run": self.sync_run, "ms": self.sync_ms},
             "tests": {
                 "catalog": ([[tc.id, tc.name, ", ".join(tc.tools) or "—",
-                              tc.est or "—", bool(tc.error)]
+                              tc.est or "—", bool(tc.error), tc.grade, tc.variants]
                              for tc in sorted(self.testcases.values(), key=lambda t: t.id)]
                             if self.testcases
-                            else [list(t) for t in data.TESTS] if demo else []),
+                            else [list(t) + ["", []] for t in data.TESTS] if demo else []),
+                #: what the two catalog filters can offer, from what is
+                #: actually in the folder — an empty dropdown is better
+                #: than one listing grades no case has
+                "grades": sorted({tc.grade for tc in self.testcases.values() if tc.grade}),
+                "variants": sorted({v for tc in self.testcases.values()
+                                    for v in tc.variants}),
                 "lastRes": data.LAST_RESULTS if not self.testcases and demo else {},
                 "runProg": self.run_prog,
                 "manual": self.manual_prompt,

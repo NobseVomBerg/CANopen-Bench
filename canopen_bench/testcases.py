@@ -22,7 +22,7 @@ _BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send dat
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
 _HEAD_KEYS = {"id", "name", "desc", "grade", "tools", "est", "dut",
-              "on_fail", "preconditions", "steps"}
+              "variants", "on_fail", "preconditions", "steps"}
 #: what a failed expectation does to the rest of the case. "stop" (the
 #: default) ends it there. "continue" records the failure and keeps
 #: going, which is what a case needs when its last steps put the bench
@@ -82,6 +82,11 @@ class TestCase:
     est: str = ""
     dut: object = "selected"  # "selected" | {"code": "<DUT code>"}
     on_fail: str = "stop"     # "stop" | "continue" — see _ON_FAIL
+    #: hardware variants this case applies to, as the device reports them
+    #: ("820", "920"). Empty means every variant. Declared rather than
+    #: checked in preconditions so the catalog can filter on it without
+    #: running anything, and so a case states its scope in one place.
+    variants: list[str] = field(default_factory=list)
     preconditions: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     file: str = ""
@@ -339,6 +344,7 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     tc.est = str(doc.get("est") or "")
     tc.dut = doc.get("dut") or "selected"
     tc.on_fail = str(doc.get("on_fail") or "stop")
+    tc.variants = [str(v) for v in doc.get("variants") or []]
     tc.preconditions = doc.get("preconditions") or []
     tc.steps = doc.get("steps") or []
 
@@ -355,6 +361,8 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
         problems.append('dut must be "selected" or {code: ...}')
     if tc.grade and tc.grade not in _GRADES:
         problems.append(f'grade must be one of {sorted(_GRADES)}, got "{tc.grade}"')
+    if not isinstance(doc.get("variants") or [], list):
+        problems.append("variants must be a list of variant names")
     if tc.on_fail not in _ON_FAIL:
         problems.append(f'on_fail must be one of {sorted(_ON_FAIL)}, got "{tc.on_fail}"')
     for group_name, group in (("preconditions", tc.preconditions), ("steps", tc.steps)):
