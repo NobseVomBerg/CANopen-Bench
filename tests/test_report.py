@@ -43,8 +43,8 @@ steps:
 
 
 def _case(**kw) -> CaseRecord:
-    base = dict(id="4602", name="Power off handling", device="DEMO_120",
-                variant="820", sn="0026", node=1, started="2026-07-29T09:13:30",
+    base = dict(id="0042", name="Power off handling", device="DUT_ALPHA",
+                variant="V2", sn="0026", node=1, started="2026-07-29T09:13:30",
                 seconds=8.4, verdict="PASS")
     return CaseRecord(**{**base, **kw})
 
@@ -55,7 +55,7 @@ def test_the_header_says_what_ran_against_what():
     doc = case_html(_case(desc="checks under-voltage", grade="automated",
                           tools=["PSU"], user="bench"))
     for text in ("Power off handling", "checks under-voltage", "automated",
-                 "PSU", "DEMO_120", "variant 820", "SN 0026", "node 01",
+                 "PSU", "DUT_ALPHA", "variant V2", "SN 0026", "node 01",
                  "2026-07-29T09:13:30", "8.4 s"):
         assert text in doc, text
 
@@ -123,7 +123,7 @@ def test_the_json_beside_it_has_the_numbers_an_overview_needs():
     doc = json.loads(summary_json(_run(_case(file="a.html"))))
     assert doc["verdict"] == "PASS"
     (case,) = doc["cases"]
-    assert case["variant"] == "820" and case["verdict"] == "PASS"
+    assert case["variant"] == "V2" and case["verdict"] == "PASS"
     assert case["file"] == "a.html" and case["seconds"] == 8.4
     assert "steps" not in case      # those live in the case's own file
 
