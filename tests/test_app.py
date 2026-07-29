@@ -1,6 +1,7 @@
 """App-level integration coverage for multi-workspace mode (canopen_bench/app.py)."""
 from __future__ import annotations
 
+import contextlib
 import time
 
 import pytest
@@ -106,3 +107,78 @@ def test_trace_export_candump_endpoint(tmp_path, monkeypatch):
     assert disposition.startswith("attachment; filename=\"trace_")
     assert disposition.endswith(".candump.log\"")
     assert resp.text == expected
+
+
+# -- the loop everything on screen comes from -------------------------------
+
+def test_a_failing_notifier_does_not_end_the_tick_loop():
+    """The tick loop drains the trace, updates bus load, checks heartbeats
+    and pushes every state change. It had no guard at all, so one raise out
+    of the notifier ended it for good — and since nothing closes the
+    WebSocket, the browser kept a healthy socket that never received
+    another message. A finished run still read "Running…".
+    """
+    import asyncio
+    import tempfile
+    from pathlib import Path
+
+    import canopen_bench.core as core_mod
+    from canopen_bench.core import Bench
+    from canopen_bench.db import Db
+
+    bench = Bench(Db(Path(tempfile.mkdtemp()) / "t.db"))
+    calls = []
+
+    async def exploding() -> None:
+        calls.append(1)
+        raise RuntimeError("Set changed size during iteration")
+
+    bench.set_notifier(exploding)
+    bench.swdl_run = True          # makes every tick dirty, so it notifies
+
+    async def go():
+        orig, core_mod.TICK_S = core_mod.TICK_S, 0.01
+        task = asyncio.ensure_future(bench._tick_loop_body())
+        try:
+            await asyncio.sleep(0.15)
+        finally:
+            core_mod.TICK_S = orig
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    asyncio.run(go())
+
+    assert len(calls) > 2, "the loop stopped after the first failure"
+    assert any("tick failed" in ln["msg"] for ln in bench.logs)
+    # the same failure every tick must not fill the log with itself
+    assert sum("tick failed" in ln["msg"] for ln in bench.logs) == 1
+
+
+def test_broadcast_survives_a_client_connecting_while_it_sends():
+    """`for ws in clients` with an await inside: a browser connecting or a
+    tab closing during a send mutated the set mid-iteration. That raised
+    out of the whole broadcast, so every client after that point silently
+    missed the update."""
+    import asyncio
+
+    app = create_app(db_path=":memory:")
+    clients = app.state.ws_clients
+    delivered = []
+    joined = []
+
+    class Client:
+        """Whichever of these is served first is when the next browser
+        connects — set iteration order is not ours to choose, so every
+        client mutates on the first send and none on the rest."""
+
+        async def send_json(self, msg):
+            delivered.append(self)
+            if not joined:
+                joined.append(Client())
+                clients.add(joined[0])
+
+    originals = [Client() for _ in range(3)]
+    clients.update(originals)
+    asyncio.run(app.state.bench._notify())
+    missed = [c for c in originals if c not in delivered]
+    assert not missed, f"{len(missed)} of 3 clients never got the update"

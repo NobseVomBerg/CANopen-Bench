@@ -1,0 +1,27 @@
+# Standard addressing via LSS (CiA 305) — the vendor-neutral procedure the
+# core ships out of the box. Unconfigured slaves (factory node-ID 0xFF) are
+# commissioned one at a time via LSS fastscan; a single already-configured
+# device is re-addressed via global state switching (only unambiguous with
+# one LSS slave on the bus) — see BusInterface.lss_assign.
+#
+# CAUTION: untested against real LSS hardware so far — written to CiA 305
+# and validated against the demo bus only (docs/ablaeufe/A-03-scan-verify.md).
+# Vendor-specific procedures (e.g. button-teach, A-05) ship as plugin
+# packages and appear in the same procedure dropdown.
+id: "lss"
+name: "Standard addressing (LSS / CiA 305)"
+# $expected is an UPPER bound (operator teach passes the address range's
+# top node-id): fastscan assigns until no more slaves answer. Only a run
+# that addresses nothing is a failure — after an auto re-address, the
+# verify against the expected state still catches a shortfall.
+steps:
+  - log: "standard LSS assignment (fastscan commissioning)"
+  - nmt: {cmd: preop, node: all}
+  - wait: 0.1
+  - lss_assign: {count: $expected, into: R0}
+  - jump_lt: {a: R0, b: 1, to: none}
+  - nmt: {cmd: start, node: all}
+  - end:
+
+  - label: none
+  - fail: "LSS assigned no devices"

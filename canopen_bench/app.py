@@ -59,7 +59,14 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
             return
         snap = holder["bench"].snapshot()
         dead = []
-        for ws in clients:
+        # over a snapshot of the set, not the set itself: sending is an
+        # await, and a browser connecting or a tab closing in that window
+        # mutates `clients` mid-iteration. That raised "Set changed size
+        # during iteration" *out of the whole broadcast*, so every client
+        # after the one being sent to missed that update — and since this
+        # runs as a fire-and-forget task, the only trace was an unretrieved
+        # exception on the console while a screen quietly went stale.
+        for ws in tuple(clients):
             try:
                 await ws.send_json({"type": "state", "state": snap})
             except Exception:
@@ -67,9 +74,26 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         for ws in dead:
             clients.discard(ws)
 
+    async def safe_broadcast() -> None:
+        """Push state, and never let failing to push break anything else.
+
+        The tick loop awaits this every tick and the Bench fires it after
+        every action. A raise out of here used to take the whole tick loop
+        with it — and since nothing closes the WebSocket, the browser kept
+        a healthy socket that simply never received another message. No
+        reconnect, no error on screen: a run that had finished still read
+        "Running…".
+        """
+        try:
+            await broadcast()
+        except Exception as exc:      # noqa: BLE001 — the point is to catch all
+            bench = holder.get("bench")
+            if bench is not None:
+                bench.log(f"APP  state not pushed — {type(exc).__name__}: {exc}", "emcy0")
+
     def _build_bench(db: Db) -> Bench:
         bench = Bench(db, bus=bus, plugins=plugins, workspaces_root=root)
-        bench.set_notifier(broadcast)
+        bench.set_notifier(safe_broadcast)
         if root is not None:
             bench.on_workspace_switch = lambda name: asyncio.ensure_future(_switch(name))
             bench.on_plugin_reload = lambda: asyncio.ensure_future(_reload_plugins())
@@ -182,4 +206,5 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ])
     app.state.bench = holder["bench"]
+    app.state.ws_clients = clients   # for tests; the app itself closes over it
     return app
