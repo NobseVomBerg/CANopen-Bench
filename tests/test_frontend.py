@@ -46,3 +46,25 @@ def test_the_page_loads_the_module_it_is_served(tmp_path):
     """A parse guard on a file nothing imports would guard nothing."""
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     assert 'type="module" src="/static/app.js"' in index
+
+
+def test_the_filter_chip_memoises_its_select():
+    """Preact clears and rewrites ``option.value`` while diffing an
+    ``<option>``'s text child, on every render, changed or not. The page
+    re-renders on every state snapshot, so an open native dropdown is
+    rebuilt ten times a second and Chromium throws the highlight back to
+    the current selection — you cannot pick anything unless you click
+    inside one tick.
+
+    Returning the identical vnode while the chip's inputs are unchanged
+    makes Preact skip the subtree. Nothing else in the suite would notice
+    if that came back out: the file still parses, every Python test still
+    passes, and the filter is simply unusable again.
+    """
+    src = (STATIC / "app.js").read_text(encoding="utf-8")
+    start = src.index("function FilterChip(")
+    body = src[start:src.index("\nfunction ", start + 1)]
+    assert "useMemo" in body, "FilterChip must memoise, see this test's docstring"
+    # the options arrive as a fresh array every tick, so the dependency has
+    # to compare their contents — the array itself never matches
+    assert "options.join(" in body

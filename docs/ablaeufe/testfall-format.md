@@ -22,7 +22,7 @@ Ausführungssemantik (Verdikte, Executor, Abbruch): siehe
 ## Kopf
 
 ```yaml
-id: "4602"                  # Pflicht; Katalog-ID, eindeutig im Ordner
+id: "4602"                  # Pflicht; Katalog-ID, eindeutig im Ordner (s.u.)
 name: "Aux power off handling, under-voltage"   # Pflicht; Anzeige
 desc: "Prüft, dass ..."     # optional; ein Satz für den Report-Kopf
 grade: automated            # optional; automated | semi | manual | production
@@ -43,6 +43,22 @@ Bus-Schritt darf per `node:` ein anderes Gerät ansprechen: ein Fall
 handelt von einem Prüfling, aber am Bus hängt manchmal mehr — ein zweites
 Gerät, das Material verbraucht, ein Gateway. Ohne diese Angabe ließe sich
 so ein Fall gar nicht aufschreiben.
+
+### `id` — eindeutig, und zwar nachprüfbar
+
+Der Katalog ist nach `id` geschlüsselt: Laufreihenfolge, Ergebnis und
+Report werden alle gegen sie geschrieben. Beanspruchen zwei Dateien im
+Ordner dieselbe `id`, ist also nur eine von beiden im Katalog — welche,
+entscheidet die Verzeichnisreihenfolge.
+
+Das passiert lautlos, wenn niemand es meldet: 85 Dateien im Ordner, 81
+Einträge in der Liste. Deshalb protokolliert der Scan jede Kollision und
+hängt sie als Schema-Fehler an den Fall, der übrig geblieben ist — mit
+dem Namen der Datei, die verdrängt wurde. Die Liste zeigt ihn dann rot,
+und der fehlende Fall ist nicht mehr unsichtbar, sondern benannt.
+
+Zu beheben ist das nur in der Quelle: eine der beiden Dateien bekommt
+eine andere `id`.
 
 ### `variants` — für welche Hardware der Fall gilt
 

@@ -946,3 +946,37 @@ def test_expect_no_emcy_with_a_code_ignores_a_different_one(tc_bench):
     _add_tc(tc_bench, "TC0052_no_emcy_filtered.yaml", NO_EMCY_FILTERED_TC)
     run_selected(tc_bench, {"0052"})
     assert tc_bench.results == {"0052": "PASS"}
+
+
+DUP_A = """id: "7700"
+name: "First claimant"
+steps:
+  - log: "a"
+"""
+
+DUP_B = """id: "7700"
+name: "Second claimant"
+steps:
+  - log: "b"
+"""
+
+
+def test_two_files_claiming_one_id_are_reported_not_silently_dropped(tc_bench):
+    """The catalog is keyed by case id, so the loser of a collision is not
+    in it. That used to happen in silence: a folder of 85 files produced a
+    list of 81 and nothing said which four were gone."""
+    _add_tc(tc_bench, "TC7700_first.yaml", DUP_A)
+    _add_tc(tc_bench, "TC7700_second.yaml", DUP_B)
+
+    kept = tc_bench.testcases["7700"]
+    assert "duplicate id 7700" in kept.error
+    # the file that lost is named, so it can be found and fixed
+    other = "TC7700_second.yaml" if kept.file.endswith("first.yaml") else "TC7700_first.yaml"
+    assert other in kept.error
+    assert any("claimed by 2 files" in ln["msg"] and ln["type"] == "emcy0"
+               for ln in tc_bench.logs)
+
+
+def test_a_unique_id_carries_no_duplicate_error(tc_bench):
+    _add_tc(tc_bench, "TC7701_alone.yaml", DUP_A.replace("7700", "7701"))
+    assert "duplicate" not in (tc_bench.testcases["7701"].error or "")

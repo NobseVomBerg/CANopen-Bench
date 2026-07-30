@@ -407,6 +407,23 @@ def _slug(text: str) -> str:
     return "_".join("".join(keep).split()) or "case"
 
 
+def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
+    """Ids that more than one file in the folder claims.
+
+    The catalog is keyed by case id, so two files claiming 4602 means one
+    of them is simply not in it — and until now nothing said so: the
+    folder held 85 files, the list showed 81, and the four that went
+    missing were whichever the directory order dropped. The id cannot
+    just be made unique here, because it is what the run order, the
+    results and the report are all written against. So the collision is
+    reported instead, against the file that survived it.
+    """
+    seen: dict[str, list[str]] = {}
+    for tc in catalog:
+        seen.setdefault(tc.id, []).append(Path(tc.file).name if tc.file else "?")
+    return {tid: files for tid, files in seen.items() if len(files) > 1}
+
+
 def _bench_user() -> str:
     """Who ran it, for the report header. Best effort: on a bench machine
     this is a login name, and where the environment does not say, an empty
@@ -1631,12 +1648,24 @@ class Bench:
                                      extensions=self._step_types,
                                      symbols=self.symbols)
         self.testcases = {tc.id: tc for tc in catalog}
+        clashes = _duplicate_ids(catalog)
+        for tid, files in clashes.items():
+            kept = self.testcases.get(tid)
+            if kept is None:
+                continue
+            lost = [f for f in files if f != Path(kept.file).name]
+            note = (f"duplicate id {tid} — also claimed by {', '.join(lost)}; "
+                    "only this file is loaded")
+            kept.error = f"{kept.error}; {note}" if kept.error else note
         if log:
             broken = sum(1 for tc in catalog if tc.error)
             msg = f"CFG  testcases folder scanned — {len(catalog)} test cases discovered"
             if broken:
                 msg += f", {broken} with schema errors"
             self.log(msg, "emcy0" if broken else "info")
+            for tid, files in clashes.items():
+                self.log(f"CFG  test case id {tid} is claimed by {len(files)} files "
+                         f"({', '.join(files)}) — only one of them can be run", "emcy0")
 
     def act_tc_rescan(self, p: dict) -> None:
         self._load_testcases()

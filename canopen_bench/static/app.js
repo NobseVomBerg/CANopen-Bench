@@ -1,6 +1,6 @@
 // CANopen Bench frontend — pixel-faithful port of the Claude Design prototype.
 // Server (FastAPI) owns all bench state; this file renders it and sends actions.
-import { html, render, useState, useEffect, useRef } from '/static/vendor/preact-htm.module.js';
+import { html, render, useState, useEffect, useMemo, useRef } from '/static/vendor/preact-htm.module.js';
 
 const MONO = "'IBM Plex Mono',monospace";
 
@@ -900,12 +900,28 @@ function ObjectsPage({ s, ui, setUi }) {
 // A catalog filter, offering only what the folder actually contains — a
 // dropdown listing grades or variants no case has is a filter that can
 // only ever empty the list.
+//
+// The subtree is memoised, and that is not a micro-optimisation — it is
+// what makes the dropdown usable at all. Preact clears `option.value`
+// while diffing an <option>'s text child and writes it back straight
+// after, on every render, whether or not anything changed. At one state
+// snapshot per tick that rewrites every option ten times a second, and
+// Chromium rebuilds an open popup when its options are touched: whatever
+// you were pointing at snaps back to the current selection unless you
+// click within the tick. Returning the identical vnode while the chip's
+// own inputs are unchanged makes Preact skip the subtree by vnode
+// identity, so the popup is left alone. `onPick` goes through a ref
+// because the memo would otherwise hold the first render's closure and
+// pick against a stale `ui`.
 function FilterChip({ label, value, options, empty, onPick }) {
-  const active = !!value;
-  return html`
+  const pick = useRef(onPick);
+  pick.current = onPick;
+  return useMemo(() => {
+    const active = !!value;
+    return html`
     <span style="display:flex;align-items:center;gap:5px;border:1px solid ${active ? 'var(--acc)' : 'var(--inp)'};background:${active ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:4px 8px;color:${active ? 'var(--acc)' : 'var(--mid)'}">
       <span style="font-size:12px">${label}:</span>
-      <select value=${value} onChange=${(e) => onPick(e.target.value)}
+      <select value=${value} onChange=${(e) => pick.current(e.target.value)}
         disabled=${!options.length}
         title=${options.length ? '' : `no case in this folder declares a ${label.toLowerCase()}`}
         style="background:transparent;color:inherit;border:0;font:600 12px 'IBM Plex Sans';outline:none;cursor:${options.length ? 'pointer' : 'default'}">
@@ -913,6 +929,9 @@ function FilterChip({ label, value, options, empty, onPick }) {
         ${options.map((o) => html`<option value=${o}>${o}</option>`)}
       </select>
     </span>`;
+    // the options are compared by content: the server sends a fresh array
+    // every tick, so comparing the array itself would never match
+  }, [label, value, empty, options.join(' ')]);
 }
 
 function TestsPage({ s, ui, setUi }) {
@@ -940,6 +959,16 @@ function TestsPage({ s, ui, setUi }) {
     }));
   if (t.running && runningId) runLog.push({ line: runningId + ' running…', fg: 'var(--acc)' });
   const anyFail = Object.values(t.results).includes('FAIL');
+  // runIdx counts cases *finished*, so during the first case it is 0 —
+  // "0 / 4" next to "Running 1000" reads as if nothing had started. While
+  // a run is on, the counter names the case being worked on instead. The
+  // bar folds in that case's own step progress: a case with a hundred
+  // steps otherwise leaves the bar parked for minutes, which is what a
+  // stuck run looks like.
+  const runAt = Math.min(t.running ? t.runIdx + 1 : t.runIdx, total);
+  const within = t.running && t.runProg && t.runProg.of > 0
+    ? Math.min(1, t.runProg.step / t.runProg.of) : 0;
+  const runFrac = total ? Math.min(1, (t.runIdx + within) / total) : 0;
   // every column is capped and clipped: a broken file's "id" is its whole
   // filename, which used to run straight through the next two columns
   const cols = '34px 72px minmax(160px,1fr) 110px 90px 76px 28px';
@@ -1030,9 +1059,9 @@ function TestsPage({ s, ui, setUi }) {
       <div style="border:1px solid var(--bd);border-radius:8px;padding:10px 12px;background:var(--panel2)">
         <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mid);margin-bottom:6px">
           <span>${t.running ? 'Running ' + runningId : total ? 'Idle — last run' : 'Idle'}</span>
-          <span>${total ? Math.min(t.runIdx, total) + ' / ' + total : '—'}</span>
+          <span>${total ? runAt + ' / ' + total : '—'}</span>
         </div>
-        <div style="height:6px;border-radius:3px;background:var(--bd);overflow:hidden"><span style="display:block;width:${total ? Math.round(100 * t.runIdx / total) : 0}%;height:100%;background:${anyFail ? 'var(--red)' : 'var(--acc)'};transition:width .4s"></span></div>
+        <div style="height:6px;border-radius:3px;background:var(--bd);overflow:hidden"><span style="display:block;width:${Math.round(100 * runFrac)}%;height:100%;background:${anyFail ? 'var(--red)' : 'var(--acc)'};transition:width .4s"></span></div>
         <div style="margin-top:8px;font:10.5px ${MONO};color:var(--dim);line-height:1.7;min-height:56px">
           ${(runLog.length ? runLog : [{ line: 'no run yet — select tests and press Start', fg: 'var(--faint)' }]).map((r) => html`<div style="color:${r.fg}">${r.line}</div>`)}
           ${t.runProg && html`<div style="color:var(--acc)">TEST ${t.runProg.tid} step ${t.runProg.step}/${t.runProg.of}  ${t.runProg.text}</div>`}
