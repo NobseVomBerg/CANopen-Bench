@@ -129,6 +129,13 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return None
         return None if val in _NMT_COMMANDS else f"nmt: unknown command {val!r}"
     if key == "wait":
+        # the mapping form exists only so a wait can carry its `note`: "wait
+        # 4 s" in a report says nothing, "waiting for the reset and the
+        # lifter cycle" says why four
+        if isinstance(val, dict):
+            if unknown := set(val) - {"s"} - _NOTE:
+                return f"wait: unknown field(s) {sorted(unknown)}"
+            val = val.get("s")
         return None if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= 0 \
             else "wait: needs a duration in seconds"
     if key == "log":

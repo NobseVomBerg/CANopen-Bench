@@ -336,7 +336,8 @@ def _step_text(key: str, val) -> str:
     if key == "sdo_write":
         return f"write {_hexstr(val['index'])}:{_hexstr(val['sub'])} = {val['value']}"
     if key == "wait":
-        return f"wait {val:g}s" if isinstance(val, (int, float)) else f"wait {val}s"
+        secs = val.get("s") if isinstance(val, dict) else val
+        return f"wait {secs:g}s" if isinstance(secs, (int, float)) else f"wait {secs}s"
     if key == "wait_for":
         if "cob" in val:
             cobs = val["cob"] if isinstance(val["cob"], list) else [val["cob"]]
@@ -3174,7 +3175,7 @@ class Bench:
             self.log(f"TEST {tc.id} · {val}", "test")
             return "ok", ""
         if key == "wait":
-            await asyncio.sleep(float(val))
+            await asyncio.sleep(float(val["s"] if isinstance(val, dict) else val))
             return "ok", ""
         # -- bus -------------------------------------------------------------
         if key == "nmt":
