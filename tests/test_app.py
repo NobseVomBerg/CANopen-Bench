@@ -117,6 +117,11 @@ def test_a_failing_notifier_does_not_end_the_tick_loop():
     of the notifier ended it for good — and since nothing closes the
     WebSocket, the browser kept a healthy socket that never received
     another message. A finished run still read "Running…".
+
+    The tick no longer awaits the notifier itself — every push goes through
+    the one coalescing task — so the guard that reports a raising notifier
+    lives there now. What must hold is unchanged: the loop keeps going, the
+    failure is on screen, and it is said once rather than every tick.
     """
     import asyncio
     import tempfile
@@ -149,9 +154,9 @@ def test_a_failing_notifier_does_not_end_the_tick_loop():
     asyncio.run(go())
 
     assert len(calls) > 2, "the loop stopped after the first failure"
-    assert any("tick failed" in ln["msg"] for ln in bench.logs)
+    assert any("state push failed" in ln["msg"] for ln in bench.logs)
     # the same failure every tick must not fill the log with itself
-    assert sum("tick failed" in ln["msg"] for ln in bench.logs) == 1
+    assert sum("state push failed" in ln["msg"] for ln in bench.logs) == 1
 
 
 def test_broadcast_survives_a_client_connecting_while_it_sends():
@@ -182,3 +187,44 @@ def test_broadcast_survives_a_client_connecting_while_it_sends():
     asyncio.run(app.state.bench._notify())
     missed = [c for c in originals if c not in delivered]
     assert not missed, f"{len(missed)} of 3 clients never got the update"
+
+
+def test_state_pushes_coalesce_but_never_drop_the_last_one():
+    """The executor asks for a push after every step, including the register
+    arithmetic and jumps a case spends most of its steps on. Measured against
+    a browser before this: 3627 pushes and 41 MB through the socket in a
+    five-second run, a panel that never repainted between the first case and
+    the end, and a run that took 17 times as long as it needed to.
+
+    So a request arriving during a push becomes one trailing push rather than
+    another queued snapshot. The trailing half is what makes that safe: the
+    last request is the one carrying "the run has finished", and dropping it
+    is exactly what plain throttling would do.
+    """
+    import asyncio
+    import tempfile
+    from pathlib import Path
+
+    from canopen_bench.core import Bench
+    from canopen_bench.db import Db
+
+    bench = Bench(Db(Path(tempfile.mkdtemp()) / "t.db"))
+    seen = []
+
+    async def slow_push() -> None:
+        await asyncio.sleep(0.02)      # a real one serialises and sends
+        seen.append(bench.run_idx)
+
+    bench.set_notifier(slow_push)
+
+    async def go():
+        for i in range(200):           # 200 steps, as fast as they execute
+            bench.run_idx = i
+            bench._changed()
+            await asyncio.sleep(0)
+        while bench._push_task is not None and not bench._push_task.done():
+            await asyncio.sleep(0.01)
+    asyncio.run(go())
+
+    assert len(seen) < 20, f"{len(seen)} pushes for 200 requests — not coalescing"
+    assert seen[-1] == 199, "the state asked for last never reached the screen"
