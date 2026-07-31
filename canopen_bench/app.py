@@ -184,6 +184,28 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
     async def export_candump(request: Request) -> Response:
         return _download(holder["bench"]._trace_candump(), "text/plain", "candump.log")
 
+    async def report(request: Request) -> Response:
+        """One file out of the results folder.
+
+        The reports are written as HTML that links to each other and to a
+        stylesheet by bare file name, so they are served under one prefix
+        and those relative links keep working — a summary opened here can
+        still reach its per-case pages.
+
+        Only a plain name is accepted, and only from that folder: the name
+        arrives from the URL, and a results folder is a path the operator
+        chose, so "whatever is under it" must not become "whatever is on
+        the disk".
+        """
+        name = request.path_params["name"]
+        folder = holder["bench"]._results_dir().resolve()
+        target = (folder / name).resolve()
+        if (Path(name).name != name or target.parent != folder
+                or target.suffix.lower() not in (".html", ".json", ".css")
+                or not target.is_file()):
+            return Response("not found", status_code=404)
+        return FileResponse(target)
+
     async def ws(websocket: WebSocket) -> None:
         await websocket.accept()
         clients.add(websocket)
@@ -202,6 +224,7 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         Route("/api/action", action, methods=["POST"]),
         Route("/api/trace/export.csv", export_csv),
         Route("/api/trace/export/candump", export_candump),
+        Route("/api/report/{name}", report),
         WebSocketRoute("/ws", ws),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ])

@@ -228,3 +228,61 @@ def test_state_pushes_coalesce_but_never_drop_the_last_one():
 
     assert len(seen) < 20, f"{len(seen)} pushes for 200 requests — not coalescing"
     assert seen[-1] == 199, "the state asked for last never reached the screen"
+
+
+# -- reports are files somebody wants to open --------------------------------
+
+def test_a_report_can_be_fetched_and_only_from_the_results_folder(tmp_path, monkeypatch):
+    """The run panel used to render the summary's name as underlined accent
+    text with a pointer cursor and no handler — a link that is not one. It is
+    served now, and the reports link to each other and to their stylesheet by
+    bare file name, so a summary opened this way still reaches its per-case
+    pages.
+
+    The name comes out of the URL and the results folder is a path the
+    operator chose, so "anything under that folder" must not widen into
+    "anything on the disk".
+    """
+    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
+    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
+
+    app = create_app(db_path=str(tmp_path / "x.db"))
+    with TestClient(app) as client:
+        folder = app.state.bench._results_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "20260101_010101__summary.html").write_text("<h1>run</h1>", encoding="utf-8")
+        (folder / "testReportStyle.css").write_text("body{}", encoding="utf-8")
+        secret = folder.parent / "bench.db"
+        secret.write_text("not yours", encoding="utf-8")
+
+        assert client.get("/api/report/20260101_010101__summary.html").text == "<h1>run</h1>"
+        assert client.get("/api/report/testReportStyle.css").status_code == 200
+
+        for probe in ("../bench.db", "..%2Fbench.db", "%2e%2e%2fbench.db",
+                      "nothing.html", "20260101_010101__summary.txt"):
+            resp = client.get(f"/api/report/{probe}", follow_redirects=False)
+            assert resp.status_code in (307, 404), f"{probe} was served: {resp.status_code}"
+        assert "not yours" not in client.get("/api/report/..%2Fbench.db").text
+
+
+def test_only_a_report_that_exists_is_offered_as_a_link(tmp_path, monkeypatch):
+    """The demo's example runs name files that were never on any disk. A
+    link to a 404 is worse than plain text, so the entry the UI links to is
+    the one a run actually wrote — it carries `file`, the examples do not."""
+    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
+    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
+
+    from canopen_bench import data
+
+    assert not any("file" in seed for seed in data.SEED_REPORTS)
+
+    app = create_app(db_path=str(tmp_path / "x.db"))
+    with TestClient(app) as client:
+        bench = app.state.bench
+        bench.results = {"0001": "PASS"}
+        bench._run_cases = []
+        bench._push_report(["0001"])
+        entry = client.get("/api/state").json()["tests"]["reports"][0]
+        assert entry["file"] == entry["name"]
+        # and what it points at is really there
+        assert client.get(f"/api/report/{entry['file']}").status_code == 200

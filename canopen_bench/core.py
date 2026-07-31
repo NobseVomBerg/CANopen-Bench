@@ -1024,7 +1024,11 @@ class Bench:
             user=_bench_user(), workspace=self.workspace_name,
             tool=f"canopen-bench {__version__}", cases=cases)
         name = self._write_report(run)
-        self.reports = [{"name": name, "score": f"{passed}/{len(order)}",
+        # `file` is what the UI links to, and only a run that really wrote
+        # one has it — the demo's example entries name files that were
+        # never on any disk, and a link to a 404 is worse than plain text
+        self.reports = [{"name": name, "file": name,
+                         "score": f"{passed}/{len(order)}",
                          "ok": passed == len(order)}] + self.reports[:4]
 
     def _write_report(self, run: reportlib.RunRecord) -> str:
