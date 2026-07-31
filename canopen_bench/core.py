@@ -439,6 +439,27 @@ def _emcy_wanted(val: dict) -> str:
     return "expect_emcy " + (", ".join(parts) if parts else "any")
 
 
+def _write_value(val: dict, regs: dict, builtins: dict) -> str:
+    """The hex literal an sdo_write actually puts on the wire.
+
+    One function, because the step line shows this and the bus gets it: if
+    the two were worked out separately, a report could name a value the
+    device never saw, which is the kind of difference nobody catches by
+    reading.
+
+    `size` wins where it is given. Without one, a literal's own digits are
+    the width — that is how a two-byte object is written as "0x001E".
+    """
+    raw = val["value"]
+    declared = val.get("size")
+    if (declared is None and isinstance(raw, str)
+            and raw not in regs and not raw.startswith("$")):
+        return raw
+    size = int(declared or 4)
+    v = _resolve(raw, regs, builtins) & ((1 << (size * 8)) - 1)
+    return f"0x{v:0{size * 2}X}"
+
+
 def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
     """Ids that more than one file in the folder claims.
 
@@ -1123,18 +1144,30 @@ class Bench:
 
     # ------------------------------------------------------------------
     # actions (dispatched from the API layer)
-    def _label_step(self, key: str, val) -> str:
+    def _label_step(self, key: str, val, regs: dict | None = None,
+                    builtins: dict | None = None) -> str:
         """Progress text for one step — plugin step types label themselves.
 
         Object steps get the EDS name of what they touch appended. A line
         reading "write 0x1F51:0x02 = 2" is a line somebody has to go and
         look up before they can say whether the run did the right thing;
         the name is already in the registry, so it belongs in the report.
+
+        With the registers to hand, a write whose value is a register or a
+        builtin also shows what that came out as: "= R12 = 0x00007211".
+        Otherwise the number that went on the wire appears nowhere on the
+        step line, and a run a week old cannot say what it wrote.
         """
         ext = self._step_types.get(key)
         if ext:
             return ext.label(val)
         text = _step_text(key, val)
+        if key == "sdo_write" and regs is not None and isinstance(val, dict):
+            actual = _write_value(val, regs, builtins or {})
+            # only when it says something the value in the line does not —
+            # a literal is already there, in whatever width it was written
+            if _as_int(actual) != _as_int(val["value"]):
+                text += f" = {actual}"
         if key in ("sdo_read", "sdo_write", "adjust") and isinstance(val, dict):
             name = self._object_label(_hexstr(val["index"]), _hexstr(val["sub"]))
             if name:
@@ -3251,7 +3284,7 @@ class Bench:
             if should_stop():
                 return "error", "aborted"
             key, val = next(iter(steps[pc].items()))
-            text = self._label_step(key, val)
+            text = self._label_step(key, val, regs, builtins)
             on_step(base + pc + 1, text)
             status, info = await self._exec_one(tc, key, val, node, regs,
                                                 builtins, should_stop)
@@ -3398,22 +3431,7 @@ class Bench:
             # DUT resolved from the file's `dut`.
             node = _resolve(val["node"], regs, builtins)
         if key == "sdo_write":
-            raw = val["value"]
-            declared = val.get("size")
-            if (declared is None and isinstance(raw, str)
-                    and raw not in regs and not raw.startswith("$")):
-                # nothing declared: the literal's own digits are the width,
-                # which is how a two-byte object is written as "0x001E"
-                value_str = raw
-            else:
-                # `size` wins where it is given. It used to be ignored for a
-                # literal, so `value: "0x1234", size: 4` went out as two
-                # bytes and a device answered 0x06070010 (length mismatch)
-                # to a case that was asking about write permission — the
-                # expected abort never even got a chance to happen.
-                size = int(declared or 4)
-                v = _resolve(raw, regs, builtins) & ((1 << (size * 8)) - 1)
-                value_str = f"0x{v:0{size * 2}X}"
+            value_str = _write_value(val, regs, builtins)
             res = await asyncio.to_thread(
                 bus.sdo_write, node, _hexstr(val["index"]), _hexstr(val["sub"]), value_str)
             where = f"sdo_write {_hexstr(val['index'])}:{_hexstr(val['sub'])}"
@@ -3424,8 +3442,10 @@ class Bench:
                 if code is not None and code == _as_int(val["expect_abort"]):
                     return "ok", f"Response: abort {res.abort} — expected"
                 return "fail", f"{where} expected abort {_hexstr(val['expect_abort'])}, got {res.abort}"
-            return (("ok", f"Response: wrote {value_str}") if res.ok
-                    else ("fail", f"{where} abort {res.abort}"))
+            # nothing on the passing path: the step line already carries
+            # the value, resolved, so a "wrote …" underneath it is the same
+            # number a second time
+            return ("ok", "") if res.ok else ("fail", f"{where} abort {res.abort}")
         if key == "sdo_read":
             index_s, sub_s = _hexstr(val["index"]), _hexstr(val["sub"])
             res = await asyncio.to_thread(bus.sdo_read, node, index_s, sub_s)

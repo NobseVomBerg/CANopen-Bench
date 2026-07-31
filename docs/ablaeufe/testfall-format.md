@@ -153,7 +153,6 @@ landet im Report unter dem Schritt, in einer eigenen Zeile:
 ```
 14   write 0x1F51:0x02 = 2  (Program control)
      Reboot DUT
-     Response: wrote 0x02
 ```
 
 Der Report zeigt je Schritt bis zu drei Zeilen: **was lief** (mit dem
@@ -161,6 +160,21 @@ Objektnamen aus dem EDS, wenn er bekannt ist), **warum** (`note`) und
 **was zurückkam** — auch im Gutfall, samt Enum-Bedeutung, wo ein Plugin
 das Objekt beschreibt. Eine Zeile pro Schritt ist kompakt und eine Woche
 später nicht mehr nachvollziehbar.
+
+Ein **geglückter `sdo_write` hat keine dritte Zeile**: das Gerät antwortet
+darauf mit nichts, und der geschriebene Wert steht schon in der ersten.
+Kommt er aus einem Register oder einem Builtin, steht er dort *auch* —
+aufgelöst, hinter dem Namen:
+
+```
+20   write 0x220B:0x02 = R12 = 0x00007211  (Menu.IdWithValue)
+     Write the calculated Value
+```
+
+Sonst stünde die Zahl, die auf den Bus ging, nirgends. Anzeige und
+Businhalt kommen aus derselben Funktion, damit ein Report nicht einen
+Wert nennen kann, den das Gerät nie gesehen hat. Scheitert der Schreib­vorgang,
+steht der Abort wie gehabt darunter.
 
 In `note` und `log` sind einfache Formatierungs-Tags erlaubt (`<b>`,
 `<i>`, `<u>`, `<em>`, `<strong>`, `<code>`, `<small>`, `<sub>`, `<sup>`,
