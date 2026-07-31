@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
+from canopen_bench import data
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.plugin import BenchPlugin
@@ -980,3 +981,30 @@ def test_two_files_claiming_one_id_are_reported_not_silently_dropped(tc_bench):
 def test_a_unique_id_carries_no_duplicate_error(tc_bench):
     _add_tc(tc_bench, "TC7701_alone.yaml", DUP_A.replace("7700", "7701"))
     assert "duplicate" not in (tc_bench.testcases["7701"].error or "")
+
+
+def test_a_real_testcases_folder_starts_with_nothing_selected(tmp_path):
+    """The demo catalog ships with a few cases ticked so the demo shows what
+    a selection looks like. Those ids are ordinary numbers and collide with
+    real ones, so a bench pointed at a real folder used to start with cases
+    nobody had chosen already ticked — one press of Start away from running
+    them against the hardware on the bench."""
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    for tid in ("1000", "4433", "4602"):        # three of the demo defaults
+        (tc_dir / f"TC{tid}_real.yaml").write_text(
+            f'id: "{tid}"\nname: "Real case"\nsteps:\n  - log: "x"\n')
+    first = Bench(Db(tmp_path / "t.db"))
+    first.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    reopened = Bench(Db(tmp_path / "t.db"))     # the folder is remembered
+    assert set(reopened.testcases) == {"1000", "4433", "4602"}
+    assert reopened.test_sel == set()
+
+
+def test_the_demo_catalog_still_comes_with_its_selection(tmp_path):
+    """Without a TestCases folder the demo catalog is what is on screen, and
+    an empty list there shows nothing about how a run is put together."""
+    bench = Bench(Db(tmp_path / "t.db"))
+    assert bench.adapter == "demo" and not bench.testcases
+    assert bench.test_sel == set(data.DEFAULT_TEST_SEL)
