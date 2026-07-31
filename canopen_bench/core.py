@@ -364,10 +364,10 @@ def _step_text(key: str, val) -> str:
         # written — saying "expect EMCY 0x00" for that would be a lie
         if "mask" in val and _as_int(val["mask"]) == 0:
             return "expect any EMCY"
-        return f"expect EMCY {_hexstr(val['code'])}"
+        return _emcy_wanted(val).replace("expect_emcy ", "expect EMCY ")
     if key == "expect_no_emcy":
-        return ("expect no EMCY" if "code" not in val
-                else f"expect no EMCY {_hexstr(val['code'])}")
+        return ("expect no EMCY" if not (val.keys() & {"code", "mec", "reg"})
+                else _emcy_wanted(val).replace("expect_emcy ", "expect no EMCY "))
     if key == "emcy_clear":
         return "clear EMCY list"
     if key in ("fail", "skip"):
@@ -405,6 +405,28 @@ def _slug(text: str) -> str:
     tool used: words joined by underscores, nothing exotic left."""
     keep = [ch if ch.isalnum() else " " for ch in text]
     return "_".join("".join(keep).split()) or "case"
+
+
+def _emcy_str(entry: tuple[int, int, int, bytes]) -> str:
+    """One recorded EMCY, in the terms a case is written in."""
+    node, code, reg, mfr = entry
+    return (f"0x{code:04X} reg 0x{reg:02X} mec 0x{mfr[0]:02X} "
+            f"from node {node:02d}" if mfr else
+            f"0x{code:04X} reg 0x{reg:02X} from node {node:02d}")
+
+
+def _emcy_wanted(val: dict) -> str:
+    """What the step asked for, for the failure line."""
+    parts = []
+    if "code" in val:
+        parts.append(f"code {_hexstr(val['code'])}"
+                     + (f" (mask {_hexstr(val['mask'])})" if "mask" in val else ""))
+    if "mec" in val:
+        parts.append(f"mec {_hexstr(val['mec'])}"
+                     + (f" (mask {_hexstr(val['mec_mask'])})" if "mec_mask" in val else ""))
+    if "reg" in val:
+        parts.append(f"reg {_hexstr(val['reg'])}")
+    return "expect_emcy " + (", ".join(parts) if parts else "any")
 
 
 def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
@@ -589,12 +611,18 @@ class Bench:
         self.browse: dict | None = None  # directory-picker state while the modal is open
         self.devices: list[dict] = []
         self.emcy_new = 0
-        #: (node, error code) of every EMCY seen since the last emcy_clear —
-        #: what a test case checks against. A device sends an EMCY when it
-        #: is ready, not when a step happens to be waiting, so the check
-        #: reads a record rather than a live window (deque: a run that
-        #: never clears must not grow without bound)
-        self.emcy_seen: deque[tuple[int, int]] = deque(maxlen=200)
+        #: every EMCY seen since the last emcy_clear, as
+        #: (node, error code, error register, manufacturer bytes) — what a
+        #: test case checks against. A device sends an EMCY when it is
+        #: ready, not when a step happens to be waiting, so the check reads
+        #: a record rather than a live window (deque: a run that never
+        #: clears must not grow without bound).
+        #:
+        #: The manufacturer bytes are kept because that is where a device
+        #: family puts its own error code, and that is what a case is
+        #: usually about — CiA 301 says nothing about their content, so
+        #: only the frame carries it.
+        self.emcy_seen: deque[tuple[int, int, int, bytes]] = deque(maxlen=200)
         self.obj_vals: dict[str, str] = {}
         # bench instruments beside the bus (canopen_bench/instruments): the
         # port that once answered is remembered, so a restart reconnects to
@@ -1467,7 +1495,7 @@ class Bench:
         row["val"] = reg
         if not live:
             return
-        self.emcy_seen.append((row["node"], code))
+        self.emcy_seen.append((row["node"], code, payload[2], payload[3:8]))
         node = f"node {row['node']:02d}" if row["node"] else "node ?"
         # an error reset clears, it doesn't alarm — log it without the badge
         self.log(f"EMCY {node}  0x{code:04X}  {text}", "emcy" if code else "info")
@@ -3086,6 +3114,46 @@ class Bench:
             self._manual_event = None
             self._changed()
 
+    def _emcy_matcher(self, val: dict, regs: dict, builtins: dict):
+        """One predicate over a recorded EMCY, from the fields a step gave.
+
+        The three parts of the frame are asked about separately, and every
+        part a step names has to agree. CiA 301 fixes only the first
+        three bytes — error code u16, error register u8 — and leaves the
+        remaining five to the manufacturer, which is exactly where a
+        device family puts the code its own test cases are written
+        against. Folding those into `code` would mean one number standing
+        for two unrelated things; asking about them by name keeps a case
+        readable and lets it check a manufacturer code and the error
+        register in the same step.
+
+        A step that names none of them matches any EMCY at all, which is
+        what "an EMCY, never mind which" looks like.
+        """
+        def num(key):
+            return _resolve(val[key], regs, builtins)
+        code = num("code") if "code" in val else None
+        mask = num("mask") if "mask" in val else 0xFFFF
+        mec = num("mec") if "mec" in val else None
+        mec_mask = num("mec_mask") if "mec_mask" in val else 0xFF
+        reg = num("reg") if "reg" in val else None
+        want_node = num("node") if "node" in val else None
+
+        def match(entry: tuple[int, int, int, bytes]) -> bool:
+            node, got_code, got_reg, mfr = entry
+            if want_node not in (None, node):
+                return False
+            if code is not None and got_code & mask != code & mask:
+                return False
+            if reg is not None and got_reg != reg:
+                return False
+            if mec is not None:
+                got_mec = mfr[0] if mfr else 0
+                if got_mec & mec_mask != mec & mec_mask:
+                    return False
+            return True
+        return match
+
     async def _exec_case(self, tid: str) -> tuple[str, str]:
         tc = self.testcases.get(tid)
         started = time.time()
@@ -3389,16 +3457,13 @@ class Bench:
             self.emcy_seen.clear()
             return "ok", ""
         if key == "expect_emcy":
-            code = _resolve(val["code"], regs, builtins)
-            mask = _resolve(val["mask"], regs, builtins) if "mask" in val else 0xFFFF
-            want_node = _resolve(val["node"], regs, builtins) if "node" in val else None
+            match = self._emcy_matcher(val, regs, builtins)
             timeout = float(val.get("timeout", 1.0))
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
 
             def seen() -> bool:
-                return any(c & mask == code & mask and (want_node in (None, n))
-                           for n, c in self.emcy_seen)
+                return any(match(e) for e in self.emcy_seen)
 
             # an EMCY that arrived before this step is a hit too: the device
             # sends it when it feels like it, and a check that only looks
@@ -3413,25 +3478,21 @@ class Bench:
                 if not self.connected:
                     return "error", "connection lost"
                 await asyncio.sleep(0.05)
-            where = f"expect_emcy {_hexstr(val['code'])}"
-            if mask != 0xFFFF:
-                where += f" (mask {_hexstr(val['mask'])})"
-            return "fail", f"{where} — none seen within {timeout:g}s"
+            seen_now = ", ".join(_emcy_str(e) for e in list(self.emcy_seen)[-3:])
+            return "fail", (f"{_emcy_wanted(val)} — none seen within {timeout:g}s"
+                            + (f"; saw {seen_now}" if seen_now
+                               else "; nothing arrived at all"))
         if key == "expect_no_emcy":
             # the opposite of expect_emcy, and it cannot wait: no amount of
             # waiting proves nothing will arrive. It asks what expect_emcy
             # asks — of the same window, everything since the last
             # emcy_clear — and fails if anything in it matches.
-            mask = _resolve(val["mask"], regs, builtins) if "mask" in val else 0xFFFF
-            code = _resolve(val["code"], regs, builtins) if "code" in val else None
-            want_node = _resolve(val["node"], regs, builtins) if "node" in val else None
-            hits = [(n, c) for n, c in self.emcy_seen
-                    if want_node in (None, n)
-                    and (code is None or c & mask == code & mask)]
+            match = self._emcy_matcher(val, regs, builtins)
+            hits = [e for e in self.emcy_seen if match(e)]
             if not hits:
                 return "ok", ""
-            what = ", ".join(f"0x{c:04X} from node {n:02d}" for n, c in hits[-3:])
-            return "fail", f"expected no EMCY, saw {what}"
+            return "fail", ("expected no EMCY, saw "
+                            + ", ".join(_emcy_str(e) for e in hits[-3:]))
         if key == "wait_for":
             timeout = float(val["timeout"])
             loop = asyncio.get_running_loop()

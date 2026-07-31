@@ -38,6 +38,10 @@ ALLOWED = {
     "eObjIdx_Process", "eObjIdx_Foo", "eIdx_Button",
     "eSubProcess_Status", "eSub_A", "eSub_B", "eSub_C", "eSub_D", "eSub_E",
     "eSub_F", "eSub_Tension", "eObjIdx_Buttn",  # deliberate typo in a test
+    # an invented manufacturer error code, for the EMCY example in
+    # docs/ablaeufe/testfall-format.md — that field is only interesting
+    # with a name in it, and a real device's name belongs in its plugin
+    "eErrCode_MotorStalled",
     # value tables
     "eLamp_Off", "eLamp_Blinking", "eLampState_GreenOff", "eLampState_BlueBlinking",
     "eLampState_RedOff", "eKey_Up", "eKey_Down", "eKey_Enter",

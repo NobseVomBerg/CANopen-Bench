@@ -1008,3 +1008,62 @@ def test_the_demo_catalog_still_comes_with_its_selection(tmp_path):
     bench = Bench(Db(tmp_path / "t.db"))
     assert bench.adapter == "demo" and not bench.testcases
     assert bench.test_sel == set(data.DEFAULT_TEST_SEL)
+
+
+MEC_TC = """\
+id: "0017"
+name: "the code the device family uses"
+steps:
+  - expect_emcy: {mec: "0x72", timeout: 0.2}
+"""
+
+MEC_AND_REG_TC = """\
+id: "0018"
+name: "manufacturer code together with the error register"
+steps:
+  - expect_emcy: {mec: "0x6D", reg: "0x01", timeout: 0.2}
+"""
+
+
+def _emcy_frame(bench: Bench, payload: str, node: int = 1) -> None:
+    """Feed one whole EMCY frame in, bytes as they are on the wire."""
+    row = {"cls": "EMCY", "node": node, "data": payload, "obj": "", "val": ""}
+    bench._annotate_emcy(row)
+
+
+def test_the_manufacturer_error_code_is_what_a_case_can_ask_about(tc_bench):
+    """A real frame off the bus: 00 10 01 72 00 00 00 00 — CiA code 0x1000,
+    error register 0x01, and 0x72 in the manufacturer bytes, which is the
+    code the device's own test case is written against. Only the CiA code
+    used to be recorded, so `expect_emcy 0x72` compared 0x1000 against 0x72
+    and reported "none seen" about an EMCY that was sitting right there.
+    """
+    _add_tc(tc_bench, "TC0017_mec.yaml", MEC_TC)
+    _emcy_frame(tc_bench, "00 10 01 72 00 00 00 00")
+    run_selected(tc_bench, {"0017"})
+    assert tc_bench.results == {"0017": "PASS"}
+
+
+def test_the_error_register_is_asked_about_separately(tc_bench):
+    _add_tc(tc_bench, "TC0018_mec_reg.yaml", MEC_AND_REG_TC)
+    _emcy_frame(tc_bench, "00 10 01 6D 00 00 00 00")
+    run_selected(tc_bench, {"0018"})
+    assert tc_bench.results == {"0018": "PASS"}
+
+
+def test_a_wrong_manufacturer_code_says_what_did_arrive(tc_bench):
+    """"none seen" about a frame that arrived is the report that cost an
+    evening: what is missing is not the EMCY, it is the match."""
+    _add_tc(tc_bench, "TC0017_mec.yaml", MEC_TC)
+    _emcy_frame(tc_bench, "00 10 01 65 00 00 00 00")
+    run_selected(tc_bench, {"0017"})
+    assert tc_bench.results == {"0017": "FAIL"}
+    said = " ".join(ln["msg"] for ln in tc_bench.logs)
+    assert "mec 0x65" in said, said
+
+
+def test_the_error_register_alone_does_not_make_a_match(tc_bench):
+    _add_tc(tc_bench, "TC0018_mec_reg.yaml", MEC_AND_REG_TC)
+    _emcy_frame(tc_bench, "00 10 01 72 00 00 00 00")   # right reg, wrong mec
+    run_selected(tc_bench, {"0018"})
+    assert tc_bench.results == {"0018": "FAIL"}
