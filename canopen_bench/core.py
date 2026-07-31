@@ -600,7 +600,7 @@ class Bench:
         self._psu_opener = None            # tests inject a fake serial port
         self._psu_ports = None
         self._psu_connect(str(db.get("psu_port") or ""), announce=False)
-        self.test_sel: set[str] = set(data.DEFAULT_TEST_SEL)
+        self.test_sel: set[str] = set()   # demo seeds below, once the catalog is known
         self.running = False
         self.run_order: list[str] = []
         self.run_idx = 0
@@ -707,6 +707,15 @@ class Bench:
         self.paths = stored_paths
         self.testcases: dict[str, tclib.TestCase] = {}
         self._load_testcases(log=False)
+        # The demo catalog comes with a few cases ticked, so that the shipped
+        # demo shows what a selection looks like rather than an empty list.
+        # A real TestCases folder must not inherit it: the demo ids are
+        # ordinary numbers and overlap with real ones, so cases nobody had
+        # chosen sat ticked at every start — one press of Start away from
+        # running against the hardware on the bench. Gated exactly like the
+        # demo catalog itself (see _catalog_rows).
+        if not self.testcases and self.adapter == "demo":
+            self.test_sel = set(data.DEFAULT_TEST_SEL)
         # test suites: name -> {sel, repeat_case, repeat_run, stop_on_err}
         self.suites: dict[str, dict] = db.get("suites", {})
         self.active_suite: str = db.get("active_suite", "")
