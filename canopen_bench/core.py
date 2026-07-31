@@ -560,6 +560,11 @@ class Bench:
         self._demo_bus.install_hooks([h for p in self.plugins for h in p.demo_hooks()])
         self._notify: Callable[[], Awaitable[None]] | None = None
         self._tasks: set[asyncio.Task] = set()
+        # one state push at a time, plus a note that another was asked for
+        # while it ran (see _changed)
+        self._push_task: asyncio.Task | None = None
+        self._push_again = False
+        self._push_error = ""
         self._catalog_cache: dict[str, tuple[float, tuple[dict, list] | str]] = {}
         self._ods = OdCache(db.eds_dir)  # object names for the trace interpreter
         # bus backends report a vanished interface (adapter unplugged) from
@@ -820,10 +825,62 @@ class Bench:
         self._changed()
 
     def _changed(self) -> None:
-        if self._notify:
-            task = asyncio.ensure_future(self._notify())
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+        """Ask for a state push, with at most one of them in flight.
+
+        A push is a full snapshot of everything on screen, and the executor
+        asks for one after every step — including the register arithmetic
+        and the jumps that a case spends most of its steps on. Measured on
+        three short cases against a browser: 3627 pushes, 41 MB through the
+        socket in five seconds. The page spends all of it parsing JSON, so
+        it never repaints between the first case and the end of the run.
+        That does not look like a slow screen, it looks like a frozen one —
+        the run is over and the panel still names the first case.
+
+        A request that arrives while a push is running becomes a single
+        trailing push once that one lands. The trailing part is the whole
+        point: plain throttling drops the last request, and the last
+        request is the one carrying "the run has finished".
+        """
+        if self._notify is None:
+            return
+        if self._push_task is not None and not self._push_task.done():
+            self._push_again = True
+            return
+        self._push_again = False
+        self._push_task = asyncio.ensure_future(self._push_state())
+        self._tasks.add(self._push_task)
+        self._push_task.add_done_callback(self._tasks.discard)
+
+    async def _push_state(self) -> None:
+        """Push, then push once more for everything that asked while it ran.
+
+        The loop can only exit with no request outstanding: nothing awaits
+        between the check and the return, so no request can slip in behind
+        it and be forgotten.
+
+        A notifier that raises is caught here. It used to be caught by the
+        tick loop, which awaited it directly; now that every push comes
+        through this one task, a raise would otherwise be an unretrieved
+        exception on the console while the screen quietly stopped updating
+        — which is the failure this whole path exists to make visible. The
+        same message is logged once, not once per push.
+        """
+        notify = self._notify
+        if notify is None:
+            return
+        while True:
+            try:
+                await notify()
+            except Exception as exc:      # noqa: BLE001 — a push must not take the run with it
+                text = f"{type(exc).__name__}: {exc}"
+                if text != self._push_error:
+                    self._push_error = text
+                    self.log(f"APP  state push failed — {text}", "emcy0")
+            else:
+                self._push_error = ""
+            if not self._push_again:
+                return
+            self._push_again = False
 
     def log(self, msg: str, type_: str = "info") -> None:
         self.logs = self.logs[-40:] + [{"t": now_str(), "type": type_, "msg": msg}]
@@ -927,8 +984,10 @@ class Bench:
         if self.swdl_run:
             self._swdl.step(self)
             dirty = True
-        if dirty and self._notify:
-            await self._notify()
+        if dirty:
+            # through the same gate as every other push, so a tick and a
+            # running case cannot end up writing to one socket at once
+            self._changed()
 
     # -- test runner -------------------------------------------------------
     def _run_step(self) -> None:
@@ -3259,10 +3318,19 @@ class Bench:
             node = _resolve(val["node"], regs, builtins)
         if key == "sdo_write":
             raw = val["value"]
-            if isinstance(raw, str) and raw not in regs and not raw.startswith("$"):
-                value_str = raw  # literal hex keeps its own byte width
+            declared = val.get("size")
+            if (declared is None and isinstance(raw, str)
+                    and raw not in regs and not raw.startswith("$")):
+                # nothing declared: the literal's own digits are the width,
+                # which is how a two-byte object is written as "0x001E"
+                value_str = raw
             else:
-                size = int(val.get("size", 4))
+                # `size` wins where it is given. It used to be ignored for a
+                # literal, so `value: "0x1234", size: 4` went out as two
+                # bytes and a device answered 0x06070010 (length mismatch)
+                # to a case that was asking about write permission — the
+                # expected abort never even got a chance to happen.
+                size = int(declared or 4)
                 v = _resolve(raw, regs, builtins) & ((1 << (size * 8)) - 1)
                 value_str = f"0x{v:0{size * 2}X}"
             res = await asyncio.to_thread(
