@@ -1070,7 +1070,7 @@ function TestsPage({ s, ui, setUi }) {
       <div style="font-weight:600;font-size:13px;margin-top:2px">Recent reports</div>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px">
         ${t.reports.map((rp) => html`
-          <span style="display:flex;justify-content:space-between;color:var(--mid)"><span style="color:var(--acc);text-decoration:underline;cursor:pointer">${rp.name}</span><span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
+          <span style="display:flex;justify-content:space-between;color:var(--mid)">${rp.file ? reportLink(rp.file) : html`<span>${rp.name}</span>`}<span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
       </div>
       <${OverviewBox} ov=${t.overview} />
     </div>
@@ -1117,6 +1117,16 @@ function OperatorPrompt({ p }) {
   </div>`;
 }
 
+// A report file, opened in its own tab. Underlined accent text with a
+// pointer cursor and no handler is not "not clickable yet" — it is a
+// promise the page does not keep, and the run it names is a file somebody
+// wants to read. The server hands the results folder out under one prefix
+// so the links inside a summary reach its per-case pages.
+const reportLink = (name) => html`
+  <a href=${'/api/report/' + encodeURIComponent(name)} target="_blank" rel="noopener"
+    title="open ${name}"
+    style="color:var(--acc);text-decoration:underline;cursor:pointer">${name}</a>`;
+
 // Across runs, by hardware variant. Written on request, not after every
 // run: it reads the whole results folder, and most runs are one more data
 // point in a picture nobody is looking at right now.
@@ -1139,7 +1149,7 @@ function OverviewBox({ ov }) {
       ${!ov && html`<span style="color:var(--faint)">not created yet — the file lands beside the reports</span>`}
       ${ov && html`
         <span style="display:flex;justify-content:space-between">
-          <span style="color:var(--acc);text-decoration:underline">${ov.name}</span>
+          ${reportLink(ov.name)}
           <span style="color:var(--faint);font:10.5px ${MONO}">${ov.runs} run${ov.runs === 1 ? '' : 's'} · ${ov.days} d</span>
         </span>
         ${ov.variants.length === 0 && html`<span style="color:var(--faint)">no runs in that window</span>`}

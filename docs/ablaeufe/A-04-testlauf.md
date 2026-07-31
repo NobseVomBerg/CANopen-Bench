@@ -67,7 +67,28 @@ UI → `Bench.act_run_start` → Step-Executor →
    restlichen nichts mehr zu erfahren.
 7. **Abschluss [Ist]:** `RUN  finished — report created`, Report via
    `_push_report` (`core.py`) mit Score `passed/total` in die
-   Report-Historie.
+   Report-Historie. Der Eintrag verlinkt die Datei — `GET
+   /api/report/<name>` reicht sie aus dem Ergebnisordner heraus, unter
+   einem gemeinsamen Präfix, damit die relativen Links *im* Report (die
+   Fallseiten, das Stylesheet) weiter auflösen. Nur ein einfacher
+   Dateiname aus genau diesem Ordner wird bedient, und nur `.html`,
+   `.json`, `.css`. Die Beispielreports der Demo tragen keine Datei und
+   werden deshalb als Text statt als Link gezeigt.
+
+### Zustand auf den Schirm **[Ist]**
+
+Der Executor meldet nach jedem Schritt eine Zustandsänderung, und eine
+Meldung ist ein vollständiger Snapshot. Ungebremst waren das an drei
+kurzen Fällen 3627 Pushes und 41 MB in fünf Sekunden: die Seite kam
+nicht mehr zum Zeichnen, das Panel nannte bis zum Schluss den ersten
+Fall, und der Lauf selbst dauerte siebzehnmal so lange.
+
+`_changed()` fasst deshalb zusammen — einer unterwegs, und was während
+dessen anfragt, wird zu *einem* nachlaufenden Push. Das Nachlaufen ist
+der Punkt: die letzte Anfrage trägt „der Lauf ist fertig", und genau
+die würde reines Wegwerfen verlieren. Der Tick-Loop geht durch dieselbe
+Schleuse, damit Tick und laufender Fall nicht gleichzeitig auf denselben
+Socket schreiben.
 
 ### Step-Executor **[Ist]**
 
