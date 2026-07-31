@@ -1051,6 +1051,35 @@ def test_the_error_register_is_asked_about_separately(tc_bench):
     assert tc_bench.results == {"0018": "PASS"}
 
 
+WIDE_MEC_TC = """\
+id: "0019"
+name: "a manufacturer code that does not fit in a byte"
+steps:
+  - expect_emcy: {mec: "0x0134", timeout: 0.2}
+"""
+
+
+def test_the_manufacturer_code_is_two_bytes_little_endian(tc_bench):
+    """The frame carries it in bytes 3 and 4, the same way round as every
+    other multi-byte field. Reading only byte 3 works until the first code
+    above 0xFF and then compares a low byte against a whole number: here
+    0x34 against 0x0134, which is "nothing arrived" about a frame that is
+    right there."""
+    _add_tc(tc_bench, "TC0019_wide.yaml", WIDE_MEC_TC)
+    _emcy_frame(tc_bench, "00 10 01 34 01 00 00 00")
+    run_selected(tc_bench, {"0019"})
+    assert tc_bench.results == {"0019": "PASS"}
+
+
+def test_a_narrow_expectation_does_not_match_a_wide_code(tc_bench):
+    """0x34 and 0x0134 are different codes, and the high byte is part of
+    the number rather than something to ignore."""
+    _add_tc(tc_bench, "TC0017_mec.yaml", MEC_TC.replace('"0x72"', '"0x34"'))
+    _emcy_frame(tc_bench, "00 10 01 34 01 00 00 00")
+    run_selected(tc_bench, {"0017"})
+    assert tc_bench.results == {"0017": "FAIL"}
+
+
 def test_a_wrong_manufacturer_code_says_what_did_arrive(tc_bench):
     """"none seen" about a frame that arrived is the report that cost an
     evening: what is missing is not the EMCY, it is the match."""
@@ -1059,7 +1088,7 @@ def test_a_wrong_manufacturer_code_says_what_did_arrive(tc_bench):
     run_selected(tc_bench, {"0017"})
     assert tc_bench.results == {"0017": "FAIL"}
     said = " ".join(ln["msg"] for ln in tc_bench.logs)
-    assert "mec 0x65" in said, said
+    assert "mec 0x0065" in said, said
 
 
 def test_the_error_register_alone_does_not_make_a_match(tc_bench):

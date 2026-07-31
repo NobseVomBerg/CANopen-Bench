@@ -62,20 +62,28 @@ eine andere `id`.
 
 ### EMCY prüfen — welcher Teil des Frames gemeint ist
 
-Ein EMCY-Frame hat nach CiA 301 drei Teile: **Error-Code** (2 Byte, LE),
-**Error-Register** (1 Byte) und **5 Byte herstellerspezifisch**. Was in
-den letzten fünf steht, sagt die Norm nicht — und genau dort legt eine
-Gerätefamilie ihren eigenen Fehlercode ab, gegen den ihre Testfälle
-geschrieben sind.
+Ein EMCY-Frame hat nach CiA 301 drei Teile: **Error-Code** (Byte 0–1,
+u16 LE), **Error-Register** (Byte 2) und **5 Byte herstellerspezifisch**
+(Byte 3–7). Was in den letzten fünf steht, sagt die Norm nicht — und
+genau dort legt eine Gerätefamilie ihren eigenen Fehlercode ab, gegen
+den ihre Testfälle geschrieben sind. Ein Gerät kann normkonform `0x1000`
+(generic error) in den Error-Code schreiben und *welcher* Fehler es ist
+in die Herstellerbytes.
 
-Deshalb wird jeder Teil einzeln benannt, und **jedes angegebene Feld muss
+Verbreitet, und was `mec` liest: die ersten beiden Herstellerbytes
+(3–4) als **u16 little-endian**, gleiche Byte-Reihenfolge wie der
+Error-Code. Byte 5–7 werden nicht verglichen; braucht ein Fall etwas
+daraus, ist das ein eigenes Feld wert und keine stillschweigende
+Umdeutung von `mec`.
+
+Jeder Teil wird einzeln benannt, und **jedes angegebene Feld muss
 passen**:
 
 | Feld | Vergleicht | Maske |
 |---|---|---|
-| `code` | Error-Code (u16) | `mask`, Default `0xFFFF` |
-| `mec` | Manufacturer Error Code — Byte 4 des Frames | `mec_mask`, Default `0xFF` |
-| `reg` | Error-Register (u8) | — |
+| `code` | Error-Code, Byte 0–1 (u16 LE) | `mask`, Default `0xFFFF` |
+| `mec` | Manufacturer Error Code, Byte 3–4 (u16 LE) | `mec_mask`, Default `0xFFFF` |
+| `reg` | Error-Register, Byte 2 (u8) | — |
 
 ```yaml
 - expect_emcy: {mec: $eErrCode_MotorStalled}      # nur der Herstellercode
@@ -90,10 +98,10 @@ keine EMCY" ist `expect_no_emcy`, und das ist eine andere Aussage.
 
 Der Grund für die Trennung: `code` und `mec` sind zwei voneinander
 unabhängige Dinge. In einem echten Frame `00 10 01 72 00 00 00 00` ist
-der Error-Code `0x1000` und der Herstellercode `0x72` — eine einzelne
-Zahl für beides wäre eine Zahl, die zwei Sachen bedeutet, und ein
-`expect_emcy 0x72` verglich dann `0x1000` gegen `0x72` und meldete „keine
-EMCY gesehen" über eine, die längst dalag.
+der Error-Code `0x1000`, das Register `0x01` und der Herstellercode
+`0x0072` — eine einzelne Zahl für beides wäre eine Zahl, die zwei Sachen
+bedeutet, und ein `expect_emcy 0x72` verglich dann `0x1000` gegen `0x72`
+und meldete „keine EMCY gesehen" über eine, die längst dalag.
 
 Fehlschlägt der Schritt, nennt die Begründung deshalb auch, **was
 stattdessen kam** — mit Code, Register und Herstellercode.

@@ -407,12 +407,22 @@ def _slug(text: str) -> str:
     return "_".join("".join(keep).split()) or "case"
 
 
+def _mec(mfr: bytes) -> int:
+    """The manufacturer error code: the first two of the five manufacturer
+    bytes, little-endian like every other multi-byte field in the frame.
+
+    Reading only the first byte works right up to the first code above
+    0xFF, and then compares a low byte against a whole number and says
+    nothing arrived.
+    """
+    return (mfr[0] if mfr else 0) | ((mfr[1] << 8) if len(mfr) > 1 else 0)
+
+
 def _emcy_str(entry: tuple[int, int, int, bytes]) -> str:
     """One recorded EMCY, in the terms a case is written in."""
     node, code, reg, mfr = entry
-    return (f"0x{code:04X} reg 0x{reg:02X} mec 0x{mfr[0]:02X} "
-            f"from node {node:02d}" if mfr else
-            f"0x{code:04X} reg 0x{reg:02X} from node {node:02d}")
+    return (f"0x{code:04X} reg 0x{reg:02X} mec 0x{_mec(mfr):04X} "
+            f"from node {node:02d}")
 
 
 def _emcy_wanted(val: dict) -> str:
@@ -3135,7 +3145,7 @@ class Bench:
         code = num("code") if "code" in val else None
         mask = num("mask") if "mask" in val else 0xFFFF
         mec = num("mec") if "mec" in val else None
-        mec_mask = num("mec_mask") if "mec_mask" in val else 0xFF
+        mec_mask = num("mec_mask") if "mec_mask" in val else 0xFFFF
         reg = num("reg") if "reg" in val else None
         want_node = num("node") if "node" in val else None
 
@@ -3148,8 +3158,7 @@ class Bench:
             if reg is not None and got_reg != reg:
                 return False
             if mec is not None:
-                got_mec = mfr[0] if mfr else 0
-                if got_mec & mec_mask != mec & mec_mask:
+                if _mec(mfr) & mec_mask != mec & mec_mask:
                     return False
             return True
         return match
