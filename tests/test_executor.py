@@ -1096,3 +1096,48 @@ def test_the_error_register_alone_does_not_make_a_match(tc_bench):
     _emcy_frame(tc_bench, "00 10 01 72 00 00 00 00")   # right reg, wrong mec
     run_selected(tc_bench, {"0018"})
     assert tc_bench.results == {"0018": "FAIL"}
+
+
+WRITE_SHAPES_TC = """\
+id: "0020"
+name: "what a write puts in the report"
+steps:
+  - sdo_write: {index: "0x2000", sub: "0x00", value: "0x00000001", note: "a literal"}
+  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - sdo_write: {index: "0x2000", sub: "0x00", value: R3, size: 4, note: "a register"}
+"""
+
+
+def test_a_write_that_worked_says_it_once(tc_bench):
+    """"write 0x220C:0x00 = 0x00000001" followed by "Response: wrote
+    0x00000001" is the same number twice. A write that succeeded answers
+    with nothing, so there is nothing to fill a line with — and the value
+    is already on the step line.
+
+    Where it is *not* — a register, a builtin — the resolved value joins
+    the step line instead, because otherwise what went on the wire appears
+    nowhere at all.
+    """
+    _add_tc(tc_bench, "TC0020_shapes.yaml", WRITE_SHAPES_TC)
+    run_selected(tc_bench, {"0020"})
+    assert tc_bench.results == {"0020": "PASS"}
+    steps = tc_bench._run_cases[0].steps
+
+    literal = steps[0]
+    assert literal.text.endswith("= 0x00000001  (Writable counter)"), literal.text
+    assert literal.detail == "", f"still a second line: {literal.detail!r}"
+
+    from_register = steps[2]
+    assert "= R3 = 0x00260001" in from_register.text, from_register.text
+    assert from_register.detail == ""
+
+
+def test_a_write_that_failed_still_says_why(tc_bench):
+    """The line is dropped because it was empty of news, not because a
+    failing write should go unexplained."""
+    _add_tc(tc_bench, "TC0021_bad.yaml",
+            'id: "0021"\nname: x\nsteps:\n'
+            '  - sdo_write: {index: "0x3000", sub: "0x00", value: 1, size: 4}\n')
+    run_selected(tc_bench, {"0021"})
+    assert tc_bench.results == {"0021": "FAIL"}
+    assert "abort" in tc_bench._run_cases[0].steps[0].detail
