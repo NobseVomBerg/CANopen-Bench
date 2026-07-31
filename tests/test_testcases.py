@@ -316,14 +316,23 @@ def test_a_node_that_is_not_a_value_is_rejected():
     assert tc.error and "invalid node" in tc.error
 
 
-def test_expect_emcy_needs_a_code_and_takes_a_mask():
+def test_expect_emcy_asks_about_a_part_of_the_frame_and_needs_at_least_one():
+    """CiA 301 fixes the error code and the error register and leaves the
+    remaining five bytes to the manufacturer — which is where a device
+    family puts the code its own cases are written against. Each part is
+    named separately, and a step that names none of them asserts nothing
+    while looking like it does."""
     ok = ('id: "1"\nname: x\nsteps:\n'
           '  - emcy_clear:\n'
-          '  - expect_emcy: {code: "0x7100", mask: "0x00FF", node: 2, timeout: 1.5}\n')
+          '  - expect_emcy: {code: "0x7100", mask: "0x00FF", node: 2, timeout: 1.5}\n'
+          '  - expect_emcy: {mec: "0x72"}\n'
+          '  - expect_emcy: {mec: "0x6D", reg: "0x01"}\n'
+          '  - expect_no_emcy: {mec: "0x72"}\n')
     assert parse_testcase(ok, "TC1_x.yaml").error is None
-    missing = 'id: "1"\nname: x\nsteps:\n  - expect_emcy: {mask: "0x00FF"}\n'
-    tc = parse_testcase(missing, "TC1_x.yaml")
-    assert tc.error and "missing field" in tc.error
+
+    nothing = 'id: "1"\nname: x\nsteps:\n  - expect_emcy: {mask: "0x00FF"}\n'
+    tc = parse_testcase(nothing, "TC1_x.yaml")
+    assert tc.error and "one of code, mec or reg" in tc.error
 
 
 def test_the_register_file_goes_to_r15():

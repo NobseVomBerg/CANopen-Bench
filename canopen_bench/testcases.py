@@ -52,10 +52,16 @@ _NOTE = {"note"}
 _STEP_FIELDS = {
     "sdo_read": ({"index", "sub"}, {"expect", "expect_abort", "mask", "into", "node"}),
     "sdo_write": ({"index", "sub", "value"}, {"size", "expect_abort", "node"}),
-    "expect_emcy": ({"code"}, {"mask", "node", "timeout"}),
+    #: `code`/`mask` ask about the CiA-301 error code, `mec`/`mec_mask`
+    #: about the manufacturer error code in the frame's fourth byte, `reg`
+    #: about the error register. Every part a step names has to agree; a
+    #: step naming none of them takes any EMCY. None is required, because
+    #: "an EMCY arrived" is a real assertion on its own.
+    "expect_emcy": (set(), {"code", "mask", "mec", "mec_mask", "reg",
+                            "node", "timeout"}),
     #: the opposite assertion, and not expressible as expect_emcy with
     #: anything: "nothing arrived" cannot be written as a code to match
-    "expect_no_emcy": (set(), {"code", "mask", "node"}),
+    "expect_no_emcy": (set(), {"code", "mask", "mec", "mec_mask", "reg", "node"}),
     "psu": (set(), {"ch", "volt", "curr", "output"}),
     "rand": ({"to"}, {"min", "max"}),
     "adjust": ({"index", "sub"}, {"text", "size", "node", "timeout"}),
@@ -282,7 +288,12 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             if "output" in val and val["output"] not in (True, False, "on", "off"):
                 return "psu: output must be on or off"
         if key in ("expect_emcy", "expect_no_emcy"):
-            for name in ("code", "mask", "node"):
+            # at least one part of the frame, or the step says nothing. Only
+            # expect_emcy: "no EMCY at all" is the whole point of the other
+            # one, and it is written by naming nothing.
+            if key == "expect_emcy" and not (val.keys() & {"code", "mec", "reg"}):
+                return "expect_emcy: needs one of code, mec or reg"
+            for name in ("code", "mask", "mec", "mec_mask", "reg", "node"):
                 if name in val and not _is_value(val[name]):
                     return f"expect_emcy: invalid {name} {val[name]!r}"
             if "timeout" in val and not isinstance(val["timeout"], (int, float)):

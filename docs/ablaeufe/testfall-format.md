@@ -60,6 +60,52 @@ und der fehlende Fall ist nicht mehr unsichtbar, sondern benannt.
 Zu beheben ist das nur in der Quelle: eine der beiden Dateien bekommt
 eine andere `id`.
 
+### EMCY prüfen — welcher Teil des Frames gemeint ist
+
+Ein EMCY-Frame hat nach CiA 301 drei Teile: **Error-Code** (Byte 0–1,
+u16 LE), **Error-Register** (Byte 2) und **5 Byte herstellerspezifisch**
+(Byte 3–7). Was in den letzten fünf steht, sagt die Norm nicht — und
+genau dort legt eine Gerätefamilie ihren eigenen Fehlercode ab, gegen
+den ihre Testfälle geschrieben sind. Ein Gerät kann normkonform `0x1000`
+(generic error) in den Error-Code schreiben und *welcher* Fehler es ist
+in die Herstellerbytes.
+
+Verbreitet, und was `mec` liest: die ersten beiden Herstellerbytes
+(3–4) als **u16 little-endian**, gleiche Byte-Reihenfolge wie der
+Error-Code. Byte 5–7 werden nicht verglichen; braucht ein Fall etwas
+daraus, ist das ein eigenes Feld wert und keine stillschweigende
+Umdeutung von `mec`.
+
+Jeder Teil wird einzeln benannt, und **jedes angegebene Feld muss
+passen**:
+
+| Feld | Vergleicht | Maske |
+|---|---|---|
+| `code` | Error-Code, Byte 0–1 (u16 LE) | `mask`, Default `0xFFFF` |
+| `mec` | Manufacturer Error Code, Byte 3–4 (u16 LE) | `mec_mask`, Default `0xFFFF` |
+| `reg` | Error-Register, Byte 2 (u8) | — |
+
+```yaml
+- expect_emcy: {mec: $eErrCode_MotorStalled}      # nur der Herstellercode
+- expect_emcy: {mec: "0x6D", reg: "0x01"}         # zusammen mit dem Register
+- expect_emcy: {code: "0x8110", mask: "0xFF00"}   # nur die CiA-Klasse
+- expect_emcy: {code: "0x00", mask: "0x00"}       # irgendeine, egal welche
+```
+
+Mindestens eines von `code`, `mec`, `reg` muss dastehen. Ein Schritt, der
+keines nennt, prüft nichts und sieht dabei aus, als täte er es — „gar
+keine EMCY" ist `expect_no_emcy`, und das ist eine andere Aussage.
+
+Der Grund für die Trennung: `code` und `mec` sind zwei voneinander
+unabhängige Dinge. In einem echten Frame `00 10 01 72 00 00 00 00` ist
+der Error-Code `0x1000`, das Register `0x01` und der Herstellercode
+`0x0072` — eine einzelne Zahl für beides wäre eine Zahl, die zwei Sachen
+bedeutet, und ein `expect_emcy 0x72` verglich dann `0x1000` gegen `0x72`
+und meldete „keine EMCY gesehen" über eine, die längst dalag.
+
+Fehlschlägt der Schritt, nennt die Begründung deshalb auch, **was
+stattdessen kam** — mit Code, Register und Herstellercode.
+
 ### `variants` — für welche Hardware der Fall gilt
 
 Die Varianten, wie das Gerät sie selbst meldet (Scan liest sie aus dem
@@ -173,8 +219,8 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `psu` | `{ch?, volt?, curr?, output?}` | Labornetzteil stellen (`canopen_bench/instruments/`): Spannung/Strom eines Kanals (`ch`, Default 1) und/oder Ausgang `on`/`off`. Mindestens eines von `volt`/`curr`/`output`. Volt/Ampere dürfen Kommazahlen sein | kein Netzteil verbunden oder Fehler am Gerät → ERROR (Prüfmittel fehlt, das ist kein Fehlverhalten des DUT) |
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
 | `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
-| `expect_no_emcy` | `{code?, mask?, node?}` | prüft, dass **keine** passende EMCY kam — ohne `code`: gar keine. Wartet nicht: kein Warten beweist, dass nichts mehr kommt; geprüft wird dasselbe Fenster wie bei `expect_emcy`, also alles seit dem letzten `emcy_clear` | passende EMCY vorhanden → FAIL, mit ihrem Code in der Begründung |
-| `expect_emcy` | `{code, mask?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. `mask` vergleicht nur einen Teil des Codes, für Geräte, deren Klassenbyte nicht dokumentiert ist | keine passende EMCY → FAIL |
+| `expect_no_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?}` | prüft, dass **keine** passende EMCY kam — ohne Feld: gar keine. Wartet nicht: kein Warten beweist, dass nichts mehr kommt; geprüft wird dasselbe Fenster wie bei `expect_emcy`, also alles seit dem letzten `emcy_clear` | passende EMCY vorhanden → FAIL, mit ihren Feldern in der Begründung |
+| `expect_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. Mindestens eines von `code`, `mec`, `reg` ist Pflicht (s.u.) | keine passende EMCY → FAIL, mit dem, was stattdessen kam |
 
 ### Variablen, Arithmetik, Sprünge (v2)
 
