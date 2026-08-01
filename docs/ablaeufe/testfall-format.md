@@ -187,7 +187,7 @@ In `note` und `log` sind einfache Formatierungs-Tags erlaubt (`<b>`,
 - **Wert-Angaben** — überall, wo ein Wert erwartet wird (`value`,
   `expect`, `mask`, `cob`, `data`-Bytes, Vergleichsoperanden `a`/`b`,
   `node`), sind gleichwertig erlaubt:
-  - Hex-String `"0x2050"`, Ganzzahl-Literal `42`,
+  - Hex-String `"0x2050"`, Binär-String `"0b1100"`, Ganzzahl-Literal `42`,
   - Registername `R3`,
   - Builtin: `$node` (aufgelöste DUT-Node-ID), `$expected`
     (Soll-Geräteanzahl aus dem übernommenen Soll-Zustand (Machine
@@ -197,6 +197,12 @@ In `note` und `log` sind einfache Formatierungs-Tags erlaubt (`<b>`,
     inkrementiert) ist **nur** in `can_send`-Daten erlaubt — als ganze
     `data`-Quelle oder als Listeneintrag, der an Ort und Stelle zu seinen
     Bytes expandiert (`data: [$session, "0x02", 0, 0]`).
+  Ein String ohne Präfix wird als **Hex** gelesen (`"30"` ist 48), ein
+  YAML-Integer als Dezimalzahl. `0b…` ist ausdrücklich nötig, wo Bits
+  gemeint sind: `"0b1100"` *ist* gültiges Hex — 0, B, 1, 1, 0, 0 — und
+  ohne das Präfix-Wissen läse sich Zwölf als 725248, ohne dass irgendwo
+  etwas auffällt.
+
   - **Symbol** aus den C-Headern des Geräts, `$eObjIdx_LampControl`
     — überall erlaubt, wo ein Wert steht, also auch für `index` und `sub`:
 
