@@ -2131,6 +2131,19 @@ class Bench:
         if enable:
             self._rematch_devices()
 
+    def _eds_rows(self) -> list[dict]:
+        """Registry rows whose EDS file is really in the folder.
+
+        A plugin seeds the profiles of a whole device family
+        (BenchPlugin.seed_eds), so a fresh workspace starts out with rows for
+        files nobody has put there yet. Such a row can do nothing — there is
+        no object dictionary to load, to match a scanned device against or to
+        generate a demo DUT from — and showing it only raises the question
+        which of those devices are real. The row is not deleted: it is the
+        family's pre-configuration, so dropping the file into the folder
+        brings it back with its identity, code and variant already set."""
+        return [e for e in self.db.eds_list() if (self.db.eds_dir / e["file"]).is_file()]
+
     def _eds_by_identity(self) -> dict[str, dict]:
         """Enabled EDS entries keyed by normalized identity. When several
         enabled files claim the same identity, the newest file on disk wins —
@@ -2141,7 +2154,7 @@ class Bench:
             except OSError:
                 return 0.0
         out: dict[str, dict] = {}
-        for e in sorted((e for e in self.db.eds_list() if e["enabled"]), key=mtime):
+        for e in sorted((e for e in self._eds_rows() if e["enabled"]), key=mtime):
             out[normalize_identity(e["ident"])] = e
         return out
 
@@ -2149,7 +2162,7 @@ class Bench:
         """Normalized identity → file names, for identities that more than
         one enabled EDS file claims."""
         groups: dict[str, list[str]] = {}
-        for e in self.db.eds_list():
+        for e in self._eds_rows():
             if e["enabled"]:
                 groups.setdefault(normalize_identity(e["ident"]), []).append(e["file"])
         return {ident: files for ident, files in groups.items() if len(files) > 1}
@@ -4139,7 +4152,7 @@ class Bench:
         first = sel[0] if sel else None
         demo = self.adapter == "demo"
         catalog, obj_groups, obj_hint = self._object_catalog()
-        eds_files = self.db.eds_list()
+        eds_files = self._eds_rows()
         conflicts = self._eds_conflicts()
         winners = {ident: e["file"] for ident, e in self._eds_by_identity().items()}
         for e in eds_files:
