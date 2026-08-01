@@ -1176,3 +1176,37 @@ def test_a_bit_level_expectation_is_not_a_nibble_one(tc_bench):
             'expect: "0x00000001", mask: "0x00000001"}\n')
     run_selected(tc_bench, {"0023"})
     assert tc_bench.results == {"0023": "PASS"}
+
+
+def _order_for(bench: Bench, visible: list[str]) -> list[str]:
+    """What a run would execute, given those ids on screen. Started and
+    stopped inside a loop, because run_start hands the case list to a task."""
+    bench.test_sel = {"0001", "0002", "0005"}
+
+    async def go():
+        bench.dispatch("run_start", {"ids": visible})
+        order = list(bench.run_order)
+        bench.dispatch("run_stop", {})
+        while bench.running:
+            await asyncio.sleep(0.02)
+        return order
+    return asyncio.run(go())
+
+
+def test_a_case_that_is_filtered_off_the_screen_does_not_run(tc_bench):
+    """A filter narrows the list, not the selection. So a case selected
+    before the filter was set stays selected while being invisible — and
+    ran: the category said `automated`, the screen showed 47 of 85, and the
+    run was 74 long, stopping at a question from a semi-automated case
+    nobody could see.
+
+    The Start button has always counted "selected among shown". This is the
+    number it was already promising.
+    """
+    assert _order_for(tc_bench, ["0001", "0005"]) == ["0001", "0005"]
+
+
+def test_the_run_order_follows_the_catalog_not_the_client(tc_bench):
+    """The ids say which, never in what order — a list arriving shuffled
+    must not shuffle the run."""
+    assert _order_for(tc_bench, ["0005", "0002", "0001"]) == ["0001", "0002", "0005"]

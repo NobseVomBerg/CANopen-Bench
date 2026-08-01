@@ -3048,22 +3048,29 @@ class Bench:
     def _shown_tests(self) -> list[tuple]:
         return [t for t in self._catalog_rows() if self.tool_filter or t[2] == "—"]
 
-    def act_tests_all(self, p: dict) -> None:
-        """Select what the list is showing — which the client has to say.
+    def _visible(self, p: dict) -> list[str]:
+        """The ids on screen, in catalog order.
 
         Variant, category and the search box are filters the frontend
-        applies to the catalog it was sent; the server never hears about
-        them. Selecting from its own idea of "shown" therefore picked up
-        cases that were not on screen: with the category set to
-        `automated`, a semi-automated case went into the selection and
-        the run stopped at a question nobody expected.
+        applies to the catalog it was sent — the server never hears about
+        them, and its own `_shown_tests` knows only the tool filter. So
+        anything that acts on "what is shown" has to be told, and both
+        callers ask here rather than each keeping their own idea of it.
 
-        The ids are still intersected with what is actually runnable, so
-        a stale list cannot select a case that has since gone or broken.
+        What comes back is intersected with what is actually runnable, so
+        a stale list cannot name a case that has since gone or broken.
+        Without a list at all — any caller that sends none — it means
+        everything, which is what it always meant.
         """
-        runnable = {t[0] for t in self._shown_tests()}
+        runnable = [t[0] for t in self._shown_tests()]
         asked = p.get("ids")
-        self.test_sel = (runnable & set(asked)) if isinstance(asked, list) else runnable
+        if not isinstance(asked, list):
+            return runnable
+        wanted = set(asked)
+        return [tid for tid in runnable if tid in wanted]
+
+    def act_tests_all(self, p: dict) -> None:
+        self.test_sel = set(self._visible(p))
 
     def act_tests_none(self, p: dict) -> None:
         self.test_sel = set()
@@ -3082,7 +3089,12 @@ class Bench:
             self.repeat_run = n
 
     def act_run_start(self, p: dict) -> None:
-        sel = [t[0] for t in self._shown_tests() if t[0] in self.test_sel]
+        # what is selected *and* on screen. A filter narrows the list and
+        # not the selection, so a case selected before the filter was set
+        # stays selected while being invisible — and ran. The button has
+        # always counted the other way, "selected among shown", so this is
+        # the number it was already promising.
+        sel = [tid for tid in self._visible(p) if tid in self.test_sel]
         if self.running or not sel:
             return
         if self.testcases:
