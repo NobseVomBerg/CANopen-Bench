@@ -3357,3 +3357,64 @@ def test_open_in_editor_does_not_share_the_servers_stdin(tmp_path, monkeypatch):
     _, kwargs = calls[0]
     assert kwargs["stdin"] == subprocess.DEVNULL
     assert kwargs["start_new_session"] is True
+
+
+def test_a_string_object_reads_back_as_the_string_it_is():
+    """0x0000003332315F4F4D4544 is "DEMO_123" written back to front — the
+    bus builds the answer with int.from_bytes(data, "little"), so the
+    characters stand in the hex reversed, and the number's leading zeros
+    are the string's trailing padding. Nobody recognises their device name
+    in the number."""
+    from canopen_bench.core import _hex_to_text
+
+    assert _hex_to_text("0x0000003332315F4F4D4544") == "DEMO_123"
+    # a number is not text, whatever its bytes happen to spell
+    assert _hex_to_text("0x260001") is None
+    assert _hex_to_text("R3") is None
+    assert _hex_to_text("0x") is None
+    assert _hex_to_text("0x123") is None      # odd digit count
+
+
+def test_a_text_expectation_is_compared_against_the_decoded_answer():
+    """The expectation is written "DEMO_123" and the answer arrives as a
+    number. Comparing the raw hex against the wanted characters could only
+    ever fail — which is what it did, on a device that had answered
+    correctly."""
+    from canopen_bench.bus.interface import SdoResult
+    from canopen_bench.core import _judge_read
+
+    spec = {"index": "0x1008", "sub": "0x00", "expect": '"DEMO_123"'}
+    good = SdoResult(ok=True, value="0x0000003332315F4F4D4544")
+    assert _judge_read(spec, good)[0] == "ok"
+
+    other = SdoResult(ok=True, value="0x0000003432315F4F4D4544")   # DEMO_124
+    status, why = _judge_read(spec, other)
+    assert status == "fail"
+    assert '"DEMO_124"' in why and "DEMO_123" in why, why
+
+
+def test_select_all_takes_only_what_the_list_shows(tmp_path, monkeypatch):
+    """Variant, category and the search box are filters the frontend applies
+    to the catalog it was sent — the server never hears about them. Picking
+    from its own idea of "shown" therefore selected cases that were not on
+    screen: with the category set to `automated`, a semi-automated case
+    joined the run and stopped it at a question nobody was expecting."""
+    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda: [])
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    for tid, grade in (("4646", "automated"), ("4647", "semi")):
+        (tc_dir / f"TC{tid}_c.yaml").write_text(
+            f'id: "{tid}"\nname: c\ngrade: {grade}\nsteps:\n  - log: "x"\n')
+    bench = Bench(Db(tmp_path / "t.db"))
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    bench.dispatch("tests_all", {"ids": ["4646"]})       # what the filter showed
+    assert bench.test_sel == {"4646"}
+
+    # an id the folder does not have cannot be selected by asking for it
+    bench.dispatch("tests_all", {"ids": ["4646", "9999"]})
+    assert bench.test_sel == {"4646"}
+
+    # no list at all still means everything, for any caller that sends none
+    bench.dispatch("tests_all", {})
+    assert bench.test_sel == {"4646", "4647"}

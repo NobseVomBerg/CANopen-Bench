@@ -988,7 +988,7 @@ function TestsPage({ s, ui, setUi }) {
     <input placeholder="⌕ Filter test cases…" value=${ui.testFilter || ''} onInput=${(e) => setUi({ ...ui, testFilter: e.target.value })}
       style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:6px;padding:5px 10px;width:170px;outline:none;font:12px 'IBM Plex Sans'" />
     <span style="width:10px"></span>
-    <span onClick=${() => send('tests_all')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
+    <span onClick=${() => send('tests_all', { ids: shown.map((r) => r[0]) })} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
     <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
     <span style="flex:1"></span>
     <span style="font:10.5px ${MONO};color:var(--faint)">${shown.length} of ${t.catalog.length}</span>
