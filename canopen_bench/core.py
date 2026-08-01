@@ -187,12 +187,26 @@ def _hexstr(value) -> str:
     return f"0x{value:X}" if isinstance(value, int) else str(value)
 
 
+def _base(text: str) -> int:
+    """Which base a written value is in.
+
+    Base 16 is the default for a bare string, because that is what a
+    CANopen value normally is. `0b` has to be checked first and by name:
+    "0b1100" is *valid hexadecimal* — 0, B, 1, 1, 0, 0 — so a plain
+    int(s, 16) reads twelve as 725248 and says nothing. That is the shape
+    of wrong that a test case cannot notice, because every number in it is
+    wrong the same way.
+    """
+    return 2 if text[:2].lower() == "0b" else 16
+
+
 def _as_int(value) -> int | None:
     if isinstance(value, int):
         return value
+    text = str(value).strip()
     try:
-        return int(str(value), 16)
-    except ValueError:
+        return int(text, _base(text))
+    except (ValueError, IndexError):
         return None
 
 
@@ -388,7 +402,7 @@ def _resolve(value, regs: dict, builtins: dict) -> int:
         return int(builtins["node"])
     if s == "$expected":
         return int(builtins["expected"])
-    return int(s, 16)
+    return int(s, _base(s))
 
 
 def _resolve_num(value, regs: dict, builtins: dict) -> float:

@@ -1141,3 +1141,38 @@ def test_a_write_that_failed_still_says_why(tc_bench):
     run_selected(tc_bench, {"0021"})
     assert tc_bench.results == {"0021": "FAIL"}
     assert "abort" in tc_bench._run_cases[0].steps[0].detail
+
+
+BINARY_TC = """\
+id: "0022"
+name: "values written in bits"
+steps:
+  - mov: {to: R1, value: "0b1100"}
+  - jump_eq: {a: R1, b: 12, to: ok}
+  - fail: "0b1100 is not twelve"
+  - label: ok
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0b00000000001001100000000000000001"}
+"""
+
+
+def test_a_binary_literal_is_read_as_binary(tc_bench):
+    """"0b1100" is *valid hexadecimal* — 0, B, 1, 1, 0, 0 — so reading it
+    with int(s, 16) gives 725248 instead of 12 and raises nothing. Every
+    number in such a case is then wrong the same way, which is how it
+    passes its own comparisons and tells nobody.
+    """
+    _add_tc(tc_bench, "TC0022_bits.yaml", BINARY_TC)
+    run_selected(tc_bench, {"0022"})
+    assert tc_bench.results == {"0022": "PASS"}
+
+
+def test_a_bit_level_expectation_is_not_a_nibble_one(tc_bench):
+    """A "#" in a hex filter is four bits at once, so a single-bit check
+    cannot be written that way — 0x2040:01 is 0x00260001, and asserting
+    bit 0 alone has to leave the other three bits of that nibble free."""
+    _add_tc(tc_bench, "TC0023_bit.yaml",
+            'id: "0023"\nname: x\nsteps:\n'
+            '  - sdo_read: {index: "0x2040", sub: "0x01", '
+            'expect: "0x00000001", mask: "0x00000001"}\n')
+    run_selected(tc_bench, {"0023"})
+    assert tc_bench.results == {"0023": "PASS"}
