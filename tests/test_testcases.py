@@ -436,3 +436,22 @@ def test_a_note_must_be_a_text_and_a_typo_is_still_caught():
     assert parse_testcase(bad, "TC1_x.yaml").error
     empty = 'id: "1"\nname: x\nsteps:\n  - mov: {to: R1, value: 5, note: ""}\n'
     assert "note must be a text" in parse_testcase(empty, "TC1_x.yaml").error
+
+
+def test_a_value_naming_a_base_has_to_name_one_that_exists():
+    """"0b1100" is valid hexadecimal — 0, B, 1, 1, 0, 0 — and so are
+    "0d15" and "0e10". Read as hex they are 725248, 3349 and 3600, with no
+    error anywhere. A prefix is therefore checked by name before the hex
+    default may apply, and one that names nothing makes the case
+    unloadable instead of running on a number nobody wrote."""
+    for text in ("0d15", "0e10", "0a5", "0o17"):
+        tc = parse_testcase(
+            f'id: "1"\nname: x\nsteps:\n  - mov: {{to: R1, value: "{text}"}}\n',
+            "TC1_x.yaml")
+        assert tc.error, f"{text} loaded as a number"
+
+    for text, number in (("0x1100", 0x1100), ("0b1100", 12), ("1100", 0x1100)):
+        tc = parse_testcase(
+            f'id: "1"\nname: x\nsteps:\n  - mov: {{to: R1, value: "{text}"}}\n',
+            "TC1_x.yaml")
+        assert tc.error is None, f"{text}: {tc.error}"

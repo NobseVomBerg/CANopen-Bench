@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from .values import base_of
+
 MANUAL_TIMEOUT_S = 120.0  # default confirmation window for `manual` steps
 MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
 
@@ -79,7 +81,13 @@ def _is_value(v: object) -> bool:
     if v in REGISTERS or v in _BUILTINS:
         return True
     try:
-        int(v, 16)
+        # same rule as the executor: a value that looks like it names a
+        # base has to name one that exists. "0d15" is valid hexadecimal
+        # and would otherwise load fine and run as 3349.
+        base = base_of(v)
+        if base is None:
+            return False
+        int(v, base)
         return True
     except ValueError:
         return False

@@ -24,6 +24,28 @@ from dataclasses import dataclass
 _QUALIFIED = re.compile(r"^[A-Za-z_]\w*(?::[A-Za-z_]\w*)?$")
 
 
+#: the prefixes a written value may carry, and what they mean
+BASES = {"0x": 16, "0b": 2}
+
+
+def base_of(text: str) -> int | None:
+    """Which base a written value is in, or None if it claims one this
+    does not know.
+
+    Base 16 is the default for a bare string, because that is what a
+    CANopen value normally is — but a prefix has to be recognised *by
+    name* before that default may apply. "0b1100" is valid hexadecimal
+    (0, B, 1, 1, 0, 0) and so are "0d15" and "0e10"; read as hex they are
+    725248, 3349 and 3600, quietly and without error. A value that looks
+    like it names a base therefore has to name one that exists, or it is
+    not a number here at all — better an unreadable step than a step that
+    runs on a number nobody wrote.
+    """
+    if len(text) > 1 and text[0] == "0" and text[1].isalpha():
+        return BASES.get(text[:2].lower())
+    return 16
+
+
 @dataclass(frozen=True)
 class Field:
     """One interpreted slice of an object's value.

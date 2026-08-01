@@ -37,7 +37,7 @@ from .db import Db
 from .eds_od import OdCache, find_var, pdo_mapping
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 from .symbols import SymbolTables, load_symbols
-from .values import Field, alternatives, describe, format_number, parse_value
+from .values import BASES, Field, alternatives, base_of, describe, format_number, parse_value
 
 VERSION = __version__  # single source: canopen_bench/__init__.py
 
@@ -187,25 +187,17 @@ def _hexstr(value) -> str:
     return f"0x{value:X}" if isinstance(value, int) else str(value)
 
 
-def _base(text: str) -> int:
-    """Which base a written value is in.
-
-    Base 16 is the default for a bare string, because that is what a
-    CANopen value normally is. `0b` has to be checked first and by name:
-    "0b1100" is *valid hexadecimal* — 0, B, 1, 1, 0, 0 — so a plain
-    int(s, 16) reads twelve as 725248 and says nothing. That is the shape
-    of wrong that a test case cannot notice, because every number in it is
-    wrong the same way.
-    """
-    return 2 if text[:2].lower() == "0b" else 16
 
 
 def _as_int(value) -> int | None:
     if isinstance(value, int):
         return value
     text = str(value).strip()
+    base = base_of(text)
+    if base is None:
+        return None
     try:
-        return int(text, _base(text))
+        return int(text, base)
     except (ValueError, IndexError):
         return None
 
@@ -285,8 +277,9 @@ def _typed_number(text: str) -> int | None:
 
 def _judge_read(spec: dict, res: SdoResult) -> tuple[str, str]:
     """Verdict for an sdo_read step: values compare numerically (with
-    optional mask) so "0x2A" matches "0x0000002A"; non-hex values (strings
-    like a device name) compare literally."""
+    optional mask) so "0x2A" matches "0x0000002A". An expectation that is
+    not a number is text: the answer is decoded back into characters and
+    the two are compared as such."""
     where = f"sdo_read {_hexstr(spec['index'])}:{_hexstr(spec['sub'])}"
     if "expect_abort" in spec:
         if res.ok:
@@ -300,10 +293,21 @@ def _judge_read(spec: dict, res: SdoResult) -> tuple[str, str]:
     if "expect" not in spec:
         return "ok", ""
     got, exp = _as_int(res.value), _as_int(spec["expect"])
-    if got is None or exp is None:  # non-numeric: literal comparison
-        if str(res.value) == str(spec["expect"]):
+    if got is None or exp is None:
+        # One side is not a number, so this is a text comparison — and the
+        # answer has to be decoded for it. Comparing the raw hex against
+        # the wanted characters could only ever fail: a device name comes
+        # back as 0x0000003332315F4F4D4544, and no amount of it looks like
+        # "DEMO_123". The quotes are the CSV's way of saying "these are
+        # characters", and are not part of the value.
+        want = str(spec["expect"]).strip()
+        if len(want) >= 2 and want[0] == want[-1] == '"':
+            want = want[1:-1]
+        text = _hex_to_text(res.value)
+        if text == want or str(res.value) == str(spec["expect"]):
             return "ok", ""
-        return "fail", f"{where} = {res.value!r}, expected {spec['expect']!r}"
+        shown = f'"{text}"' if text is not None else repr(res.value)
+        return "fail", f"{where} = {shown}, expected {want!r}"
     mask = _as_int(spec["mask"]) if "mask" in spec else None
     ok = (got & mask) == (exp & mask) if mask is not None else got == exp
     if ok:
@@ -402,7 +406,11 @@ def _resolve(value, regs: dict, builtins: dict) -> int:
         return int(builtins["node"])
     if s == "$expected":
         return int(builtins["expected"])
-    return int(s, _base(s))
+    base = base_of(s)
+    if base is None:
+        raise ValueError(f"{s!r} names a base that does not exist "
+                         f"(known: {', '.join(sorted(BASES))})")
+    return int(s, base)
 
 
 def _resolve_num(value, regs: dict, builtins: dict) -> float:
@@ -451,6 +459,37 @@ def _emcy_wanted(val: dict) -> str:
     if "reg" in val:
         parts.append(f"reg {_hexstr(val['reg'])}")
     return "expect_emcy " + (", ".join(parts) if parts else "any")
+
+
+#: CiA 301 data types whose content is characters, not a number
+#: (VISIBLE_STRING, OCTET_STRING, UNICODE_STRING)
+_TEXT_TYPES = (0x09, 0x0A, 0x0B)
+
+
+def _hex_to_text(value: object) -> str | None:
+    """A device answer read back as the characters it is, or None.
+
+    The bus builds the answer with int.from_bytes(data, "little"), so the
+    bytes stand in the hex string back to front: "DEMO_123" arrives as
+    0x0000003332315F4F4D4544. Reversing puts them right, and the leading
+    zeros of the number are the trailing padding of the string.
+
+    Anything outside printable ASCII means this was not text after all,
+    and saying so beats printing control characters at somebody.
+    """
+    digits = str(value).strip()
+    if digits[:2].lower() != "0x":
+        return None
+    digits = digits[2:]
+    if not digits or len(digits) % 2:
+        return None
+    try:
+        raw = bytes.fromhex(digits)[::-1].rstrip(b"\x00")
+    except ValueError:
+        return None
+    if not raw or any(b < 0x20 or b > 0x7E for b in raw):
+        return None
+    return raw.decode("ascii")
 
 
 def _write_value(val: dict, regs: dict, builtins: dict) -> str:
@@ -1197,7 +1236,26 @@ class Bench:
             meaning = describe(number, fields, self.symbols)
             if meaning:
                 return f"{value} — {meaning}"
+        # an object the EDS calls a string is one somebody wants to read,
+        # not decode: 0x0000003332315F4F4D4544 is "DEMO_123" written back
+        # to front, and nobody recognises their device name in that
+        if self._is_text_object(idx, sub):
+            text = _hex_to_text(value)
+            if text is not None:
+                return f'"{text}"'
         return str(value)
+
+    def _is_text_object(self, idx: str, sub: str) -> bool:
+        """Whether the EDS declares this object as one of the string types."""
+        dev = self.sel_devices[0] if self.sel_devices else None
+        od = self._ods.load(dev["eds"]) if dev else None
+        if od is None:
+            return False
+        want_i, want_s = _as_int(idx), _as_int(sub)
+        if want_i is None:
+            return False
+        var = find_var(od, want_i, want_s or 0)
+        return getattr(var, "data_type", None) in _TEXT_TYPES
 
     def dispatch(self, action: str, p: dict[str, Any]) -> None:
         fn = self._plugin_actions.get(action)  # namespaced "<plugin>.<name>"
@@ -2990,8 +3048,29 @@ class Bench:
     def _shown_tests(self) -> list[tuple]:
         return [t for t in self._catalog_rows() if self.tool_filter or t[2] == "—"]
 
+    def _visible(self, p: dict) -> list[str]:
+        """The ids on screen, in catalog order.
+
+        Variant, category and the search box are filters the frontend
+        applies to the catalog it was sent — the server never hears about
+        them, and its own `_shown_tests` knows only the tool filter. So
+        anything that acts on "what is shown" has to be told, and both
+        callers ask here rather than each keeping their own idea of it.
+
+        What comes back is intersected with what is actually runnable, so
+        a stale list cannot name a case that has since gone or broken.
+        Without a list at all — any caller that sends none — it means
+        everything, which is what it always meant.
+        """
+        runnable = [t[0] for t in self._shown_tests()]
+        asked = p.get("ids")
+        if not isinstance(asked, list):
+            return runnable
+        wanted = set(asked)
+        return [tid for tid in runnable if tid in wanted]
+
     def act_tests_all(self, p: dict) -> None:
-        self.test_sel = {t[0] for t in self._shown_tests()}
+        self.test_sel = set(self._visible(p))
 
     def act_tests_none(self, p: dict) -> None:
         self.test_sel = set()
@@ -3010,7 +3089,12 @@ class Bench:
             self.repeat_run = n
 
     def act_run_start(self, p: dict) -> None:
-        sel = [t[0] for t in self._shown_tests() if t[0] in self.test_sel]
+        # what is selected *and* on screen. A filter narrows the list and
+        # not the selection, so a case selected before the filter was set
+        # stays selected while being invisible — and ran. The button has
+        # always counted the other way, "selected among shown", so this is
+        # the number it was already promising.
+        sel = [tid for tid in self._visible(p) if tid in self.test_sel]
         if self.running or not sel:
             return
         if self.testcases:

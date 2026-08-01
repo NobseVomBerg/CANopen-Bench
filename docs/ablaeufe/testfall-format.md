@@ -198,10 +198,19 @@ In `note` und `log` sind einfache Formatierungs-Tags erlaubt (`<b>`,
     `data`-Quelle oder als Listeneintrag, der an Ort und Stelle zu seinen
     Bytes expandiert (`data: [$session, "0x02", 0, 0]`).
   Ein String ohne Präfix wird als **Hex** gelesen (`"30"` ist 48), ein
-  YAML-Integer als Dezimalzahl. `0b…` ist ausdrücklich nötig, wo Bits
-  gemeint sind: `"0b1100"` *ist* gültiges Hex — 0, B, 1, 1, 0, 0 — und
-  ohne das Präfix-Wissen läse sich Zwölf als 725248, ohne dass irgendwo
-  etwas auffällt.
+  YAML-Integer als Dezimalzahl. Ein Präfix wird aber **zuerst beim Namen
+  geprüft**, und es muss eines sein, das es gibt: `"0b1100"` *ist*
+  gültiges Hex — 0, B, 1, 1, 0, 0 — und `"0d15"` und `"0e10"` ebenso. Als
+  Hex gelesen wären das 725248, 3349 und 3600, lautlos. Deshalb ist
+  `0x…`/`0b…` erlaubt und alles andere mit führender `0` plus Buchstabe
+  **kein Wert**: der Fall lädt dann nicht, statt mit einer Zahl zu
+  laufen, die niemand hingeschrieben hat.
+
+  Ein `expect`, das keine Zahl ist, ist **Text**: die Antwort wird in
+  Zeichen zurückübersetzt und so verglichen. Ein Objekt, das die EDS als
+  String führt, wird auch im Report so gezeigt — `0x0000003332315F4F4D4544`
+  ist `"DEMO_123"`, rückwärts geschrieben, und in der Zahl erkennt das
+  niemand wieder.
 
   - **Symbol** aus den C-Headern des Geräts, `$eObjIdx_LampControl`
     — überall erlaubt, wo ein Wert steht, also auch für `index` und `sub`:
