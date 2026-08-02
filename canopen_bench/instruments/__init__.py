@@ -116,11 +116,20 @@ def _pyserial_opener(port: str, baud: int, timeout: float):
 
 
 def _pyserial_ports() -> list[tuple[str, str]]:
-    """(device, description) for every serial port, or [] without pyserial."""
+    """(device, description) for every serial port.
+
+    Says so when pyserial is missing rather than returning an empty list.
+    An empty list is what a machine with no serial ports looks like, so
+    the search reported "no known power supply found" — sending the
+    reader to the cable, the port and the instrument, when what was
+    missing was an optional package. The opener has always named it; the
+    search stayed quiet, which is the worse of the two places to.
+    """
     try:
         from serial.tools import list_ports
-    except ImportError:
-        return []
+    except ImportError as exc:  # optional dependency: pip install ".[serial]"
+        raise InstrumentError(
+            "pyserial is not installed — run pip install \".[serial]\"") from exc
     return [(p.device, f"{p.description or ''} {p.manufacturer or ''}")
             for p in list_ports.comports()]
 

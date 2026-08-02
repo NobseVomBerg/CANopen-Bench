@@ -182,6 +182,37 @@ def test_without_pyserial_the_message_says_what_to_install(monkeypatch):
         SerialLink("COM6").open()
 
 
+def _without_pyserial(monkeypatch):
+    """Make ``import serial`` fail, the way a missing optional extra does."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_serial(name, *args, **kwargs):
+        if name == "serial" or name.startswith("serial."):
+            raise ImportError("no module named serial")
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", no_serial)
+
+
+def test_searching_without_pyserial_says_so_instead_of_finding_nothing(monkeypatch):
+    """An empty port list is exactly what a machine with no serial ports
+    looks like. Returning one made "the package is missing" and "there is
+    no supply here" the same answer, and only one of them is actionable."""
+    _without_pyserial(monkeypatch)
+    with pytest.raises(InstrumentError, match="pyserial"):
+        discover()
+
+
+def test_an_injected_port_list_needs_no_pyserial(monkeypatch):
+    """Only the enumeration needs the package. Given the ports, the search
+    is the caller's own list and an opener — which is how the tests above
+    run, and how a caller that knows its port can work without the extra."""
+    _without_pyserial(monkeypatch)
+    got = discover(opener=opener_for(FakePort()), ports=[("COM6", "FTDI")])
+    assert got is not None
+
+
 def test_a_single_channel_unit_reports_one_channel():
     """Same model line, one output instead of two — nothing here may
     assume the shape of the bench it is standing on."""
@@ -216,6 +247,20 @@ def _bench_with_psu(tmp_path, port=FakePort):
 def test_the_box_is_absent_until_something_is_found(tmp_path):
     bench, _ = _bench_with_psu(tmp_path)
     assert bench.snapshot()["psu"] is None
+
+
+def test_the_search_blames_the_missing_package_not_the_bench(tmp_path, monkeypatch):
+    """What this cost once: the supply was connected and answering, the
+    extra was not installed, and the box said "no known power supply
+    found on the serial ports" — which reads as a verdict on the cable
+    and the instrument."""
+    from canopen_bench.core import Bench
+    from canopen_bench.db import Db
+    _without_pyserial(monkeypatch)
+    bench = Bench(Db(tmp_path / "psu.db"), plugins=[])   # no ports injected
+    bench.dispatch("psu_search", {})
+    assert "pyserial" in bench.logs[-1]["msg"]
+    assert "no known power supply" not in bench.logs[-1]["msg"]
 
 
 def test_search_finds_the_supply_and_reports_its_set_values(tmp_path):
