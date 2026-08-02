@@ -134,6 +134,10 @@ class PowerSupply:
     #: bridge names its chip, and probing everything is how you write to
     #: the CAN adapter by accident
     port_hints: tuple[str, ...] = ()
+    #: what this instrument's port is opened at. Not a preference: a
+    #: supply answering at 115200 stays silent at 9600, which discovery
+    #: cannot tell apart from "not this instrument".
+    baud: int = 9600
 
     def __init__(self, link: SerialLink):
         self.link = link
@@ -161,8 +165,9 @@ class PowerSupply:
 
 
 def drivers() -> list[type[PowerSupply]]:
+    from .owon import OwonSpe
     from .toellner import Toellner8952
-    return [Toellner8952]
+    return [Toellner8952, OwonSpe]
 
 
 def discover(opener=None, ports=None) -> tuple[PowerSupply, str] | None:
@@ -178,7 +183,7 @@ def discover(opener=None, ports=None) -> tuple[PowerSupply, str] | None:
             if driver.port_hints and not any(h.lower() in description.lower()
                                              for h in driver.port_hints):
                 continue
-            link = SerialLink(device, opener=opener)
+            link = SerialLink(device, opener=opener, baud=driver.baud)
             try:
                 idn = driver.identify(link)
             except Exception:
@@ -192,7 +197,7 @@ def discover(opener=None, ports=None) -> tuple[PowerSupply, str] | None:
 def connect(device: str, opener=None) -> tuple[PowerSupply, str] | None:
     """Reconnect to a known port — no probing of anything else."""
     for driver in drivers():
-        link = SerialLink(device, opener=opener)
+        link = SerialLink(device, opener=opener, baud=driver.baud)
         try:
             idn = driver.identify(link)
         except Exception:

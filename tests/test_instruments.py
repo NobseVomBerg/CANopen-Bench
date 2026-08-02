@@ -1,15 +1,17 @@
-"""Bench instruments: the power-supply layer and the Töllner driver.
+"""Bench instruments: the power-supply layer, the Töllner and the OWON driver.
 
 No hardware and no pyserial: a fake port answers the way the real unit
-does. The sample strings are the ones a Töllner 8952 actually returned —
-that is the whole point of having them here, since a driver written
-against an imagined answer format is a driver nobody has tested.
+does. The sample strings are the ones a Töllner 8952 and a Kiprim DC605S
+actually returned — that is the whole point of having them here, since a
+driver written against an imagined answer format is a driver nobody has
+tested.
 """
 from __future__ import annotations
 
 import pytest
 
 from canopen_bench.instruments import InstrumentError, SerialLink, connect, discover
+from canopen_bench.instruments.owon import OwonSpe
 from canopen_bench.instruments.toellner import Toellner8952, parse_settings
 
 IDN = "TOELLNER,TOE8952-60,102625,3.63-3.62"
@@ -358,3 +360,106 @@ def test_a_unit_that_answers_the_short_form_is_left_in_it():
     psu.state()
     assert psu.dialect == "short"
     assert not any("SYST:LANG" in w for w in port.written)
+
+
+# -- the OWON driver --------------------------------------------------------
+#
+# Every string below is what a Kiprim DC605S answered on COM10.
+
+OWON_IDN = "KIPRIM,DC605S,23090539,FV:V4.1.0"
+OWON_ANSWERS = {
+    "*IDN?": OWON_IDN,
+    "VOLT?": "57.400",
+    "CURR?": "2.000",
+    "VOLT:LIM?": "62.000",
+    "CURR:LIM?": "5.200",
+    "OUTP?": "ON",
+    "MEAS:ALL:INFO?": "57.430,0.059,3.390,OFF,OFF,OFF,1",
+}
+
+
+def owon_for(answers: dict[str, str] | None = None):
+    port = FakePort(answers if answers is not None else dict(OWON_ANSWERS))
+    return OwonSpe(SerialLink("COM10", opener=opener_for(port))), port
+
+
+def test_identify_accepts_every_badge_on_the_same_firmware():
+    for idn in (OWON_IDN, "OWON,P4305,1715040,FV:V1.0.2"):
+        link = SerialLink("COM10", opener=opener_for(FakePort({"*IDN?": idn})))
+        assert OwonSpe.identify(link) == idn
+
+
+def test_identify_reads_the_vendor_field_not_the_whole_line():
+    """A model number containing the vendor name of another make is not
+    that make — the first comma-separated field is the badge."""
+    link = SerialLink("COM10", opener=opener_for(FakePort({"*IDN?": "ACME,OWON-CLONE,1,1"})))
+    assert OwonSpe.identify(link) is None
+
+
+def test_state_reads_settings_measurements_and_limits():
+    psu, _ = owon_for()
+    st = psu.state()
+    assert (st.model, st.serial, st.firmware) == ("DC605S", "23090539", "FV:V4.1.0")
+    assert st.output is True
+    assert len(st.channels) == 1
+    ch = st.channels[0]
+    assert (ch.volt, ch.curr) == (57.4, 2.0)              # the settings
+    assert (ch.meas_volt, ch.meas_curr) == (57.43, 0.059)  # what the terminals do
+    assert ch.limit == 62.0
+
+
+def test_the_measurement_is_never_the_setting():
+    """The point of MEAS:ALL:INFO? — the chained ":MEAS:VOLT?;CURR?" gives
+    2.000 here, which is the current setting wearing the wrong label."""
+    psu, _ = owon_for()
+    ch = psu.state().channels[0]
+    assert ch.meas_curr != ch.curr
+
+
+def test_the_unnamed_tail_is_kept_as_text_not_given_labels():
+    psu, _ = owon_for()
+    ch = psu.state().channels[0]
+    assert ch.extra["MEAS:ALL:INFO?"] == "OFF,OFF,OFF,1"
+    assert ch.extra["POWER"] == "3.390"
+
+
+def test_a_refused_query_is_not_read_as_a_value():
+    """This unit answers the literal "ERR", which float() must not see as
+    an answer — "did it reply" and "is that a number" differ here."""
+    answers = dict(OWON_ANSWERS, **{"VOLT:LIM?": "ERR", "CURR:LIM?": "ERR"})
+    psu, _ = owon_for(answers)
+    ch = psu.state().channels[0]
+    assert ch.limit is None
+    assert "CURR:LIM" not in ch.extra
+
+
+def test_an_output_the_unit_does_not_name_stays_unknown():
+    psu, _ = owon_for(dict(OWON_ANSWERS, **{"OUTP?": "ERR"}))
+    assert psu.state().output is None
+    psu, _ = owon_for(dict(OWON_ANSWERS, **{"OUTP?": "OFF"}))
+    assert psu.state().output is False
+
+
+def test_the_write_commands_are_the_documented_ones():
+    psu, port = owon_for()
+    psu.set_voltage(1, 24)
+    psu.set_current(1, 1.5)
+    psu.set_output(True)
+    psu.set_output(False)
+    assert port.written == ["VOLT 24.000", "CURR 1.500", "OUTP ON", "OUTP OFF"]
+
+
+# -- the port is opened at the driver's own baud rate -----------------------
+
+def test_each_driver_opens_its_port_at_its_own_baud():
+    """A supply answering at 115200 says nothing at 9600, and discovery
+    cannot tell that apart from "not this instrument"."""
+    seen: list[int] = []
+
+    def opener(device, baud, timeout):
+        seen.append(baud)
+        return FakePort(OWON_ANSWERS if baud == OwonSpe.baud else {})
+
+    found = connect("COM10", opener=opener)
+    assert found is not None
+    assert OwonSpe.baud in seen and OwonSpe.baud == 115200
