@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import json
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -3133,15 +3134,27 @@ def test_workspace_switch_path_traversal_reduced_to_basename(ws_bench):
     assert cb.calls == ["B"]
 
 
-def test_workspace_switch_backslash_name_is_not_a_posix_separator(ws_bench):
-    # On POSIX, "\" is a legal filename character rather than a path
-    # separator, so Path(...).name leaves it untouched — this literal
-    # string is simply not a known workspace and gets logged as unknown.
+def test_workspace_switch_backslash_name_cannot_leave_the_root(ws_bench):
+    """A backslash is a separator on one platform and an ordinary character
+    on the other, and the guard has to hold either way.
+
+    What must be true everywhere is that nothing with a separator or a
+    ".." in it reaches the callback — that is what reducing to a basename
+    is for. What differs is where "..\\..\\B" then lands: on Windows
+    Path(...).name gives "B", a workspace that exists, so the switch
+    happens; on POSIX the string survives whole, matches no workspace, and
+    is logged as unknown. Asserting only the POSIX half made this fail on
+    Windows for a behaviour that was never wrong.
+    """
     cb = _RecordingSwitch()
     ws_bench.on_workspace_switch = cb
     ws_bench.dispatch("workspace_switch", {"name": "..\\..\\B"})
-    assert cb.calls == []
-    assert "unknown workspace" in ws_bench.logs[-1]["msg"]
+    assert all("/" not in c and "\\" not in c and c != ".." for c in cb.calls)
+    if os.name == "nt":
+        assert cb.calls == ["B"]
+    else:
+        assert cb.calls == []
+        assert "unknown workspace" in ws_bench.logs[-1]["msg"]
 
 
 def test_workspace_actions_without_root_log_switching_disabled(bench):

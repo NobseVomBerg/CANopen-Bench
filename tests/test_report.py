@@ -7,6 +7,7 @@ which device, which step failed and why — rather than about markup.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -212,11 +213,20 @@ def test_the_summary_in_the_list_is_a_file_that_exists(tmp_path):
     assert (Path(bench.paths["res"]) / name).exists()
 
 
+#: a results folder the filesystem will refuse to create, which takes one
+#: string per platform: "/proc/nope" cannot be made on Linux and is an
+#: ordinary relative path on Windows, created without complaint, leaving
+#: the branch under test unreached. "|" is the mirror image — illegal in a
+#: Windows filename, perfectly legal in a POSIX one. Both raise OSError,
+#: which is what the writer catches.
+UNWRITABLE = "nope|results" if os.name == "nt" else "/proc/nope/results"
+
+
 def test_an_unwritable_results_folder_does_not_lose_the_run(tmp_path):
     """The verdicts are already on screen and in the log. A report that
     cannot be written is a line in the log, not a failed run."""
     bench = _bench(tmp_path)
-    bench.dispatch("set_path", {"which": "res", "value": "/proc/nope/results"})
+    bench.dispatch("set_path", {"which": "res", "value": UNWRITABLE})
     _run_all(bench)
     assert bench.results.get("0101") == "PASS"
     assert any("report not written" in row["msg"] for row in bench.logs)
@@ -382,7 +392,7 @@ def test_an_unwritable_results_folder_leaves_the_overview_alone(tmp_path):
     """Same contract as a single report: a folder that cannot be written
     to is a log line, not a crash, and the last good overview stays put."""
     bench = _bench_res(tmp_path)
-    bench.dispatch("set_path", {"which": "res", "value": "/proc/nope/results"})
+    bench.dispatch("set_path", {"which": "res", "value": UNWRITABLE})
     bench.dispatch("report_overview", {"days": 7})
     assert bench.snapshot()["tests"]["overview"] is None
     assert any("overview not written" in row["msg"] for row in bench.logs)
