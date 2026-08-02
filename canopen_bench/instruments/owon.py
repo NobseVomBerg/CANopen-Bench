@@ -48,6 +48,12 @@ second half of the chain is read as a plain ``CURR?``. So the chained
 form is never used here; ``MEAS:ALL:INFO?`` is the one that answers about
 the terminals.
 
+Everything here has been run against a Kiprim DC605S, reads and writes
+both: setting voltage and current is read back from the unit, and the
+output switching is confirmed by the measurement rather than by the
+unit's own ``OUTP?`` — 0.0 V off, 48.04 V on, which is the difference
+between a command the unit acknowledged and one it acted on.
+
 Undocumented but answered by this unit: ``SYST:VERS?`` and ``SYST:ERR?``
 (hex, ``0x0000`` when clear). Documented and deliberately not sent:
 ``SYST:REM`` and ``SYST:LOC``, which take the front panel away from
