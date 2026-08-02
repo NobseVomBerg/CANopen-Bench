@@ -17,6 +17,7 @@ committed headers, since the core ships the parser and never a header.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -79,11 +80,30 @@ def test_no_firmware_symbol_names_anywhere_in_the_repo():
     )
 
 
+def _published(pattern: str) -> list[str]:
+    """What git would carry for a pathspec: tracked, plus new and not ignored.
+
+    Asked of git rather than of the folder, because the folder holds more
+    than this repository publishes: the bench keeps its workspace inside
+    its own checkout (``data/``, gitignored) and installing a plugin there
+    puts that device's headers a few directories below the source. Real
+    files, none of them ours to answer for — and a walk reported every one
+    of them. New files stay in scope, so a header dropped in and not yet
+    committed is still caught, which is when catching it helps.
+    """
+    out = subprocess.run(["git", "-C", str(ROOT), "ls-files",
+                          "--cached", "--others", "--exclude-standard", "-z",
+                          "--", pattern],
+                         capture_output=True, text=True, check=False)
+    if out.returncode:
+        pytest.skip(f"not a git checkout: {out.stderr.strip()}")
+    return [name for name in out.stdout.split("\0") if name]
+
+
 def test_no_c_headers_are_committed():
     """Headers are a device's own source. The core ships the parser for
     them (canopen_bench/symbols.py) and never a header."""
-    headers = [p.relative_to(ROOT) for p in ROOT.rglob("*.h")
-               if ".git" not in p.parts and "node_modules" not in p.parts]
+    headers = _published("*.h")
     assert not headers, f"C headers belong in a plugin package, not here: {headers}"
 
 
