@@ -1210,3 +1210,43 @@ def test_the_run_order_follows_the_catalog_not_the_client(tc_bench):
     """The ids say which, never in what order — a list arriving shuffled
     must not shuffle the run."""
     assert _order_for(tc_bench, ["0005", "0002", "0001"]) == ["0001", "0002", "0005"]
+
+
+DUMP_TC = """\
+id: "0024"
+name: "the register state, written down"
+steps:
+  - mov: {to: R1, value: 12}
+  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - dump_registers: {note: "state before the write"}
+"""
+
+
+def test_dump_registers_puts_every_register_in_the_report(tc_bench):
+    """53 lines across 26 of the real cases ask for this. What they are
+    asking for is the register state at that point, in the report somebody
+    reads afterwards — so it goes in the step's own detail, all sixteen of
+    them whether the case has touched one or not. "R7 is missing" would be
+    a fact about the list rather than about the run."""
+    _add_tc(tc_bench, "TC0024_dump.yaml", DUMP_TC)
+    run_selected(tc_bench, {"0024"})
+    assert tc_bench.results == {"0024": "PASS"}
+
+    step = tc_bench._run_cases[0].steps[-1]
+    assert step.text == "dump registers"
+    assert step.note == "state before the write"
+    for name in (f"R{i}" for i in range(16)):
+        assert f"{name} = 0x" in step.detail, f"{name} missing from the dump"
+    # both bases, because a case mixes them: a screen id reads in hex, a
+    # count does not
+    assert "R1 = 0x0000000C (12)" in step.detail
+    assert "R3 = 0x00260001 (2490369)" in step.detail
+
+
+def test_dump_registers_needs_no_value_and_takes_no_stray_field():
+    from canopen_bench.testcases import parse_testcase
+
+    bare = 'id: "1"\nname: x\nsteps:\n  - dump_registers:\n'
+    assert parse_testcase(bare, "TC1_x.yaml").error is None
+    stray = 'id: "1"\nname: x\nsteps:\n  - dump_registers: {to: R1}\n'
+    assert "unknown field" in parse_testcase(stray, "TC1_x.yaml").error

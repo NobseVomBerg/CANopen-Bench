@@ -248,6 +248,7 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `psu` | `{ch?, volt?, curr?, output?}` | Labornetzteil stellen (`canopen_bench/instruments/`): Spannung/Strom eines Kanals (`ch`, Default 1) und/oder Ausgang `on`/`off`. Mindestens eines von `volt`/`curr`/`output`. Volt/Ampere dürfen Kommazahlen sein | kein Netzteil verbunden oder Fehler am Gerät → ERROR (Prüfmittel fehlt, das ist kein Fehlverhalten des DUT) |
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
 | `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
+| `dump_registers` | `dump_registers:` oder `{note}` | schreibt alle 16 Register mit ihrem Inhalt in den Report — hex und dezimal, weil ein Fall beides mischt. Ein Debug-Schritt, der nichts prüft und nichts am Bus tut | keine |
 | `expect_no_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?}` | prüft, dass **keine** passende EMCY kam — ohne Feld: gar keine. Wartet nicht: kein Warten beweist, dass nichts mehr kommt; geprüft wird dasselbe Fenster wie bei `expect_emcy`, also alles seit dem letzten `emcy_clear` | passende EMCY vorhanden → FAIL, mit ihren Feldern in der Begründung |
 | `expect_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. Mindestens eines von `code`, `mec`, `reg` ist Pflicht (s.u.) | keine passende EMCY → FAIL, mit dem, was stattdessen kam |
 

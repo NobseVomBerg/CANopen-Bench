@@ -17,7 +17,10 @@ from .values import base_of
 MANUAL_TIMEOUT_S = 120.0  # default confirmation window for `manual` steps
 MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
 
-REGISTERS = {f"R{i}" for i in range(16)}  # the predefined variables (v2)
+#: the predefined variables (v2), in the order a dump lists them — the
+#: set is for membership tests and has no order to lend
+REGISTER_ORDER = [f"R{i}" for i in range(16)]
+REGISTERS = set(REGISTER_ORDER)
 _BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send data
 #: $eObjIdx_Foo / $acme:eObjIdx_Foo — a symbol from the device's
 #: own headers (canopen_bench/symbols.py), substituted before validation
@@ -160,6 +163,11 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         return None  # value is ignored ("- end:")
     if key == "emcy_clear":
         return None  # value is ignored ("- emcy_clear:")
+    if key == "dump_registers":
+        # "- dump_registers:" on its own, or with a note saying why here
+        if isinstance(val, dict) and (unknown := set(val) - _NOTE):
+            return f"dump_registers: unknown field(s) {sorted(unknown)}"
+        return None
     if key in ("label", "jump", "jump_on_error"):
         return None if isinstance(val, str) and val else f"{key}: needs a name"
     if key == "ask":

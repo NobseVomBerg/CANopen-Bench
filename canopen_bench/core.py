@@ -388,6 +388,8 @@ def _step_text(key: str, val) -> str:
                 else _emcy_wanted(val).replace("expect_emcy ", "expect no EMCY "))
     if key == "emcy_clear":
         return "clear EMCY list"
+    if key == "dump_registers":
+        return "dump registers"
     if key in ("fail", "skip"):
         return f"{key}: {val}"
     if key == "end":
@@ -3583,6 +3585,16 @@ class Bench:
         if key == "emcy_clear":
             self.emcy_seen.clear()
             return "ok", ""
+        if key == "dump_registers":
+            # every register, whether the case has touched it or not: the
+            # point of asking is to see the state, and "R7 is missing"
+            # would be a fact about this list rather than about the run.
+            # Hex and decimal together, because a case mixes both — a
+            # screen id reads in hex, a count does not.
+            cells = [f"{name} = 0x{regs[name] & 0xFFFFFFFF:08X} ({regs[name]})"
+                     for name in tclib.REGISTER_ORDER]
+            rows = ["   ".join(cells[i:i + 4]) for i in range(0, len(cells), 4)]
+            return "ok", "<code>" + "<br>".join(rows) + "</code>"
         if key == "expect_emcy":
             match = self._emcy_matcher(val, regs, builtins)
             timeout = float(val.get("timeout", 1.0))
