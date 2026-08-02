@@ -936,6 +936,7 @@ function FilterChip({ label, value, options, empty, onPick }) {
 
 function TestsPage({ s, ui, setUi }) {
   const t = s.tests;
+  const resDir = (s.paths || {}).res || '';
   const filter = (ui.testFilter || '').toLowerCase();
   // "" means no restriction for both dropdowns. A case with no variants
   // declared runs on every variant, so it stays visible under any choice —
@@ -1070,9 +1071,10 @@ function TestsPage({ s, ui, setUi }) {
       <div style="font-weight:600;font-size:13px;margin-top:2px">Recent reports</div>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px">
         ${t.reports.map((rp) => html`
-          <span style="display:flex;justify-content:space-between;color:var(--mid)">${rp.file ? reportLink(rp.file) : html`<span>${rp.name}</span>`}<span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
+          <span style="display:flex;justify-content:space-between;color:var(--mid)">${rp.file ? reportLink(rp.file, resDir) : html`<span>${rp.name}</span>`}<span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
       </div>
-      <${OverviewBox} ov=${t.overview} />
+      <${ResultsPath} dir=${resDir} />
+      <${OverviewBox} ov=${t.overview} dir=${resDir} />
     </div>
   </div>`;
 }
@@ -1122,15 +1124,61 @@ function OperatorPrompt({ p }) {
 // promise the page does not keep, and the run it names is a file somebody
 // wants to read. The server hands the results folder out under one prefix
 // so the links inside a summary reach its per-case pages.
-const reportLink = (name) => html`
+//
+// The href stays http even though the file is usually on this very disk:
+// a browser refuses to follow a file:// link from an http page, so that
+// version of "no server needed" would be the dead link all over again —
+// and when the bench runs on another machine, a local path is simply the
+// wrong answer. The path goes in the tooltip instead, where it costs
+// nothing and answers "where is this thing when the bench is off".
+const reportLink = (name, dir) => html`
   <a href=${'/api/report/' + encodeURIComponent(name)} target="_blank" rel="noopener"
-    title="open ${name}"
+    title=${dir ? `${joinPath(dir, name)}\n\nopened here through the bench — the file itself needs no server` : 'open ' + name}
     style="color:var(--acc);text-decoration:underline;cursor:pointer">${name}</a>`;
+
+// Separator taken from the folder itself rather than from the browser:
+// the path was configured on the machine running the bench, and that is
+// not necessarily this one.
+const joinPath = (dir, name) =>
+  dir ? dir.replace(/[\\/]+$/, '') + (dir.includes('\\') ? '\\' : '/') + name : name;
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const ta = document.createElement('textarea');   // plain http on a LAN address
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } finally { ta.remove(); }
+  return Promise.resolve();
+}
+
+// Where the reports actually are. A run leaves standalone HTML behind —
+// relative links between the pages, one stylesheet beside them — so the
+// folder is all anyone needs to read a run back with the bench stopped.
+// Clicking copies it, because the next step is pasting it into a file
+// manager, not reading it out loud.
+function ResultsPath({ dir }) {
+  const [done, setDone] = useState(false);
+  if (!dir) return null;
+  // shortened from the left: the tail is the part that identifies the
+  // folder, and a wrapped absolute path costs three lines of a 300px panel
+  const short = dir.length > 36 ? '…' + dir.slice(-35) : dir;
+  return html`
+    <span class="hv-white" onClick=${() => copyText(dir).then(() => {
+      setDone(true);
+      setTimeout(() => setDone(false), 1400);
+    })}
+      title=${`${dir}\n\nclick to copy — the reports are ordinary files and open from this folder without the bench running`}
+      style="font:10px ${MONO};color:var(--faint);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      ${done ? '✓ path copied' : short}
+    </span>`;
+}
 
 // Across runs, by hardware variant. Written on request, not after every
 // run: it reads the whole results folder, and most runs are one more data
 // point in a picture nobody is looking at right now.
-function OverviewBox({ ov }) {
+function OverviewBox({ ov, dir }) {
   const [days, setDays] = useState(7);
   return html`
     <div style="font-weight:600;font-size:13px;margin-top:6px;display:flex;justify-content:space-between;align-items:baseline">
@@ -1149,7 +1197,7 @@ function OverviewBox({ ov }) {
       ${!ov && html`<span style="color:var(--faint)">not created yet — the file lands beside the reports</span>`}
       ${ov && html`
         <span style="display:flex;justify-content:space-between">
-          ${reportLink(ov.name)}
+          ${reportLink(ov.name, dir)}
           <span style="color:var(--faint);font:10.5px ${MONO}">${ov.runs} run${ov.runs === 1 ? '' : 's'} · ${ov.days} d</span>
         </span>
         ${ov.variants.length === 0 && html`<span style="color:var(--faint)">no runs in that window</span>`}

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -184,6 +185,27 @@ def test_the_written_report_names_the_device_and_the_failing_step(tmp_path):
     assert "DUT_ALPHA" in doc          # which device it ran against
     assert "expected" in doc           # why the step failed
     assert "resultNok" in doc
+
+
+def test_a_written_run_opens_without_the_bench(tmp_path):
+    """Every link a report makes is a bare file name, so a results folder
+    read straight from the disk still works: the summary reaches its case
+    pages and all of them find the stylesheet.
+
+    The bench serves these files while it runs, but it does not own them.
+    A run is looked at long after the tool that produced it was closed —
+    a report that needed a server to render would be a report nobody can
+    open on the machine it gets copied to.
+    """
+    bench = _bench(tmp_path)
+    bench.stop_on_err = False
+    _run_all(bench)
+    folder = Path(bench.paths["res"])
+    for path in folder.glob("*.html"):
+        for href in re.findall(r"href='([^']*)'", path.read_text(encoding="utf-8")):
+            assert "//" not in href and not href.startswith("/"), \
+                f"{path.name} links {href!r} — that needs a server"
+            assert (folder / href).exists(), f"{path.name} links {href!r}, which is not there"
 
 
 def test_the_run_puts_the_stylesheet_beside_the_reports(tmp_path):
