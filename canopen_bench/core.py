@@ -388,6 +388,8 @@ def _step_text(key: str, val) -> str:
                 else _emcy_wanted(val).replace("expect_emcy ", "expect no EMCY "))
     if key == "emcy_clear":
         return "clear EMCY list"
+    if key == "dump_registers":
+        return "dump registers"
     if key in ("fail", "skip"):
         return f"{key}: {val}"
     if key == "end":
@@ -464,6 +466,27 @@ def _emcy_wanted(val: dict) -> str:
 #: CiA 301 data types whose content is characters, not a number
 #: (VISIBLE_STRING, OCTET_STRING, UNICODE_STRING)
 _TEXT_TYPES = (0x09, 0x0A, 0x0B)
+
+
+def _in_base_of(value: object, like: object) -> str:
+    """The answer written in the base the expectation was written in.
+
+    A case asks in the base it wants to read back: `expect: 30` means the
+    answer belongs in decimal, `expect: "0x1E"` means hex. The old tool
+    worked that way and the cases were written against it — a tension in
+    counts is unreadable as hex, and a screen id is unreadable as anything
+    else. Without an expectation there is nothing to go on, so the answer
+    stays as the device sent it.
+    """
+    number = _as_int(value)
+    if number is None or like is None or isinstance(like, bool):
+        return str(value)
+    if isinstance(like, int):            # a YAML integer: decimal was meant
+        return str(number)
+    spelling = str(like).strip()[:2].lower()
+    if spelling == "0b":
+        return f"0b{number:b}"
+    return str(value)                    # hex, and that is how it arrived
 
 
 def _hex_to_text(value: object) -> str | None:
@@ -1227,7 +1250,7 @@ class Bench:
                 text += f"  ({name})"
         return text
 
-    def _value_note(self, idx: str, sub: str, value: object) -> str:
+    def _value_note(self, idx: str, sub: str, value: object, like: object = None) -> str:
         """A value as the report should show it: what came back, and what
         it means where the device's own headers say so."""
         fields = self._object_fields.get(f"{idx}:{sub}", [])
@@ -1243,7 +1266,7 @@ class Bench:
             text = _hex_to_text(value)
             if text is not None:
                 return f'"{text}"'
-        return str(value)
+        return _in_base_of(value, like)
 
     def _is_text_object(self, idx: str, sub: str) -> bool:
         """Whether the EDS declares this object as one of the string types."""
@@ -3403,12 +3426,21 @@ class Bench:
                 continue
             if status == "end":
                 break
-            if (status == "fail" and allow_continue and tc.on_fail == "continue"
-                    and key != "fail"):
+            if status == "fail" and allow_continue and tc.on_fail == "continue":
                 # the case says it wants to reach its own last steps even
                 # when something failed — that is where it puts the bench
                 # back. The failure is remembered, not forgiven: the first
                 # one is the verdict's reason, and jump_on_error can see it.
+                #
+                # An explicit `fail:` counts as one of those. It used to end
+                # the case on the grounds that somebody had written it on
+                # purpose — but what they wrote it into is an error branch,
+                # and cutting the case off there leaves the device wherever
+                # the failure found it. Observed: a case failed while the
+                # device was still booting, its closing wait never ran, and
+                # the next case failed on a device that had never left
+                # startup. A failure that spreads to the following case is
+                # worse than a case that runs a few more steps.
                 if not builtins.get("failed"):
                     builtins["failed"] = info or "step failed"
                 pc += 1
@@ -3558,7 +3590,8 @@ class Bench:
                 # what came back, on the passing path too: a report that
                 # only records failures cannot answer "what did it read
                 # last Tuesday", which is most of why anybody keeps them
-                info = f"Response: {self._value_note(index_s, sub_s, res.value)}"
+                info = "Response: " + self._value_note(
+                    index_s, sub_s, res.value, spec.get("expect"))
             return status, info
         if key == "psu":
             if self.psu is None:
@@ -3583,6 +3616,16 @@ class Bench:
         if key == "emcy_clear":
             self.emcy_seen.clear()
             return "ok", ""
+        if key == "dump_registers":
+            # every register, whether the case has touched it or not: the
+            # point of asking is to see the state, and "R7 is missing"
+            # would be a fact about this list rather than about the run.
+            # Hex and decimal together, because a case mixes both — a
+            # screen id reads in hex, a count does not.
+            cells = [f"{name} = 0x{regs[name] & 0xFFFFFFFF:08X} ({regs[name]})"
+                     for name in tclib.REGISTER_ORDER]
+            rows = ["   ".join(cells[i:i + 4]) for i in range(0, len(cells), 4)]
+            return "ok", "<code>" + "<br>".join(rows) + "</code>"
         if key == "expect_emcy":
             match = self._emcy_matcher(val, regs, builtins)
             timeout = float(val.get("timeout", 1.0))

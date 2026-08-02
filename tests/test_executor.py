@@ -798,27 +798,49 @@ def test_a_variant_matches_however_the_two_sides_spell_the_number(tmp_path):
 
 # -- on_fail: continue -------------------------------------------------------
 
-FAIL_STEP_STOPS_UNDER_CONTINUE_TC = """\
+FAIL_STEP_UNDER_CONTINUE_TC = """\
 id: "0050"
-name: "an explicit fail: step always stops the case, even under on_fail: continue"
+name: "a fail: step is a failure, not an exit"
 on_fail: continue
 steps:
   - fail: "first reason"
+  - log: "the cleanup after it still runs"
+"""
+
+FAIL_THEN_END_TC = """\
+id: "0051"
+name: "fail: then end: is how a case does stop there"
+on_fail: continue
+steps:
+  - fail: "first reason"
+  - end:
   - log: "should not run"
 """
 
 
-def test_explicit_fail_step_stops_even_under_on_fail_continue(tc_bench):
-    """on_fail: continue exists so a case that already failed can still
-    reach its own cleanup steps after a *checked* failure (a bad sdo_read).
-    An explicit `fail:` step is the case declaring the run over right there
-    — letting it fall through to `key != "fail"`'s absence meant a `fail:`
-    step became a no-op under on_fail: continue, and the step after it ran
-    anyway."""
-    _add_tc(tc_bench, "TC0050_fail_continue.yaml", FAIL_STEP_STOPS_UNDER_CONTINUE_TC)
+def test_a_fail_step_still_reaches_the_cleanup_after_it(tc_bench):
+    """A `fail:` used to end the case, on the grounds that somebody had
+    written it deliberately. What they write it into is an error branch,
+    and cutting the case off there leaves the device wherever the failure
+    found it: observed on real hardware, a case failed while the device was
+    still booting, its closing wait never ran, and the *next* case failed
+    on a device that had never left startup.
+
+    So it records the failure and carries on, like any other one. The
+    verdict is unchanged — a case that says fail: has failed."""
+    _add_tc(tc_bench, "TC0050_fail_continue.yaml", FAIL_STEP_UNDER_CONTINUE_TC)
     run_selected(tc_bench, {"0050"})
     assert tc_bench.results == {"0050": "FAIL"}
     assert any("first reason" in ln["msg"] for ln in tc_bench.logs)
+    assert any("cleanup after it still runs" in ln["msg"] for ln in tc_bench.logs)
+
+
+def test_a_case_that_really_must_stop_there_says_so(tc_bench):
+    """`end:` after the `fail:` — or `on_fail: stop` in the header. Both
+    are the case saying it, rather than every fail: meaning it."""
+    _add_tc(tc_bench, "TC0051_fail_end.yaml", FAIL_THEN_END_TC)
+    run_selected(tc_bench, {"0051"})
+    assert tc_bench.results == {"0051": "FAIL"}
     assert not any("should not run" in ln["msg"] for ln in tc_bench.logs)
 
 
@@ -1210,3 +1232,70 @@ def test_the_run_order_follows_the_catalog_not_the_client(tc_bench):
     """The ids say which, never in what order — a list arriving shuffled
     must not shuffle the run."""
     assert _order_for(tc_bench, ["0005", "0002", "0001"]) == ["0001", "0002", "0005"]
+
+
+DUMP_TC = """\
+id: "0024"
+name: "the register state, written down"
+steps:
+  - mov: {to: R1, value: 12}
+  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - dump_registers: {note: "state before the write"}
+"""
+
+
+def test_dump_registers_puts_every_register_in_the_report(tc_bench):
+    """53 lines across 26 of the real cases ask for this. What they are
+    asking for is the register state at that point, in the report somebody
+    reads afterwards — so it goes in the step's own detail, all sixteen of
+    them whether the case has touched one or not. "R7 is missing" would be
+    a fact about the list rather than about the run."""
+    _add_tc(tc_bench, "TC0024_dump.yaml", DUMP_TC)
+    run_selected(tc_bench, {"0024"})
+    assert tc_bench.results == {"0024": "PASS"}
+
+    step = tc_bench._run_cases[0].steps[-1]
+    assert step.text == "dump registers"
+    assert step.note == "state before the write"
+    for name in (f"R{i}" for i in range(16)):
+        assert f"{name} = 0x" in step.detail, f"{name} missing from the dump"
+    # both bases, because a case mixes them: a screen id reads in hex, a
+    # count does not
+    assert "R1 = 0x0000000C (12)" in step.detail
+    assert "R3 = 0x00260001 (2490369)" in step.detail
+
+
+def test_dump_registers_needs_no_value_and_takes_no_stray_field():
+    from canopen_bench.testcases import parse_testcase
+
+    bare = 'id: "1"\nname: x\nsteps:\n  - dump_registers:\n'
+    assert parse_testcase(bare, "TC1_x.yaml").error is None
+    stray = 'id: "1"\nname: x\nsteps:\n  - dump_registers: {to: R1}\n'
+    assert "unknown field" in parse_testcase(stray, "TC1_x.yaml").error
+
+
+BASE_TC = """\
+id: "0025"
+name: "the answer in the base it was asked in"
+steps:
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: 2490369, note: "decimal"}
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001", note: "hex"}
+  - sdo_read: {index: "0x2040", sub: "0x01", note: "no expectation"}
+"""
+
+
+def test_the_answer_comes_back_in_the_base_it_was_asked_in(tc_bench):
+    """A case asks in the base it wants to read: a tension in counts is
+    unreadable as hex, a screen id is unreadable as anything else. The old
+    tool worked that way and the cases were written against it — the
+    expectation's own spelling says which, and the converter keeps it
+    (decimal becomes a YAML integer, hex stays a "0x…" string)."""
+    _add_tc(tc_bench, "TC0025_base.yaml", BASE_TC)
+    run_selected(tc_bench, {"0025"})
+    assert tc_bench.results == {"0025": "PASS"}
+
+    decimal, hexed, plain = tc_bench._run_cases[0].steps[:3]
+    assert decimal.detail == "Response: 2490369", decimal.detail
+    assert hexed.detail == "Response: 0x00260001", hexed.detail
+    # nothing to go on, so it stays as the device sent it
+    assert plain.detail == "Response: 0x00260001", plain.detail
