@@ -1203,6 +1203,35 @@ def test_eds_remove(bench):
     assert "dut_beta_v7.eds" not in {e["file"] for e in bench.db.eds_list()}
 
 
+def test_eds_list_shows_only_rows_whose_file_is_there(bench):
+    """A plugin seeds the profiles of a whole device family, so most rows point
+    at files nobody has dropped in yet. Those are pre-configuration, not
+    devices to look at, and listing them invites the question which are real."""
+    assert "dut_beta_v7.eds" in {e["file"] for e in bench.db.eds_list()}
+    assert "dut_beta_v7.eds" not in {e["file"] for e in bench.snapshot()["eds"]["files"]}
+
+    bench.db.eds_write_file("dut_beta_v7.eds", SEED_EDS)
+    shown = bench.snapshot()["eds"]["files"]
+    entry = next(e for e in shown if e["file"] == "dut_beta_v7.eds")
+    # hidden, not dropped: the row comes back with what the seed configured
+    assert entry["dev"] == "DUT_BETA" and entry["code"] == "DTB"
+
+
+def test_eds_conflict_ignores_rows_whose_file_is_missing(bench):
+    """Otherwise a visible file is marked as conflicting with one the list
+    does not show, and there is nothing the user can do about it."""
+    bench.db.eds_add("dut_alpha_twin.eds", "DUT_ALPHA", "0x4D2·0x1150", "DTT", True)
+    shown = bench.snapshot()["eds"]["files"]
+    assert "dut_alpha_twin.eds" not in {e["file"] for e in shown}
+    alpha = next(e for e in shown if e["file"] == "dut_alpha_v2.eds")
+    assert alpha["conflict"] == []
+
+    # with the file in place it is a real conflict and both rows say so
+    bench.db.eds_write_file("dut_alpha_twin.eds", SEED_EDS)
+    alpha = next(e for e in bench.snapshot()["eds"]["files"] if e["file"] == "dut_alpha_v2.eds")
+    assert alpha["conflict"] == ["dut_alpha_twin.eds"]
+
+
 def test_eds_set_commands_roundtrip(bench):
     commands = [{"key": "su", "label": "SuperUser", "badge": "SU"},
                 {"key": "w", "label": "W", "write": {"index": "0x2000", "sub": "00", "on": 1, "off": 0}}]
