@@ -131,9 +131,20 @@ findet das nächste.
 `stop` beendet den Fall beim ersten verfehlten Erwartungs-Schritt, für
 die Fälle, in denen danach ohnehin nichts mehr aussagekräftig ist.
 
-Ein explizites `fail:` beendet den Fall **immer** — es ist der Abbruch,
-den jemand hingeschrieben hat, kein verfehlter Vergleich. Technische
-Fehler (ERROR) brechen ebenfalls weiterhin ab: durch einen
+Ein explizites `fail:` ist dabei **ein Fehlschlag wie jeder andere** und
+kein Ausgang: es merkt sich den Grund und läuft weiter. Der Grund ist
+Erfahrung an echter Hardware — ein `fail:` steht in einem Fehlerzweig,
+und den Fall dort abzuschneiden lässt das Gerät stehen, wo der Fehler es
+angetroffen hat. Beobachtet: ein Fall scheiterte, während das Gerät noch
+bootete, sein abschließendes `wait` lief nie, und der **nächste** Fall
+scheiterte an einem Gerät, das den Startup nie verlassen hatte. Ein
+Fehlschlag, der auf den Folgefall übergreift, ist schlimmer als ein Fall,
+der noch ein paar Schritte weiterläuft.
+
+Soll ein Fall dort wirklich enden, sagt er es: `end:` hinter dem `fail:`,
+oder `on_fail: stop` im Kopf.
+
+Technische Fehler (ERROR) brechen weiterhin ab: durch einen
 Verbindungsverlust lässt sich nicht hindurchlaufen. Für `preconditions`
 gilt `on_fail` nicht — dort heißt Fehlschlag SKIP, und es gibt nichts
 rückgängig zu machen.
@@ -179,6 +190,21 @@ steht der Abort wie gehabt darunter.
 In `note` und `log` sind einfache Formatierungs-Tags erlaubt (`<b>`,
 `<i>`, `<u>`, `<em>`, `<strong>`, `<code>`, `<small>`, `<sub>`, `<sup>`,
 `<br>`, `<hr>`) — alles andere wird escaped.
+
+### Das Zahlensystem der Antwort
+
+Ein `sdo_read` zeigt seine Antwort im Report **in der Basis, in der die
+Erwartung geschrieben ist**:
+
+```yaml
+- sdo_read: {index: "0x2007", sub: "0x05", expect: 30}        # Response: 30
+- sdo_read: {index: "0x2007", sub: "0x05", expect: "0x1E"}    # Response: 0x0000001E
+```
+
+Ein Zähler oder eine Spannung liest sich dezimal, eine Screen-ID oder ein
+Bitfeld nur hexadezimal — und welches davon gemeint ist, weiß der Fall
+und sonst niemand. Ohne `expect` gibt es nichts abzuleiten, dann bleibt
+die Antwort so, wie das Gerät sie geschickt hat.
 
 ## Register und Werte (v2)
 
