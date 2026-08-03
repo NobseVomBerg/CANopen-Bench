@@ -19,5 +19,9 @@ def test_bench_aggregates_cpcusb_adapter_card(tmp_path):
     bench = Bench(Db(tmp_path / "bench.db"), plugins=[CpcUsbPlugin()])
     assert bench.adapter_cards[0]["key"] == "cpc"
     assert bench.adapter_cards[0]["label"] == "CPC-USB / ARM7"
-    # routable to the python-can interface the driver half registers
-    assert bench._hw_bus._backends["cpc"] == ("cpcusb", None)
+    # routable to the python-can interface the driver half registers. Asked
+    # by part, not as a whole tuple: how CanopenBus stores an entry is its
+    # own business (it grew a slot for backend keyword arguments), what this
+    # plugin promises is the interface name and the channel.
+    interface, channel, _ = bench._hw_bus._backends["cpc"]
+    assert (interface, channel) == ("cpcusb", None)
