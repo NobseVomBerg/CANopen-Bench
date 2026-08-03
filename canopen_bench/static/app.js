@@ -165,8 +165,15 @@ const panelShape = (d, fg) => {
     stroke=${ink} stroke-width=${d.w || 1} stroke-linecap="round" opacity=${op} style=${an} />`;
   if (d.t === 'poly') return html`<polygon points=${d.p.join(' ')} opacity=${op} style=${an}
     fill=${d.fill ? ink : 'none'} stroke=${ink} stroke-width=${d.w || 1} />`;
-  if (d.t === 'text') return html`<text x=${d.x} y=${d.y} fill=${ink} opacity=${op} style=${an}
-    font-size=${d.size || 9} font-family="IBM Plex Sans, sans-serif">${d.s}</text>`;
+  // "tl" squeezes the glyphs into exactly that width. A physical display
+  // prints its legends into fixed cells, and the panel can only match that
+  // if it can say so — font metrics are the browser's to pick, so a plugin
+  // laying out a row by guessing them lands differently on another machine.
+  if (d.t === 'text') {
+    const fit = d.tl ? { textLength: d.tl, lengthAdjust: 'spacingAndGlyphs' } : {};
+    return html`<text x=${d.x} y=${d.y} fill=${ink} opacity=${op} style=${an}
+      font-size=${d.size || 9} font-family="IBM Plex Sans, sans-serif" ...${fit}>${d.s}</text>`;
+  }
   return null;  // unknown primitive: skip it, never break the whole panel
 };
 
