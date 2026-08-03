@@ -536,6 +536,41 @@ def _write_value(val: dict, regs: dict, builtins: dict) -> str:
     return f"0x{v:0{size * 2}X}"
 
 
+def _frame_bytes(val: dict, regs: dict, builtins: dict) -> bytes | None:
+    """The payload a ``can_send`` puts on the wire, or None when it cannot
+    be built yet.
+
+    Same reason as ``_write_value``: the step line and the bus have to
+    come from one place. A frame's bytes are the whole content of the
+    step — the label only names a COB-ID — so a report that worked them
+    out separately could show a frame that was never sent.
+
+    None means the data needs an addressing provider that is not
+    installed; the executor turns that into the failure, and the step
+    line stays as it was written.
+    """
+    data = val["data"]
+    session = builtins.get("session")
+    if data == "$session":
+        return bytes(session) if session is not None else None
+    buf = bytearray()
+    for item in data:
+        if item == "$session":       # expands to the session identity bytes
+            if session is None:
+                return None
+            buf += session
+        else:
+            buf.append(_resolve(item, regs, builtins) & 0xFF)
+    return bytes(buf)
+
+
+def _frame_text(data: bytes) -> str:
+    """Payload bytes as the trace writes them — same spacing, same case,
+    same order — so a report line and a trace row can be read against
+    each other without transcribing either."""
+    return " ".join(f"{b:02X}" for b in data)
+
+
 def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
     """Ids that more than one file in the folder claims.
 
@@ -1233,11 +1268,19 @@ class Bench:
         builtin also shows what that came out as: "= R12 = 0x00007211".
         Otherwise the number that went on the wire appears nowhere on the
         step line, and a run a week old cannot say what it wrote.
+
+        A raw frame gets its payload for the same reason, and always: the
+        label is a COB-ID and nothing else, so without the bytes the step
+        line says a frame went out and never which one.
         """
         ext = self._step_types.get(key)
         if ext:
             return ext.label(val)
         text = _step_text(key, val)
+        if key == "can_send" and regs is not None and isinstance(val, dict):
+            data = _frame_bytes(val, regs, builtins or {})
+            if data:
+                text += f" = {_frame_text(data)}"
         if key == "sdo_write" and regs is not None and isinstance(val, dict):
             actual = _write_value(val, regs, builtins or {})
             # only when it says something the value in the line does not —
@@ -3543,21 +3586,10 @@ class Bench:
             return "ok", ""
         if key == "can_send":
             cob = _resolve(val["cob"], regs, builtins)
-            uses_session = val["data"] == "$session" or (
-                isinstance(val["data"], list) and "$session" in val["data"])
-            if uses_session and builtins.get("session") is None:
+            data = _frame_bytes(val, regs, builtins)
+            if data is None:
                 return "fail", ("$session unavailable — no addressing provider "
                                 "installed (vendor plugin)")
-            if val["data"] == "$session":
-                data = bytes(builtins["session"])
-            else:
-                buf = bytearray()
-                for item in val["data"]:
-                    if item == "$session":  # expands to the session identity bytes
-                        buf += builtins["session"]
-                    else:
-                        buf.append(_resolve(item, regs, builtins) & 0xFF)
-                data = bytes(buf)
             await asyncio.to_thread(bus.send_raw, cob, data)
             return "ok", ""
         if key == "lss_assign":

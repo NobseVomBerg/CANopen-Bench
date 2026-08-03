@@ -1154,6 +1154,50 @@ def test_a_write_that_worked_says_it_once(tc_bench):
     assert from_register.detail == ""
 
 
+FRAME_TC = """\
+id: "0023"
+name: "what a raw frame puts in the report"
+steps:
+  - mov: {to: R1, value: "0x40"}
+  - can_send: {cob: "0x3FF", data: ["0x01", 0, 0, 0, 0, R1, "0x01"], note: "a PDO"}
+  - can_send: {cob: "0x80", data: [], note: "SYNC"}
+"""
+
+
+def test_a_raw_frame_says_which_bytes_went_out(tc_bench):
+    """"send frame 0x3FF" names a COB-ID and nothing else — the payload is
+    the entire content of the step, and it appeared nowhere in the report.
+    Reading it back against the trace was the only way to tell what the
+    device was actually told, which is the wrong amount of work for the
+    question "what did we send".
+
+    Spelled the way the trace spells it, so the two lines can be compared
+    without transcribing either. A frame with no payload (SYNC) has
+    nothing to add, and adds nothing.
+    """
+    _add_tc(tc_bench, "TC0023_frame.yaml", FRAME_TC)
+    run_selected(tc_bench, {"0023"})
+    assert tc_bench.results == {"0023": "PASS"}
+    steps = tc_bench._run_cases[0].steps
+
+    assert steps[1].text == "send frame 0x3FF = 01 00 00 00 00 40 01", steps[1].text
+    assert steps[2].text == "send frame 0x80", steps[2].text
+
+
+def test_the_frame_in_the_report_is_the_frame_on_the_bus(tc_bench):
+    """One source for both, so the report cannot name a frame the device
+    never saw. The register in the payload is resolved once."""
+    _add_tc(tc_bench, "TC0023_frame.yaml", FRAME_TC)
+    run_selected(tc_bench, {"0023"})
+    # straight off the bus, not out of the snapshot: the tick loop that
+    # normally drains it does not run in a test
+    sent = [f for f in tc_bench.bus.poll_frames(4096)
+            if f.cob_id == "0x3FF" and f.direction == "TX"]
+    assert sent, "the frame never reached the bus"
+    line = tc_bench._run_cases[0].steps[1].text
+    assert line.endswith(sent[-1].data), (line, sent[-1].data)
+
+
 def test_a_write_that_failed_still_says_why(tc_bench):
     """The line is dropped because it was empty of news, not because a
     failing write should go unexplained."""
