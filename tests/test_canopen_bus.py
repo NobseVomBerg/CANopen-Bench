@@ -274,3 +274,70 @@ def test_disconnect_survives_stored_notifier_exception(master):
     master.network.notifier.exception = can.CanOperationError("stale rx error")
     master.disconnect()  # must not raise
     assert master.network is None
+
+
+# -- adapter backend mapping ------------------------------------------------
+#
+# Everything below is wiring, not protocol: which python-can backend a card
+# resolves to, and what reaches it. For adapters without hardware here that
+# is the whole of what can honestly be tested — it proves the arguments are
+# handed over, not that a device answers.
+
+def _connect_kwargs(monkeypatch, adapter: str, bitrate: int = 500) -> dict:
+    """Call `connect` with canopen's own connect stubbed out, and report the
+    keyword arguments python-can would have been handed."""
+    seen: dict = {}
+
+    def spy(self, *args, **kwargs):
+        seen.update(kwargs)
+        self.bus = object()  # enough for the teardown path
+
+    monkeypatch.setattr(canopen.Network, "connect", spy)
+    monkeypatch.setattr(cb, "_shutdown_network", lambda network: None)
+    bus = CanopenBus()
+    bus.connect(adapter, bitrate)
+    return seen
+
+
+def test_vector_card_resolves_to_the_python_can_vector_backend(monkeypatch):
+    kwargs = _connect_kwargs(monkeypatch, "vector", 250)
+    assert kwargs["interface"] == "vector"
+    assert kwargs["bitrate"] == 250_000
+    assert kwargs["channel"] == 0
+
+
+def test_vector_addresses_the_hardware_channel_directly(monkeypatch):
+    """python-can defaults to app_name="CANalyzer", which resolves the
+    channel through an application entry in Vector's Hardware Config. A
+    bench that only has the free XL driver has no such entry, so the
+    channel must be addressed by its global index instead."""
+    assert _connect_kwargs(monkeypatch, "vector")["app_name"] is None
+
+
+def test_adapters_without_extra_arguments_pass_none(monkeypatch):
+    kwargs = _connect_kwargs(monkeypatch, "ixxat")
+    assert kwargs == {"interface": "ixxat", "bitrate": 500_000, "channel": 0}
+
+
+def test_plugin_backend_pairs_still_work(monkeypatch):
+    """`adapter_backends` has always returned (interface, channel) pairs.
+    The third element is optional; a plugin written before it existed must
+    not need touching."""
+    seen: dict = {}
+    monkeypatch.setattr(canopen.Network, "connect",
+                        lambda self, *a, **kw: (seen.update(kw), setattr(self, "bus", object())))
+    monkeypatch.setattr(cb, "_shutdown_network", lambda network: None)
+    bus = CanopenBus(extra_backends={"legacy": ("virtual", None)})
+    bus.connect("legacy", 500)
+    assert seen == {"interface": "virtual", "bitrate": 500_000}
+
+
+def test_plugin_backend_may_carry_extra_arguments(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(canopen.Network, "connect",
+                        lambda self, *a, **kw: (seen.update(kw), setattr(self, "bus", object())))
+    monkeypatch.setattr(cb, "_shutdown_network", lambda network: None)
+    bus = CanopenBus(extra_backends={"fancy": ("virtual", 2, {"receive_own_messages": True})})
+    bus.connect("fancy", 500)
+    assert seen["receive_own_messages"] is True
+    assert seen["channel"] == 2
