@@ -70,19 +70,10 @@ class BusInterface(ABC):
         Backs the test-step primitive `wait_for: {heartbeat: ...}`."""
         return "?"
 
-    # -- raw frames (format-v2 primitives can_send / wait_for cob) -----------
+    # -- raw frames (format-v2 primitive can_send) --------------------------
     def send_raw(self, cob: int, data: bytes) -> None:
         """Broadcast a raw CAN frame (e.g. the button-teach 0x780/0x781)."""
 
-    def wait_frame(self, cobs: list[tuple[int, bytes]], timeout: float) -> int | None:
-        """Wait for a frame matching any of the given (COB-ID, data-prefix)
-        pairs — races all of them concurrently, not one after another, so
-        a step waiting on "the expected reply" and "an out-of-band signal"
-        (e.g. addressing's per-node confirm vs. an Addr-End from any
-        device) can't miss the second one while blocked on the first.
-        Returns the index of whichever pair matched first, or None on
-        timeout. Default: not supported."""
-        return None
 
     # -- standard addressing (format-v2 primitive lss_assign) ----------------
     def lss_assign(self, count: int) -> int:

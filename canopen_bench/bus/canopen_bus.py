@@ -348,31 +348,6 @@ class CanopenBus(BusInterface):
         except (can.CanError, OSError, RuntimeError) as exc:
             self._connection_lost(exc)
 
-    def wait_frame(self, cobs: list[tuple[int, bytes]], timeout: float) -> int | None:
-        net = self.network
-        if net is None:
-            return None
-        got = threading.Event()
-        matched: list[int] = []  # single winner; a plain list append is enough
-
-        def make_handler(idx: int, prefix: bytes) -> Callable[[int, bytearray, float], None]:
-            def on_frame(can_id: int, data: bytearray, timestamp: float) -> None:
-                if bytes(data).startswith(prefix):
-                    if not matched:
-                        matched.append(idx)
-                    got.set()
-            return on_frame
-
-        subs = [(cob, make_handler(i, prefix)) for i, (cob, prefix) in enumerate(cobs)]
-        for cob, handler in subs:
-            net.subscribe(cob, handler)
-        try:
-            got.wait(timeout)
-        finally:
-            for cob, handler in subs:
-                net.unsubscribe(cob, handler)
-        return matched[0] if matched else None
-
     def sdo_read(self, node: int, index: str, sub: str) -> SdoResult:
         net = self.network
         if net is None:

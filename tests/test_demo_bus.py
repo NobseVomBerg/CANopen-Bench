@@ -1,45 +1,43 @@
-"""EdsDemoBus.wait_frame — races multiple (COB-ID, data-prefix) pairs in a
-single wait so a step can't miss an out-of-band signal (e.g. addressing's
-sender-agnostic Addr-End) while blocked on its primary COB. No Bench/plugin
-machinery needed here — EdsDemoBus only needs a Db to exist.
+"""EdsDemoBus device-side frames reach the trace.
+
+Boot-ups and vendor-hook replies used to sit in a queue that only
+``wait_frame`` read, so they never showed up in the trace at all. They now
+leave through ``poll_frames`` like any other received frame: demo mode and
+real hardware feed the same record, which is where a ``wait_for`` step
+reads. No Bench/plugin machinery needed here — EdsDemoBus only needs a Db.
 """
 from __future__ import annotations
-
-import time
 
 from canopen_bench.bus.demo import EdsDemoBus
 from canopen_bench.db import Db
 
 
 def _bus(tmp_path) -> EdsDemoBus:
-    return EdsDemoBus(Db(tmp_path / "wf.db"))
+    bus = EdsDemoBus(Db(tmp_path / "wf.db"))
+    bus.connect("demo", 500)
+    return bus
 
 
-def test_wait_frame_races_and_returns_index_of_second_pair_when_it_arrives(tmp_path):
+def test_queue_raw_surfaces_as_a_received_frame(tmp_path):
     bus = _bus(tmp_path)
-    bus.queue_raw(0x783, b"\x02")  # only the second raced pair matches
-    idx = bus.wait_frame([(0x700, b"\x01"), (0x783, b"\x02")], timeout=1.0)
-    assert idx == 1
+    bus.queue_raw(0x783, b"\x02\xAA")
+    frames = bus.poll_frames(8)
+    assert [(f.direction, f.cob_id, f.data) for f in frames] == [("RX", "0x783", "02 AA")]
 
 
-def test_wait_frame_same_cob_different_prefix_picks_matching_prefix(tmp_path):
-    bus = _bus(tmp_path)
-    bus.queue_raw(0x783, b"\x02\xAA")  # matches pair 1's prefix, not pair 0's
-    idx = bus.wait_frame([(0x783, b"\x01"), (0x783, b"\x02")], timeout=1.0)
-    assert idx == 1
-
-
-def test_wait_frame_no_match_times_out_and_returns_none(tmp_path):
-    bus = _bus(tmp_path)
-    start = time.monotonic()
-    idx = bus.wait_frame([(0x700, b"\x01"), (0x783, b"\x02")], timeout=0.3)
-    elapsed = time.monotonic() - start
-    assert idx is None
-    assert elapsed < 0.6  # roughly the requested timeout, not much more
-
-
-def test_wait_frame_single_pair_list_still_works(tmp_path):
+def test_queue_raw_frame_is_handed_over_once(tmp_path):
+    """The queue is drained, not re-read: a second poll must not repeat the
+    frame, or one arrival would be counted as several."""
     bus = _bus(tmp_path)
     bus.queue_raw(0x700, b"\x01")
-    idx = bus.wait_frame([(0x700, b"\x01")], timeout=1.0)
-    assert idx == 0
+    assert len(bus.poll_frames(8)) == 1
+    assert bus.poll_frames(8) == []
+
+
+def test_send_raw_surfaces_as_a_sent_frame(tmp_path):
+    """Our own send is mirrored into the trace as TX — visible to the
+    operator, and distinguishable from a device's answer."""
+    bus = _bus(tmp_path)
+    bus.send_raw(0x780, b"\x01")
+    frames = bus.poll_frames(8)
+    assert [(f.direction, f.cob_id) for f in frames] == [("TX", "0x780")]

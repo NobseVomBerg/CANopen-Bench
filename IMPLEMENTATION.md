@@ -98,7 +98,13 @@ light + dark theme (toggle in the header, persisted per browser):
   stop-on-error and report history.
 - **SWDL** — firmware library, SDO-serial or PDO-parallel download to the
   devices selected in the Devices box, per-device progress.
-- **Trace** — live CAN frame monitor with decode column, RX and own TX
+- **Trace** — the record of what the bus carried, and a view onto it.
+  Recording runs whenever the interface is connected: test steps read it
+  (`wait_for` with a `cob` matches against it via
+  `Bench._match_traced`), so pausing the panel or opening a saved capture
+  only changes what is *shown* — `Bench._trace_view` picks the source
+  while `Bench.trace` keeps filling underneath. The panel itself is a
+  live CAN frame monitor with decode column, RX and own TX
   frames, bus timestamps, class filters (NMT/SDO/PDO/EMCY/HB),
   pause/clear, plus a device filter (all / selected devices, broadcasts
   always visible) and an ms/µs timestamp toggle. Filtering happens

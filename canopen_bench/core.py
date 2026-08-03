@@ -79,6 +79,17 @@ def now_us_str() -> str:
     return datetime.now().strftime("%H:%M:%S.%f")
 
 
+def _tod_seconds(stamp: str) -> float | None:
+    """Trace timestamp "HH:MM:SS.ffffff" -> seconds since midnight, None if
+    it does not parse. Rows carry a time of day rather than a date, so age
+    is compared within the day and the caller handles the wrap."""
+    try:
+        h, m, s = stamp.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    except (ValueError, AttributeError):
+        return None
+
+
 def trace_node(cob: str) -> int | None:
     """Node-id a COB-ID addresses; None for broadcast/unknown functions
     (NMT, SYNC, teach frames) — those always stay visible under the
@@ -819,11 +830,22 @@ class Bench:
         self.swdl_run = False
         self.swdl_done = False
         self.swdl_prog: dict[int, float] = {}
-        self.trace: list[dict] = []  # fills once connected
-        self.trace_paused = False
+        #: The record of what the bus carried. Fills whenever the interface
+        #: is connected and is never emptied or replaced by the trace panel:
+        #: test steps read it (`wait_for` with a `cob`), so a frame missing
+        #: from it is a step that cannot pass.
+        self.trace: list[dict] = []
+        self.trace_paused = False  # freezes the *view*; recording continues
         self.trace_hide: set[str] = set()  # classes hidden by the trace filter
         self.trace_dev_filter = False  # True = only frames of the selected devices
         self._trace_counts: dict[tuple[str, int | None], int] = {}  # rows per (class, node)
+        #: What stands between the panel and the live record, as
+        #: (rows, counts): an opened capture file — a second source, not a
+        #: halted first one — or a pause, which is the live rows held still
+        #: while the record goes on filling underneath.
+        self._trace_import: tuple[list[dict], dict] | None = None
+        self._trace_freeze: tuple[list[dict], dict] | None = None
+        self._tick_rows: list[dict] = []  # drained since the last tick, for the statistics
         self.bus_load = 0.0  # rolling %, estimated from traced frames
         self.err_frames = 0  # error frames seen since connect
         self._load_win: deque[tuple[float, int]] = deque()  # (monotonic, bits) per tick
@@ -1116,37 +1138,57 @@ class Bench:
                 continue
             last_error = ""
 
+    def _drain_frames(self, max_frames: int = 4096) -> None:
+        """Move what the interface has received into the trace.
+
+        The tick calls this, and so does any test step waiting for a frame:
+        the record has to be current when it is read, not up to one tick
+        stale. Draining twice is harmless — whoever gets there first empties
+        the queue, and the rows land in the trace exactly once either way.
+
+        Recording does not ask whether the trace panel is paused. A pause
+        belongs to the view (`_trace_view`); the record underneath is what
+        `wait_for` and the statistics read, and a gap in it cannot be
+        recovered afterwards.
+        """
+        frames = self.bus.poll_frames(max_frames)
+        if not frames:
+            return
+        rows = [{"time": f.time or now_us_str(), "dir": f.direction,
+                 "cob": f.cob_id, "len": f.length, "data": f.data,
+                 "dec": f.decoded, "flag": f.flag,
+                 "cls": trace_class(f.decoded),
+                 "node": trace_node(f.cob_id),
+                 "obj": "", "val": ""} for f in frames]
+        for row in rows:
+            self._annotate_sdo(row)
+            self._annotate_pdo(row)
+            self._annotate_emcy(row)
+            # last: a matching vendor decoder overrides generic decode
+            self._annotate_plugin(row)
+            if row["cls"] == "HB" and row["node"] is not None:
+                self._hb_seen[row["node"]] = time.monotonic()
+            key = (row["cls"], row["node"])
+            self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
+        self.trace += rows
+        self._tick_rows += rows
+        cut = len(self.trace) - TRACE_CAP
+        if cut > 0:
+            for old in self.trace[:cut]:
+                self._trace_counts[(old["cls"], old["node"])] -= 1
+            del self.trace[:cut]
+
     async def _tick_once(self) -> None:
         dirty = False
-        if self.connected and not self.trace_paused:
-            frames = self.bus.poll_frames(4096)
-            rows = [{"time": f.time or now_us_str(), "dir": f.direction,
-                     "cob": f.cob_id, "len": f.length, "data": f.data,
-                     "dec": f.decoded, "flag": f.flag,
-                     "cls": trace_class(f.decoded),
-                     "node": trace_node(f.cob_id),
-                     "obj": "", "val": ""} for f in frames]
-            for row in rows:
-                self._annotate_sdo(row)
-                self._annotate_pdo(row)
-                self._annotate_emcy(row)
-                # last: a matching vendor decoder overrides generic decode
-                self._annotate_plugin(row)
-                if row["cls"] == "HB" and row["node"] is not None:
-                    self._hb_seen[row["node"]] = time.monotonic()
-                key = (row["cls"], row["node"])
-                self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
+        if self.connected:
+            self._drain_frames()
             # also with zero rows: load, rate window and history must
-            # decay on an idle bus instead of freezing at the last value
+            # decay on an idle bus instead of freezing at the last value.
+            # Rows a waiting test step drained are counted here, not there,
+            # so who did the draining cannot skew the load figures.
+            rows, self._tick_rows = self._tick_rows, []
             self._update_bus_stats(rows)
             self._check_heartbeats()
-            if rows:
-                self.trace += rows
-                cut = len(self.trace) - TRACE_CAP
-                if cut > 0:
-                    for old in self.trace[:cut]:
-                        self._trace_counts[(old["cls"], old["node"])] -= 1
-                    del self.trace[:cut]
             dirty = True  # stats/load move every tick while draining
         if self.running and self._run_mode == "sim":
             self._run_step()
@@ -3727,17 +3769,30 @@ class Bench:
                          bytes.fromhex(str(d).replace(" ", "")) if d else b"")
                         for c, d in zip(cob_list, data_list, strict=True)]
                 into = val.get("into")
-                while loop.time() < deadline:
+                # The window reaches as far back as the step is prepared to
+                # wait forward: a step willing to give a device 0.5 s will
+                # equally take an answer that came 0.5 s early, and there is
+                # no second number to get wrong. Measured from the step's
+                # start, so the window does not slide while it waits.
+                started = loop.time()
+                while True:
                     if should_stop():
                         return "error", "aborted"
                     if not self.connected:
                         return "error", "connection lost"
-                    slice_s = max(0.05, min(0.5, deadline - loop.time()))
-                    idx = await asyncio.to_thread(bus.wait_frame, pairs, slice_s)
+                    # keep the record current instead of waiting out the
+                    # tick — at TICK_S the answer could otherwise arrive in
+                    # the trace only after this step has already timed out
+                    self._drain_frames()
+                    idx = self._match_traced(pairs, timeout + (loop.time() - started))
                     if idx is not None:
                         if into:
                             regs[into] = idx
                         return "ok", ""
+                    left = deadline - loop.time()
+                    if left <= 0:
+                        break
+                    await asyncio.sleep(min(0.01, left))
                 if on_timeout:
                     return "jump", on_timeout
                 cobs_str = " / ".join(f"0x{c:03X}" for c, _ in pairs)
@@ -3848,14 +3903,73 @@ class Bench:
         self._swdl.start(self)
 
     # -- trace --------------------------------------------------------------------
+    def _match_traced(self, pairs: list[tuple[int, bytes]], max_age: float) -> int | None:
+        """Which of `pairs` the newest received frame no older than
+        `max_age` matches, or None.
+
+        Reads the trace, not the wire. A device answers when it is ready,
+        not when a step happens to start listening: a reply to something two
+        steps back is already in the record, and only a step that looks back
+        can find it. Scans from the newest row and stops at the first one
+        outside the window, so the cost is the window, not the buffer.
+
+        TX rows are skipped — our own frame is not an answer to itself,
+        which a `can_send` immediately followed by a `wait_for` on the same
+        COB-ID would otherwise make it.
+        """
+        now_tod = _tod_seconds(now_us_str()) or 0.0
+        for row in reversed(self.trace):
+            stamp = _tod_seconds(row["time"])
+            if stamp is None:
+                continue
+            age = now_tod - stamp
+            if age < 0.0:
+                age += 86400.0  # the record crossed midnight
+            if age > max_age:
+                break
+            if row["dir"] != "RX":
+                continue
+            try:
+                cob = int(row["cob"], 16)
+                data = bytes.fromhex(row["data"].replace(" ", ""))
+            except ValueError:
+                continue
+            for i, (want, prefix) in enumerate(pairs):
+                if cob == want and data.startswith(prefix):
+                    return i
+        return None
+
+    def _trace_view(self) -> tuple[list[dict], dict]:
+        """The (rows, counts) the trace panel shows: an opened capture file
+        if there is one, otherwise the live record — held still if paused.
+        Either way the record itself keeps filling."""
+        if self._trace_import is not None:
+            return self._trace_import
+        if self._trace_freeze is not None:
+            return self._trace_freeze
+        return self.trace, self._trace_counts
+
     def act_trace_toggle(self, p: dict) -> None:
         self.trace_paused = not self.trace_paused
-        if not self.trace_paused:
-            self.trace_loaded = None  # resuming: live frames append, no longer "the capture"
+        if self.trace_paused:
+            # hold the rows as they stand; the record goes on recording
+            self._trace_freeze = (list(self.trace), dict(self._trace_counts))
+        else:
+            self._trace_freeze = None
+            self._trace_import = None  # resuming shows live data, not the capture
+            self.trace_loaded = None
 
     def act_trace_clear(self, p: dict) -> None:
+        if self._trace_import is not None:
+            # with a capture open, "clear" closes it and goes back to live
+            # data — the record is not the view's to erase
+            self._trace_import = None
+            self.trace_loaded = None
+            self.trace_paused = False
+            return
         self.trace = []
         self._trace_counts = {}
+        self._trace_freeze = None
         self.trace_loaded = None
         # statistics restart with the cleared buffer; err_frames stays on
         # its connect lifecycle — it tracks bus health, not the buffer
@@ -3877,14 +3991,15 @@ class Bench:
         self._trace_saved = [{"file": f.name, "size": f.stat().st_size} for f in files]
 
     def act_trace_save(self, p: dict) -> None:
-        if not self.trace:
+        rows, _ = self._trace_view()  # what is on screen is what gets saved
+        if not rows:
             return
-        name = datetime.now().strftime("trace_%Y%m%d_%H%M%S") + f"_{len(self.trace)}f.json"
+        name = datetime.now().strftime("trace_%Y%m%d_%H%M%S") + f"_{len(rows)}f.json"
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         (self.trace_dir / name).write_text(
-            json.dumps({"v": 1, "rows": self.trace}, separators=(",", ":")), encoding="utf-8")
+            json.dumps({"v": 1, "rows": rows}, separators=(",", ":")), encoding="utf-8")
         self._refresh_trace_saved()
-        self.log(f"TRACE {len(self.trace)} frames saved → {name}")
+        self.log(f"TRACE {len(rows)} frames saved → {name}")
 
     def act_trace_load(self, p: dict) -> None:
         name = Path(p["file"]).name  # basename only: no path traversal out of trace_dir
@@ -3896,7 +4011,7 @@ class Bench:
             self.log(f"TRACE load failed — {name}: {exc}", "emcy0")
             return
         self._activate_trace_rows(rows, name)
-        self.log(f"TRACE {len(self.trace)} frames loaded from {name} — paused")
+        self.log(f"TRACE {len(rows)} frames loaded from {name} — view paused, recording continues")
 
     _IMPORT_FORMATS = ("candump",)
 
@@ -3945,15 +4060,20 @@ class Bench:
         self.log(f"TRACE {len(rows)} frames imported from {filename} ({fmt}) → saved as {name}{skip_note}")
 
     def _activate_trace_rows(self, rows: list[dict], name: str) -> None:
-        """Common tail of load/import: install `rows` as the live (paused)
-        trace view and recompute the class/node counters."""
-        self.trace = rows[-TRACE_CAP:]
-        self._trace_counts = {}
-        for row in self.trace:
+        """Common tail of load/import: open `rows` as the shown capture and
+        compute its class/node counters. The live record is untouched — it
+        keeps recording underneath, so a capture opened during a run cannot
+        cost a test step the frame it is waiting for; closing the capture
+        returns to it."""
+        rows = rows[-TRACE_CAP:]
+        counts: dict[tuple[str, int | None], int] = {}
+        for row in rows:
             row.setdefault("cls", trace_class(row.get("dec", "")))
             row.setdefault("node", trace_node(row.get("cob", "")))
             key = (row["cls"], row["node"])
-            self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
+            counts[key] = counts.get(key, 0) + 1
+        self._trace_import = (rows, counts)
+        self._trace_freeze = None
         self.trace_paused = True
         self.trace_loaded = name
 
@@ -3964,8 +4084,10 @@ class Bench:
         except OSError:
             pass
         self._refresh_trace_saved()
-        if self.trace_loaded == name:
+        if self.trace_loaded == name:  # the open capture is gone: back to live data
+            self._trace_import = None
             self.trace_loaded = None
+            self.trace_paused = False
         self.log(f"TRACE capture {name} deleted")
 
     def _trace_filter_predicate(self) -> Callable[[str, int | None], bool]:
@@ -3988,23 +4110,24 @@ class Bench:
         of the full retained buffer, so hidden classes or devices don't push
         visible frames out of the window. The device filter never hides
         broadcast frames (node None: NMT, SYNC, …)."""
+        shown, counts = self._trace_view()
         passes = self._trace_filter_predicate()
         if self.trace_hide or self.trace_dev_filter:
             rows: list[dict] = []
-            for row in reversed(self.trace):
+            for row in reversed(shown):
                 if passes(row["cls"], row["node"]):
                     rows.append(row)
                     if len(rows) == TRACE_VIEW:
                         break
             rows.reverse()
-            match = sum(n for (cls, node), n in self._trace_counts.items()
+            match = sum(n for (cls, node), n in counts.items()
                         if passes(cls, node))
         else:
-            rows = self.trace[-TRACE_VIEW:]
-            match = len(self.trace)
+            rows = shown[-TRACE_VIEW:]
+            match = len(shown)
         return {"rows": rows, "paused": self.trace_paused, "hide": sorted(self.trace_hide),
                 "devSel": self.trace_dev_filter,
-                "total": len(self.trace), "match": match,
+                "total": len(shown), "match": match,
                 "saved": self._trace_saved, "loaded": self.trace_loaded,
                 "stats": self._trace_stats(),
                 "plot": {"sel": self.plot_sel,
@@ -4014,10 +4137,11 @@ class Bench:
         """The full filtered trace — same predicate as `_trace_snapshot`,
         but not capped to TRACE_VIEW: export formats hand over everything
         that matches the current filter, not just the browser's scrollback."""
+        shown, _ = self._trace_view()
         if not (self.trace_hide or self.trace_dev_filter):
-            return list(self.trace)
+            return list(shown)
         passes = self._trace_filter_predicate()
-        return [row for row in self.trace if passes(row["cls"], row["node"])]
+        return [row for row in shown if passes(row["cls"], row["node"])]
 
     def _trace_csv(self) -> str:
         """The filtered trace as CSV — one row per frame, same columns the
