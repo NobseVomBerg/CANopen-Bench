@@ -218,11 +218,16 @@ class BenchPlugin:
         Plugin cards are listed before the built-in ones."""
         return []
 
-    def adapter_backends(self) -> dict[str, tuple[str, str | int | None]]:
+    def adapter_backends(self) -> dict[str, tuple]:
         """Adapter key -> (python-can interface name, default channel) for
         the cards this plugin adds; merged into ``CanopenBus``'s mapping.
         The python-can backend itself ships separately via python-can's own
-        ``can.interface`` entry-point group."""
+        ``can.interface`` entry-point group.
+
+        A third element may carry a dict of further keyword arguments for
+        the backend, for adapters the pair cannot describe (the built-in
+        Vector entry needs ``app_name``). Pairs stay valid — nothing that
+        worked before has to change."""
         return {}
 
     def seed_eds(self) -> list[dict]:

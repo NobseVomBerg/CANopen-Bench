@@ -84,11 +84,16 @@ has been exercised, not what is warranted.
 |---|---|---|
 | IXXAT USB-to-CAN | VCI4 (Windows) | in regular use on the author's bench |
 | PCAN-USB | PCANBasic | wired up, never run — no such adapter here |
+| Vector VN1600 (VN1610/VN1630) | XL driver (Windows) | wired up, never run — no such adapter here |
 | Demo mode | — | no hardware, EDS-driven simulation |
 | other adapters (e.g. CPC-USB) | via plugin packages | separate install |
 
 Everything above demo mode goes through python-can's own backends, so
-adapter support tracks python-can. Bring-up checklists live in
+adapter support tracks python-can. The Vector entry exists because plain
+CAN on a VN1600 needs only Vector's freely downloadable XL driver — the
+CANoe/CANalyzer licences are for their applications, not for talking to
+the hardware — and a lot of that hardware outlives the software budget
+it was bought with. Bring-up checklists live in
 `docs/ablaeufe/A-01-verbinden.md` and `A-02-scan.md`.
 
 ## Workspaces

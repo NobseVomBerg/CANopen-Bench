@@ -68,7 +68,7 @@ def test_plugin_adapter_card_listed_first(tmp_path):
 
 def test_plugin_adapter_backend_merged_into_bus(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
-    assert bench._hw_bus._backends["fake"] == ("virtual", None)
+    assert bench._hw_bus._backends["fake"] == ("virtual", None, {})
     assert "ixxat" in bench._hw_bus._backends
     assert "pcan" in bench._hw_bus._backends
 
