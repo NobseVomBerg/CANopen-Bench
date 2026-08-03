@@ -618,5 +618,5 @@ def test_press_button_and_send_raw_without_hooks_are_noops(demo_bench):
     demo_bench.bus.press_button()
     demo_bench.bus.send_raw(0x780, b"\x01")
     demo_bench.bus.send_raw(0x781, b"\x00\x00\x00\x00\x01\x02\x00\x00")
-    assert demo_bench.bus._raw_frames == []
+    assert not [f for f in demo_bench.bus._sdo_frames if f.direction == "RX"]
     assert demo_bench.bus.session is None

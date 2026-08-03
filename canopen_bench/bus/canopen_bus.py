@@ -349,6 +349,14 @@ class CanopenBus(BusInterface):
             self._connection_lost(exc)
 
     def wait_frame(self, cobs: list[tuple[int, bytes]], timeout: float) -> int | None:
+        """Subscribe now, hear what comes next. **Not** how the `wait_for`
+        test step works any more, and not what to reach for when adding one:
+        a subscription taken at call time cannot hear a frame that arrived a
+        moment earlier, which is a step failing on a device that answered
+        correctly, just early. Steps read the trace instead — the record of
+        what the bus carried, `Bench._match_traced`. Kept for callers that
+        genuinely want "strictly from now on", and they inherit that limit.
+        """
         net = self.network
         if net is None:
             return None

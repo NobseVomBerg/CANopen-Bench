@@ -13,8 +13,6 @@ matching traffic and out-of-range writes abort like a real device would.
 """
 from __future__ import annotations
 
-import time
-
 from canopen.objectdictionary import (
     DOMAIN,
     OCTET_STRING,
@@ -105,10 +103,9 @@ class EdsDemoBus(BusInterface):
         self._store: dict[tuple[int, int, int], str] = {}  # (node, idx, sub) -> display value
         self._ods = OdCache(db.eds_dir)
         self._hb_node_idx = 0
-        self._sdo_frames: list[Frame] = []  # pending synthetic SDO trace frames
-        # raw-frame queue for wait_frame plus the device-side protocol hooks
-        # (plugin.DemoHook) that simulate vendor behaviour, e.g. button-teach
-        self._raw_frames: list[tuple[int, bytes]] = []
+        self._sdo_frames: list[Frame] = []  # synthetic frames pending for the trace
+        # device-side protocol hooks (plugin.DemoHook) that simulate vendor
+        # behaviour, e.g. button-teach
         self._hooks: list = []
         self.session: bytes | None = None  # last stored session identity (set by hooks)
 
@@ -305,8 +302,14 @@ class EdsDemoBus(BusInterface):
         self._hooks = list(hooks)
 
     def queue_raw(self, cob: int, data: bytes) -> None:
-        """Queue a device-side raw frame for wait_frame (boot-ups, replies)."""
-        self._raw_frames.append((cob, bytes(data)))
+        """Emit a device-side raw frame (boot-ups, replies).
+
+        It goes into the trace like any other received frame — that is
+        where a `wait_for` step reads, on this bus exactly as on real
+        hardware, so a flow behaves the same in demo mode."""
+        self._sdo_frames.append(Frame(
+            direction="RX", cob_id=f"0x{cob:03X}", length=str(len(data)),
+            data=" ".join(f"{b:02X}" for b in data), decoded=_decode_cob(cob)))
 
     def device_nodes(self) -> list[int]:
         return sorted(self._devices)
@@ -370,17 +373,6 @@ class EdsDemoBus(BusInterface):
         for hook in self._hooks:
             if hook.press_button(self):
                 return
-
-    def wait_frame(self, cobs: list[tuple[int, bytes]], timeout: float) -> int | None:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            for i, (frame_cob, data) in enumerate(self._raw_frames):
-                for idx, (want_cob, prefix) in enumerate(cobs):
-                    if frame_cob == want_cob and data.startswith(prefix):
-                        del self._raw_frames[i]
-                        return idx
-            time.sleep(0.05)
-        return None
 
     def lss_assign(self, count: int) -> int:
         """Demo: scan enumerates devices contiguously from node 1 anyway, so
