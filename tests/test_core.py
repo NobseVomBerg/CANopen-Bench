@@ -2608,7 +2608,8 @@ def test_real_testcases_win_regardless_of_adapter(bench, tmp_path):
     assert ids == ["0001"]
 
 
-# -- catalog row shape: [id, name, tools, est, err, grade, variants, file, errmsg] --
+# -- catalog row shape: [id, name, tools, est, err, grade, variants, file,
+#    errmsg, needs_dut] --
 
 def test_catalog_row_carries_grade_variants_and_empty_errmsg_for_a_valid_case(bench, tmp_path):
     tc_dir = tmp_path / "tcs"
@@ -2620,7 +2621,7 @@ def test_catalog_row_carries_grade_variants_and_empty_errmsg_for_a_valid_case(be
 
     snap = bench.snapshot()
     row = next(r for r in snap["tests"]["catalog"] if r[0] == "0001")
-    tid, name, tools, est, err, grade, variants, file, errmsg = row
+    tid, name, tools, est, err, grade, variants, file, errmsg, needs_dut = row
     assert err is False
     assert grade == "automated"
     assert variants == ["820", "920"]
@@ -2640,10 +2641,39 @@ def test_catalog_row_for_a_broken_file_carries_err_file_and_errmsg(bench, tmp_pa
     # parsing, so the catalog falls back to the filename as the row's id —
     # find the row by file instead
     row = next(r for r in snap["tests"]["catalog"] if r[7] == "TC0002_broken.yaml")
-    tid, name, tools, est, err, grade, variants, file, errmsg = row
+    tid, name, tools, est, err, grade, variants, file, errmsg, needs_dut = row
     assert err is True
     assert file == "TC0002_broken.yaml"
     assert errmsg  # the UI shows this instead of "see file"
+
+
+def test_catalog_says_which_cases_need_the_device_picked_in_the_devices_box(bench, tmp_path):
+    """The Start button greys out when a selected case needs a DUT and none
+    is picked — the same condition ``act_run_start`` refuses on. It can only
+    apply it if the catalog says which cases those are: "selected" needs one
+    picked, a case naming its device by code brings its own.
+    """
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0001_picked.yaml").write_text(
+        'id: "0001"\nname: "picked"\nsteps:\n  - log: "hi"\n')
+    (tc_dir / "TC0002_by_code.yaml").write_text(
+        'id: "0002"\nname: "by code"\ndut:\n  code: "EFS2"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+
+    rows = {r[0]: r[9] for r in bench.snapshot()["tests"]["catalog"]}
+    assert rows == {"0001": True, "0002": False}
+
+
+def test_the_demo_catalog_row_needs_no_device(bench):
+    """Demo rows are shorter than real ones, so the column simply is not
+    there — and read as "no DUT needed", which is what that catalog does:
+    ``act_run_start`` puts it in sim mode and never touches a device. A
+    Start button greyed out over a device the run would not use would be
+    the wrong answer.
+    """
+    row = bench.snapshot()["tests"]["catalog"][0]
+    assert len(row) < 10
 
 
 def test_grades_and_variants_dropdowns_only_list_what_the_folder_has(bench, tmp_path):
