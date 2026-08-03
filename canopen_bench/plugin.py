@@ -124,7 +124,12 @@ class DevicePanel:
         ``canvas``  {w, h, fg?, bg?, draw: [...]} — a small vector display.
                     Primitives: {t: "line", p: [x1,y1,x2,y2], w?, c?},
                     {t: "poly", p: [x1,y1,x2,y2,...], fill?, w?, c?},
-                    {t: "text", x, y, s, size?, c?}. ``c`` is "fg", "dim"
+                    {t: "text", x, y, s, size?, tl?, c?}. ``tl`` squeezes
+                    the glyphs into exactly that width, for a display whose
+                    legends are printed into fixed cells — without it a
+                    plugin laying out a row has to guess font metrics that
+                    are the browser's to pick, and lands differently
+                    elsewhere. ``c`` is "fg", "dim"
                     (fg at reduced opacity) or a literal CSS colour;
                     ``fg``/``bg`` are literal colours, since a physical
                     display's own colours do not follow the page theme.
