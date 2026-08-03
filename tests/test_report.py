@@ -85,6 +85,11 @@ def test_a_log_step_reads_as_a_note_not_as_a_verdict():
     assert "testStepComment" in doc
 
 
+def test_a_step_the_case_spends_on_itself_reads_as_neither():
+    doc = case_html(_case(steps=[StepRecord(1, "jump_gt R15 0 → loop1", "flow")]))
+    assert "testStepFlow" in doc
+
+
 def test_the_style_is_linked_not_copied_into_every_file():
     """Inlining it would repeat the same block in every report of every
     run — and make restyling impossible, which is the one thing a
@@ -206,6 +211,59 @@ def test_a_written_run_opens_without_the_bench(tmp_path):
             assert "//" not in href and not href.startswith("/"), \
                 f"{path.name} links {href!r} — that needs a server"
             assert (folder / href).exists(), f"{path.name} links {href!r}, which is not there"
+
+
+LOOP_TC = """\
+id: "0103"
+name: "seventeen passes over the same object"
+steps:
+  - mov: {to: R11, value: 17}
+  - mov: {to: R15, value: R11}
+  - label: loop1
+  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sub: {to: R15, value: 1}
+  - jump_gt: {a: R15, b: 0, to: loop1}
+  - label: loop1_end
+"""
+
+
+def _loop_report(tmp_path) -> str:
+    """One case whose loop turns as often as a register says, run for real."""
+    import asyncio
+    bench = Bench(Db(tmp_path / "r.db"))
+    write_seed_eds_files(bench)
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0103_loop.yaml").write_text(LOOP_TC)
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    bench.dispatch("set_path", {"which": "res", "value": str(tmp_path / "res")})
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.test_sel = {"0103"}
+
+    async def go():
+        bench.dispatch("run_start", {})
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 20
+        while bench.running and loop.time() < deadline:
+            await asyncio.sleep(0.02)
+    asyncio.run(go())
+    path = next(p for p in Path(bench.paths["res"]).iterdir() if "__0103__" in p.name)
+    return path.read_text(encoding="utf-8")
+
+
+def test_a_loop_leaves_one_line_per_pass_in_the_report(tmp_path):
+    """A count the case works out at run time is the case that broke: a
+    loop written to turn seventeen times but read as turning once passes
+    just as green, and the report is the only place that says which."""
+    assert _loop_report(tmp_path).count("testStepOk") == 17
+
+
+def test_the_lines_that_turn_a_loop_are_set_apart_from_the_traffic(tmp_path):
+    doc = _loop_report(tmp_path)
+    # two movs and the label after the loop, plus a label, a sub and a
+    # jump on every one of the seventeen passes
+    assert doc.count("testStepFlow") == 3 + 17 * 3
 
 
 def test_the_run_puts_the_stylesheet_beside_the_reports(tmp_path):
