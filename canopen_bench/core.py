@@ -4366,9 +4366,15 @@ class Bench:
             "raw": self.raw_rows,
             "sync": {"run": self.sync_run, "ms": self.sync_ms},
             "tests": {
+                # the last column is what act_run_start's DUT guard reads:
+                # a case addressing its device by code carries its own
+                # target, only "selected" needs one picked in the Devices
+                # box. The demo rows below are shorter and so read as
+                # False, which is right — that catalog runs in sim mode
+                # and never touches a device.
                 "catalog": ([[tc.id, tc.name, ", ".join(tc.tools) or "—",
                               tc.est or "—", bool(tc.error), tc.grade, tc.variants,
-                              tc.file, tc.error or ""]
+                              tc.file, tc.error or "", tc.dut == "selected"]
                              for tc in sorted(self.testcases.values(), key=lambda t: t.id)]
                             if self.testcases
                             else [list(t) + ["", [], "", ""] for t in data.TESTS]

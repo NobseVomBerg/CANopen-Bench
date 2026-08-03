@@ -948,6 +948,13 @@ function TestsPage({ s, ui, setUi }) {
       || variants.includes(ui.variantFilter))
     .filter(([id, name]) => !filter || id.includes(filter) || name.toLowerCase().includes(filter));
   const selIds = shown.map((x) => x[0]).filter((id) => t.sel.includes(id));
+  // a run needs a DUT only where a selected case asks for the one picked
+  // in the Devices box; a case that names its device by code brings its
+  // own, and the demo catalog needs none at all. Same rule the server
+  // refuses on, so the button stops promising a run that cannot start.
+  const selDevs = s.devices.filter((d) => d.sel);
+  const dutMissing = !selDevs.length
+    && shown.some((r) => t.sel.includes(r[0]) && r[9]);
   const runningId = t.running ? t.runOrder[t.runIdx] : null;
   const total = t.runOrder.length;
   const runLog = t.runOrder
@@ -1053,7 +1060,7 @@ function TestsPage({ s, ui, setUi }) {
       <label onClick=${() => send('stop_err_toggle')} style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mid);cursor:pointer">${Cb(t.stopOnErr)}Stop on error</label>
       <div style="display:flex;gap:8px">
         <span class="hv-b" onClick=${() => send('run_start', { ids: shown.map((r) => r[0]) })}
-          style="flex:1;text-align:center;background:${t.running || !selIds.length ? 'var(--faint)' : 'var(--grn)'};color:#fff;font-weight:600;padding:8px 0;border-radius:7px;cursor:pointer">${t.running ? 'Running…' : `▶ Start ${selIds.length} tests`}</span>
+          style="flex:1;text-align:center;background:${t.running || !selIds.length || dutMissing ? 'var(--faint)' : 'var(--grn)'};color:#fff;font-weight:600;padding:8px 0;border-radius:7px;cursor:pointer">${t.running ? 'Running…' : `▶ Start ${selIds.length} tests`}</span>
         <span class="hv" onClick=${() => send('run_stop')} style="border:1px solid var(--inp);color:${t.running ? 'var(--red)' : 'var(--faint)'};font-weight:600;padding:8px 12px;border-radius:7px;cursor:pointer">■</span>
       </div>
       ${t.manual && html`<${OperatorPrompt} p=${t.manual} />`}
