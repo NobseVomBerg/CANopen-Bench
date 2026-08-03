@@ -43,9 +43,14 @@ PASS, FAIL, ERROR, SKIP = "PASS", "FAIL", "ERROR", "SKIP"
 #: verdict -> the cell class that colours it
 _RESULT_CLASS = {PASS: "resultOk", FAIL: "resultNok", ERROR: "resultNok",
                  SKIP: "resultCanceled"}
-#: step outcome -> row class
+#: step outcome -> row class. "flow" is not an outcome but a kind: the
+#: case's own bookkeeping (labels, jumps, register arithmetic), which the
+#: previous tool set apart the same way. A loop is the reason it matters —
+#: without a mark for the lines that turn it, a body that ran seventeen
+#: times and one that ran once read alike.
 _ROW_CLASS = {"ok": "testStepOk", "fail": "testStepNok", "error": "testStepNok",
-              "skip": "testStepCanceled", "note": "testStepComment", "": ""}
+              "skip": "testStepCanceled", "note": "testStepComment",
+              "flow": "testStepFlow", "": ""}
 
 #: written next to the reports as this file, and linked from them
 STYLESHEET = "testReportStyle.css"
@@ -65,6 +70,7 @@ CSS = """\
   td.resultOk     { background-color: #40C040; }
   td.resultNok    { background-color: #C04040; }
   tr.testStepOmitted, td.testStepOmitted { color: #808080; }
+  tr.testStepFlow { background-color: #3A2E20; }
   summary         { color: #B09090; }
 }
 @media (prefers-color-scheme: light) {
@@ -81,6 +87,7 @@ CSS = """\
   td.resultOk     { background-color: #44FF44; }
   td.resultNok    { background-color: #FF4444; }
   tr.testStepOmitted, td.testStepOmitted { color: #808080; }
+  tr.testStepFlow { background-color: #EFE2CC; }
   summary         { color: #705050; }
 }
 h1              { font-size: 1em; margin-left: 8px; }
@@ -99,6 +106,7 @@ summary         { cursor: pointer; font-weight: bold; padding: 2px 0; }
   table         { border: none; }
   td, th        { border: none; border-top: 1px solid #C0C0C0; }
   tr.testStepNok   { color: #FF0000; font-weight: bold; }
+  tr.testStepFlow  { background-color: transparent; color: #705030; }
   td.resultCanceled { color: #C0C000; font-weight: bold; }
   td.resultOk   { color: #40C040; font-weight: bold; }
   td.resultNok  { color: #FF0000; font-weight: bold; }

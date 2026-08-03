@@ -345,6 +345,14 @@ def _with_registers(spec: dict, regs: dict) -> dict:
     return out
 
 
+#: The steps a case spends on itself: labels, jumps, register arithmetic.
+#: Nothing of this goes out on the bus, and the report marks them as one
+#: kind (report.py, testStepFlow) so that a loop can be read as a loop —
+#: which of its lines repeat, and how often.
+_FLOW_KEYS = (tclib._ARITH | tclib._COND_JUMPS
+              | {"label", "jump", "jump_on_error", "rand"})
+
+
 def _step_text(key: str, val) -> str:
     """Human-readable step line for the run progress ("step 3/9 <text>")."""
     if key in ("manual", "ask"):
@@ -3512,6 +3520,12 @@ class Bench:
                 # sentence somebody wrote to make the report readable
                 state = "note" if key == "log" else {
                     "jump": "ok", "end": "ok"}.get(status, status)
+                # nor is the case's own bookkeeping: it sets the loop
+                # apart from the traffic, so a body that ran seventeen
+                # times is visible as seventeen. A step that went wrong
+                # keeps saying so — that outweighs what kind it was.
+                if state == "ok" and key in _FLOW_KEYS:
+                    state = "flow"
                 record.append(reportlib.StepRecord(
                     line=base + pc + 1, text=text, state=state,
                     note=val.get("note", "") if isinstance(val, dict) else "",
