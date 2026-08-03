@@ -70,20 +70,10 @@ class BusInterface(ABC):
         Backs the test-step primitive `wait_for: {heartbeat: ...}`."""
         return "?"
 
-    # -- raw frames (format-v2 primitives can_send / wait_for cob) -----------
+    # -- raw frames (format-v2 primitive can_send) --------------------------
     def send_raw(self, cob: int, data: bytes) -> None:
         """Broadcast a raw CAN frame (e.g. the button-teach 0x780/0x781)."""
 
-    def wait_frame(self, cobs: list[tuple[int, bytes]], timeout: float) -> int | None:
-        """Wait for a frame matching any of the given (COB-ID, data-prefix)
-        pairs, from now on. Returns the index of whichever pair matched
-        first, or None on timeout. Default: not supported.
-
-        Test steps do not use this — they read the trace, which also holds
-        what arrived just before the step started looking (`wait_for` in
-        `Bench._exec_step`, matched by `Bench._match_traced`). Anything
-        waiting here hears only what comes after the call."""
-        return None
 
     # -- standard addressing (format-v2 primitive lss_assign) ----------------
     def lss_assign(self, count: int) -> int:

@@ -335,9 +335,10 @@ primitive") — gewollt, damit Vendor-Abläufe nicht stumm falsch laufen.
 - Parser/Katalog: `canopen_bench/testcases.py` (`parse_testcase`,
   `load_catalog`); Label-Prüfung beim Parsen; `pyyaml` Basis-Abhängigkeit.
 - Ausführung: `Bench`-Executor (asyncio-Task) mit Programmzähler,
-  Registerbank je Lauf und Schrittzähler-Guard; Raw-CAN über die
-  Bus-Primitiven `send_raw`/`wait_frame`, Standard-Adressierung über
-  `lss_assign` (`BusInterface`).
+  Registerbank je Lauf und Schrittzähler-Guard; Raw-CAN senden über die
+  Bus-Primitive `send_raw`, Empfang über den Trace (`wait_for` prüft
+  gegen `Bench._match_traced`, nicht gegen den Bus), Standard-
+  Adressierung über `lss_assign` (`BusInterface`).
 - YAML-Eigenheit: unquotierte `0x…`-Literale parst YAML als int — die
   Engine normalisiert beides; in Dateien Hex-Werte bevorzugt quoten.
   Achtung: unquotiertes `no`/`yes`/`on`/`off` parst YAML als bool.
