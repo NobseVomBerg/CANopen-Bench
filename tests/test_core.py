@@ -5,6 +5,7 @@ import json
 import os
 import time
 from collections import deque
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -1469,7 +1470,7 @@ def test_trace_save_then_clear_then_load_round_trip(bench):
     assert snap["total"] == 4
     assert snap["paused"] is True
     assert snap["loaded"] == file_name
-    assert bench._trace_counts == {("NMT", None): 1, ("HB", 2): 3}
+    assert bench._trace_view()[1] == {("NMT", None): 1, ("HB", 2): 3}
 
 
 def test_trace_load_backfills_missing_cls(bench):
@@ -1482,8 +1483,8 @@ def test_trace_load_backfills_missing_cls(bench):
 
     bench.dispatch("trace_load", {"file": "manual_capture.json"})
 
-    assert bench.trace[0]["cls"] == "NMT"
-    assert bench._trace_counts == {("NMT", None): 1}
+    assert bench._trace_view()[0][0]["cls"] == "NMT"
+    assert bench._trace_view()[1] == {("NMT", None): 1}
 
 
 def test_trace_load_path_traversal_and_missing_file_leave_buffer_untouched(bench):
@@ -1656,8 +1657,8 @@ def test_trace_load_backfills_node_from_cob_on_legacy_captures(bench):
 
     bench.dispatch("trace_load", {"file": "legacy_capture.json"})
 
-    assert bench.trace[0]["node"] == 1
-    assert bench._trace_counts == {("HB", 1): 1}
+    assert bench._trace_view()[0][0]["node"] == 1
+    assert bench._trace_view()[1] == {("HB", 1): 1}
 
     bench.devices = [_bare_device(node=1) | {"sel": True}]
     bench.dispatch("trace_devfilter", {})
@@ -1802,7 +1803,7 @@ def test_trace_import_candump_happy_path(bench):
     bench.dispatch("trace_import", {"filename": "capture.log", "fmt": "candump",
                                      "data": _b64(text)})
 
-    assert len(bench.trace) == 2
+    assert len(bench._trace_view()[0]) == 2
     assert bench.trace_paused is True
     assert bench.trace_loaded is not None
     assert bench.trace_loaded.startswith("import_") and bench.trace_loaded.endswith("_2f.json")
@@ -1827,7 +1828,7 @@ def test_trace_import_suppresses_live_side_effects_for_emcy_and_plot(pdo_bench):
     bench.dispatch("trace_import", {"filename": "capture.log", "fmt": "candump",
                                      "data": _b64(text)})
 
-    assert len(bench.trace) == 2
+    assert len(bench._trace_view()[0]) == 2
     new_logs = bench.logs[logs_before:]
     assert len(new_logs) == 1
     assert "imported" in new_logs[0]["msg"]
@@ -1874,7 +1875,7 @@ def test_trace_import_reports_skipped_line_count_on_partial_success(bench):
     bench.dispatch("trace_import", {"filename": "capture.log", "fmt": "candump",
                                      "data": _b64(text)})
 
-    assert len(bench.trace) == 2
+    assert len(bench._trace_view()[0]) == 2
     assert any("1 unrecognized line(s) skipped" in ln["msg"] for ln in bench.logs)
 
 
@@ -3490,3 +3491,94 @@ def test_select_all_takes_only_what_the_list_shows(tmp_path, monkeypatch):
     # no list at all still means everything, for any caller that sends none
     bench.dispatch("tests_all", {})
     assert bench.test_sel == {"4646", "4647"}
+
+
+# -- what wait_for sees: the trace as the record, not a live subscription -----
+#
+# The bug these pin down: a step used to start listening when it ran, so a
+# device that answered a few ms earlier was never heard and the step failed
+# on a bus that had done nothing wrong.
+
+def _stamp_ago(seconds: float) -> str:
+    return (datetime.now() - timedelta(seconds=seconds)).strftime("%H:%M:%S.%f")
+
+
+def _traced(bench: Bench, cob: str, data: str, *, ago: float = 0.0,
+            direction: str = "RX") -> dict:
+    """Put one row into the record, `ago` seconds old."""
+    row = _trace_row(cob, data)
+    row["time"] = _stamp_ago(ago)
+    row["dir"] = direction
+    row["cls"] = ""
+    row["node"] = None
+    bench.trace.append(row)
+    return row
+
+
+def test_match_traced_finds_a_frame_that_arrived_before_the_step_started(bench):
+    _traced(bench, "0x181", "01 02", ago=0.3)
+    assert bench._match_traced([(0x181, b"")], 0.5) == 0
+
+
+def test_match_traced_ignores_a_frame_older_than_the_window(bench):
+    _traced(bench, "0x181", "01 02", ago=0.9)
+    assert bench._match_traced([(0x181, b"")], 0.5) is None
+
+
+def test_match_traced_ignores_our_own_sent_frame(bench):
+    """A can_send followed by a wait_for on the same COB-ID must not be
+    answered by the send itself — that would be a step passing on its own
+    echo without the device having said anything."""
+    _traced(bench, "0x780", "01", ago=0.05, direction="TX")
+    assert bench._match_traced([(0x780, b"")], 0.5) is None
+
+
+def test_match_traced_races_pairs_and_reports_the_winning_index(bench):
+    _traced(bench, "0x783", "02 AA", ago=0.1)  # only the second pair matches
+    assert bench._match_traced([(0x700, b"\x01"), (0x783, b"\x02")], 0.5) == 1
+
+
+def test_match_traced_same_cob_different_prefix_picks_the_matching_prefix(bench):
+    _traced(bench, "0x783", "02 AA", ago=0.1)
+    assert bench._match_traced([(0x783, b"\x01"), (0x783, b"\x02")], 0.5) == 1
+
+
+def test_match_traced_without_a_match_returns_none(bench):
+    _traced(bench, "0x700", "01", ago=0.1)
+    assert bench._match_traced([(0x783, b"\x02")], 0.5) is None
+
+
+# -- the record keeps recording, whatever the panel is showing ---------------
+
+def test_pausing_freezes_the_view_but_not_the_recording(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_toggle", {})  # pause
+    frozen = bench.snapshot()["trace"]["total"]
+
+    bench.bus.queue_raw(0x181, b"\x01\x02")
+    bench._drain_frames()
+
+    assert bench.snapshot()["trace"]["total"] == frozen  # view stands still
+    assert bench._match_traced([(0x181, b"\x01")], 5.0) == 0  # record does not
+
+
+def test_opening_a_capture_leaves_the_live_record_intact(connected_bench):
+    """A capture is a second source, not a halt of the first: opening one
+    during a run must not cost a waiting step the frame it needs."""
+    bench = connected_bench
+    bench.bus.queue_raw(0x181, b"\x01\x02")
+    bench._drain_frames()
+    live = list(bench.trace)
+
+    bench.trace_dir.mkdir(parents=True, exist_ok=True)
+    (bench.trace_dir / "other.json").write_text(
+        json.dumps({"v": 1, "rows": [_trace_row("0x000", "")]}), encoding="utf-8")
+    bench.dispatch("trace_load", {"file": "other.json"})
+
+    assert bench.snapshot()["trace"]["total"] == 1  # the capture is shown
+    assert bench.trace == live  # the record is untouched
+    assert bench._match_traced([(0x181, b"\x01")], 5.0) == 0
+
+    bench.dispatch("trace_toggle", {})  # resume: back to live data
+    assert bench.trace_loaded is None
+    assert bench.snapshot()["trace"]["total"] == len(live)

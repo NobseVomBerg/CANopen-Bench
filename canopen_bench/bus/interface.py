@@ -76,12 +76,13 @@ class BusInterface(ABC):
 
     def wait_frame(self, cobs: list[tuple[int, bytes]], timeout: float) -> int | None:
         """Wait for a frame matching any of the given (COB-ID, data-prefix)
-        pairs — races all of them concurrently, not one after another, so
-        a step waiting on "the expected reply" and "an out-of-band signal"
-        (e.g. addressing's per-node confirm vs. an Addr-End from any
-        device) can't miss the second one while blocked on the first.
-        Returns the index of whichever pair matched first, or None on
-        timeout. Default: not supported."""
+        pairs, from now on. Returns the index of whichever pair matched
+        first, or None on timeout. Default: not supported.
+
+        Test steps do not use this — they read the trace, which also holds
+        what arrived just before the step started looking (`wait_for` in
+        `Bench._exec_step`, matched by `Bench._match_traced`). Anything
+        waiting here hears only what comes after the call."""
         return None
 
     # -- standard addressing (format-v2 primitive lss_assign) ----------------
