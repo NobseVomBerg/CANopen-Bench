@@ -2,7 +2,7 @@
 
 > **Status:** Der Step-Executor ist umgesetzt (`Bench._run_task`/`_exec_case`
 > in `core.py`, Katalog-Lader `canopen_bench/testcases.py`) und seit
-> Format v2 eine kleine VM: Programmzähler, Register R0–R9, Sprünge und
+> Format v2 eine kleine VM: Programmzähler, Register R0–R15, Sprünge und
 > Arithmetik, Schrittzähler-Guard (`_run_program`/`_exec_one`). Dieselbe VM
 > führt auch die Ablauf-Dateien der Machine Control aus (A-05 Teach).
 > Die [Ist]-Markierungen unten beschreiben den implementierten Stand;
@@ -151,7 +151,7 @@ Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
 
 | Datei | Inhalt |
 |---|---|
-| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt) |
+| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt). Buchhaltung des Falls (Label, Sprung, Registerrechnung) ist hellbraun abgesetzt, damit eine Schleife als Schleife lesbar bleibt |
 | `<stamp>__summary.html` | der Lauf: eine Zeile je Testfall, verlinkt auf dessen Datei |
 | `<stamp>__summary.json` | derselbe Lauf als Daten — Grundlage der Übersicht unten |
 | `testReportStyle.css` | einmal geschrieben, von allen Reports verlinkt, **nie überschrieben** |
