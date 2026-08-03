@@ -117,6 +117,13 @@ ADAPTERS = [
     {"key": "pcan", "label": "PCAN-USB", "sub": "PEAK-System · untested",
      "conn": "PCAN connected", "foot": "PCAN-USB", "iface": "PCAN",
      "driver": "driver: PCANBasic via python-can", "full": "PCAN-USB"},
+    # No Vector hardware here either — same rule as PCAN: wired up, not
+    # vouched for. Worth having anyway, because a VN1610/VN1630 needs only
+    # Vector's free XL driver for plain CAN, not a CANoe/CANalyzer licence,
+    # and plenty of them are sitting in drawers for want of one.
+    {"key": "vector", "label": "Vector VN1600", "sub": "Vector · untested",
+     "conn": "Vector connected", "foot": "Vector VN1600", "iface": "VECTOR",
+     "driver": "driver: XL driver via python-can", "full": "Vector VN1610/VN1630"},
     {"key": "demo", "label": "Demo mode", "sub": "virtual DUTs from EDS",
      "conn": "Demo connected", "foot": "Demo mode", "iface": "DEMO",
      # keep this as short as the other driver lines — the adapter cards are

@@ -23,8 +23,8 @@ Full clickable implementation of the chosen **1a** design — all five pages,
 light + dark theme (toggle in the header, persisted per browser):
 
 - **Setup** — workspace bar (create/switch workspaces, each a subfolder
-  of the data root), bus interface (IXXAT / PCAN / Demo mode; vendor
-  adapters such as the CPC-USB arrive via plugin packages) + bitrate
+  of the data root), bus interface (IXXAT / PCAN / Vector / Demo mode;
+  vendor adapters such as the CPC-USB arrive via plugin packages) + bitrate
   (applied to a running connection immediately) + address range (node-ID)
   + own node-ID — the one range that governs this bus: the scan probes
   exactly it, and an operator teach addresses up to its top node-id —,
@@ -199,9 +199,12 @@ Server restarts and multiple browsers therefore always agree on the state.
 re-addressing, frame polling). Which implementation answers is decided by
 the adapter selected on the Setup page:
 
-- **IXXAT / PCAN — plus plugin adapters like CPC-USB** → `CanopenBus`
-  (`bus/canopen_bus.py`), real protocol via canopen/python-can. IXXAT
-  needs the VCI4 driver (Windows). A vendor adapter arrives as one
+- **IXXAT / PCAN / Vector — plus plugin adapters like CPC-USB** →
+  `CanopenBus` (`bus/canopen_bus.py`), real protocol via
+  canopen/python-can. IXXAT needs the VCI4 driver (Windows); Vector
+  (VN1600 family) needs only the free XL driver, not a CANoe/CANalyzer
+  licence, and is addressed by hardware channel index (`app_name=None`)
+  so no application entry in Vector's Hardware Config is required. A vendor adapter arrives as one
   separately installed package registering two entry points: a
   python-can driver (`can.interface`) plus a bench plugin contributing
   the adapter card and key mapping (`canopen_bench.plugins`) — e.g.

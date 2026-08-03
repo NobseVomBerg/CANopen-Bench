@@ -21,11 +21,31 @@ import canopen
 
 from .interface import NO_SERIAL, BusInterface, FoundDevice, Frame, SdoResult
 
-# app adapter key (canopen_bench.data.ADAPTERS) -> python-can interface name + default channel
-_ADAPTER_BACKENDS: dict[str, tuple[str, str | int | None]] = {
-    "ixxat": ("ixxat", 0),  # VCI channel index — python-can expects an int here
-    "pcan": ("pcan", "PCAN_USBBUS1"),
+# app adapter key (canopen_bench.data.ADAPTERS) -> python-can interface name,
+# default channel, and any further keyword arguments that backend needs
+_ADAPTER_BACKENDS: dict[str, tuple[str, str | int | None, dict]] = {
+    "ixxat": ("ixxat", 0, {}),  # VCI channel index — python-can expects an int here
+    "pcan": ("pcan", "PCAN_USBBUS1", {}),
+    # Vector VN1600 family. ``app_name=None`` addresses the hardware channel
+    # by its global index; python-can's default ("CANalyzer") would instead
+    # look the channel up through an application entry in Vector's Hardware
+    # Config, which need not exist on a machine carrying only the free XL
+    # driver — and that free driver is the whole point of supporting these.
+    "vector": ("vector", 0, {"app_name": None}),
 }
+
+
+def _backend_entry(value: tuple) -> tuple[str, str | int | None, dict]:
+    """Normalise one backend mapping entry.
+
+    Plugins have always returned ``(interface, channel)`` pairs from
+    ``adapter_backends`` and keep working unchanged; the third element
+    carrying extra keyword arguments is optional, and was added because
+    Vector needs one (``app_name``) that the pair had no room for.
+    """
+    interface, channel, *rest = value
+    return interface, channel, dict(rest[0]) if rest else {}
+
 
 _NMT_COMMAND_BY_KEY = {
     "start": "OPERATIONAL",
@@ -151,7 +171,7 @@ def _shutdown_network(network: canopen.Network) -> None:
 class CanopenBus(BusInterface):
     """One instance per attached adapter, real CANopen protocol via ``canopen.Network``."""
 
-    def __init__(self, extra_backends: dict[str, tuple[str, str | int | None]] | None = None) -> None:
+    def __init__(self, extra_backends: dict[str, tuple] | None = None) -> None:
         self.network: canopen.Network | None = None
         self._trace: _TraceListener | None = None
         self._ts_offset: float | None = None  # relative driver clock → epoch, per connection
@@ -159,7 +179,8 @@ class CanopenBus(BusInterface):
         self.bitrate = 500
         self._detach_lock = threading.Lock()  # one winner detaches the network
         # built-in mapping plus adapter keys contributed by bench plugins
-        self._backends = _ADAPTER_BACKENDS | (extra_backends or {})
+        self._backends = {key: _backend_entry(value) for key, value
+                          in (_ADAPTER_BACKENDS | (extra_backends or {})).items()}
 
     # -- lifecycle --------------------------------------------------------
     def connect(self, adapter: str, bitrate: int) -> None:
@@ -168,10 +189,10 @@ class CanopenBus(BusInterface):
         if self.network is not None:
             self.disconnect()
 
-        interface, channel = self._backends[adapter]
+        interface, channel, extra = self._backends[adapter]
         network = canopen.Network()
         self._install_listeners(network)
-        kwargs: dict = {"interface": interface, "bitrate": bitrate * 1000}
+        kwargs: dict = {"interface": interface, "bitrate": bitrate * 1000, **extra}
         if channel is not None:
             kwargs["channel"] = channel
         network.connect(**kwargs)
