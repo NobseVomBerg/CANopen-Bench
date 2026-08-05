@@ -73,7 +73,10 @@ include = ["canopen_bench*"]
 [tool.setuptools.package-data]
 # seed/*.eds is what makes demo mode work after a plain `pip install`:
 # it is read at runtime (core.SEED_EDS), so it has to be in the wheel.
-canopen_bench = ["static/**/*", "flows/*.yaml", "seed/*.eds"]
+# testReportStyle.css is the report stylesheet, written into the results
+# folder on first use (report.default_css) — a file, not a string in
+# report.py, so it can be edited and diffed as the CSS it is.
+canopen_bench = ["static/**/*", "flows/*.yaml", "seed/*.eds", "testReportStyle.css"]
 
 [tool.ruff]
 line-length = 110
