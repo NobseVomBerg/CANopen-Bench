@@ -270,7 +270,7 @@ class BenchPlugin:
         """
         return {}
 
-    def describe_object(self, index: str, sub: str) -> str:
+    def describe_object(self, index: str, sub: str, symbols) -> str:
         """What the device's own firmware calls this object, or "".
 
         The bench already names an object from the EDS, which is what the
@@ -284,6 +284,12 @@ class BenchPlugin:
         convention (``eObj<index>_<sub>`` and the like), which is exactly
         what the neutral core must not assume — hence a hook rather than a
         rule. ``index`` and ``sub`` arrive as hex strings ("0x2345", "0x01").
+
+        ``symbols`` is the parsed table the bench is actually working from —
+        the workspace copy, which is the firmware under test rather than
+        whatever the plugin was packaged with. Same argument as
+        ``object_fields``, and for the same reason: an operator who dropped
+        in newer headers expects the names to follow.
         """
         return ""
 
