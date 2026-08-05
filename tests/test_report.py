@@ -25,6 +25,7 @@ from canopen_bench.report import (
     StepRecord,
     case_html,
     collect_overview,
+    default_css,
     load_runs,
     overview_html,
     summary_html,
@@ -501,3 +502,23 @@ def test_a_case_that_was_not_re_run_does_not_hold_the_variant_red():
     # the failure is not hidden — it is still in the case's own line
     failing = next(c for c in group.cases if c.id == "4857")
     assert failing.last_verdict == "FAIL" and failing.rate == "0/1"
+
+
+def test_the_shipped_stylesheet_is_a_file_and_is_what_gets_written(tmp_path):
+    """The look lives in canopen_bench/testReportStyle.css, not in a string
+    inside report.py, and what lands in the results folder is that file
+    unchanged — so editing the shipped stylesheet is editing what a run
+    actually produces, and it can be read and diffed as the CSS it is."""
+    write_stylesheet(tmp_path)
+    written = (tmp_path / STYLESHEET).read_text(encoding="utf-8")
+    assert written == default_css()
+    assert "tr.testStepFlow { color: #b06010; }" in written
+
+
+def test_a_flow_line_is_coloured_text_in_every_context(tmp_path):
+    """A loop line is set apart by its text colour alone. It carried a
+    background tint per colour scheme and a third rule for print; one rule
+    now covers all three, so the three cannot drift apart."""
+    css = default_css()
+    assert css.count("tr.testStepFlow") == 1
+    assert "background-color: #3A2E20" not in css and "background-color: #EFE2CC" not in css

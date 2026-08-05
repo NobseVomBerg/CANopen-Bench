@@ -1,0 +1,54 @@
+@media (prefers-color-scheme: dark) {
+  body            { background-color: #101010; color: #FFFFFF; }
+  h1, h2          { color: #B09090; }
+  table           { margin-top: 8px; border: 0px solid #606060; border-style: ridge; }
+  tr              { background-color: #000000; }
+  tr.testStepNok      { background-color: #C04040; }
+  tr.testStepCanceled { background-color: #C0C040; }
+  td, th          { padding: 0 8px; border-bottom: 1px dotted #606060; }
+  tr:hover        { background-color: #444; }
+  th              { background-color: #101010; text-align: left; }
+  td.resultCanceled { background-color: #C0C040; }
+  td.resultOk     { background-color: #40C040; }
+  td.resultNok    { background-color: #C04040; }
+  tr.testStepOmitted, td.testStepOmitted { color: #808080; }
+  summary         { color: #B09090; }
+}
+@media (prefers-color-scheme: light) {
+  body            { background-color: #F0F0F0; color: #000000; }
+  h1, h2          { color: #705050; }
+  table           { margin-top: 8px; border: 8px solid #E0E0E0; border-style: ridge; }
+  tr              { background-color: #FFFFFF; }
+  tr.testStepNok      { background-color: #FF4444; }
+  tr.testStepCanceled { background-color: #FFFF44; }
+  td, th          { padding: 0 8px; border-bottom: 1px solid #A0A0A0; }
+  tr:hover        { background-color: #AAA; }
+  th              { background-color: #F0F0F0; text-align: left; }
+  td.resultCanceled { background-color: #FFFF44; }
+  td.resultOk     { background-color: #44FF44; }
+  td.resultNok    { background-color: #FF4444; }
+  tr.testStepOmitted, td.testStepOmitted { color: #808080; }
+  summary         { color: #705050; }
+}
+h1              { font-size: 1em; margin-left: 8px; }
+h2              { font-size: 1em; margin-left: 16px; }
+th.emptyColumn  { height: 10px; }
+th.StepLine     { width: 50px; }
+td.testCaseName { font-weight: bold; }
+a:link          { color: #4040FF; text-decoration: none; }
+a:visited       { color: #8040FF; text-decoration: none; }
+a:hover, a:focus { color: #FF4080; text-decoration: none; }
+td.testStepComment, tr.testStepComment { color: #40C040; }
+tr.testStepFlow { color: #b06010; }
+details         { margin: 8px 0 0 8px; }
+summary         { cursor: pointer; font-weight: bold; padding: 2px 0; }
+@media print {
+  h1, h2        { font-size: 1em; }
+  table         { border: none; }
+  td, th        { border: none; border-top: 1px solid #C0C0C0; }
+  tr.testStepNok   { color: #FF0000; font-weight: bold; }
+  td.resultCanceled { color: #C0C000; font-weight: bold; }
+  td.resultOk   { color: #40C040; font-weight: bold; }
+  td.resultNok  { color: #FF0000; font-weight: bold; }
+  details[open] { display: block; }
+}
