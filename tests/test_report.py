@@ -525,3 +525,20 @@ def test_a_flow_line_is_set_apart_by_text_colour_not_by_a_tint():
     assert rules, "a flow line needs a rule of its own, or it is not marked at all"
     assert all("background-color" not in rule for rule in rules)
     assert all("color:" in rule for rule in rules)
+
+
+def test_a_delay_and_its_reason_are_one_line():
+    """A delay's note is not a remark on the step, it is the step: "wait 1s"
+    alone says nothing about why. Two rows for four words is a row the
+    reader has to step over."""
+    doc = case_html(_case(steps=[StepRecord(line=1, text="wait 1s", state="ok",
+                                            note="Wait for delayed Menu-Update")]))
+    assert "wait 1s; Wait for delayed Menu-Update" in doc
+
+
+def test_a_wait_for_keeps_its_note_on_its_own_line():
+    """Only plain delays merge. "wait for frame 0x181" is a step with a
+    condition, and a note about it is a remark, not the missing half."""
+    doc = case_html(_case(steps=[StepRecord(line=1, text="wait for frame 0x181", state="ok",
+                                            note="the reply to the write above")]))
+    assert "wait for frame 0x181<br />the reply" in doc

@@ -13,7 +13,7 @@ import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
 from canopen_bench import data
-from canopen_bench.core import Bench
+from canopen_bench.core import Bench, _step_text
 from canopen_bench.db import Db
 from canopen_bench.plugin import BenchPlugin
 
@@ -1413,3 +1413,13 @@ def test_a_case_hidden_by_the_tool_filter_is_not_reported_as_broken(tc_bench):
     run_selected(tc_bench, {"0031"})
 
     assert not [ln for ln in tc_bench.logs if "no longer readable" in ln["msg"]]
+
+
+def test_a_sub_index_is_two_digits_wide_in_read_and_write_alike():
+    """A sub-index is a byte however the file wrote it — 1, "1" and "0x01"
+    are one address, and three renderings of it in one report invite the
+    reader to wonder whether they are."""
+    assert _step_text("sdo_read", {"index": "0x2345", "sub": 1}) == "read 0x2345:0x01"
+    assert _step_text("sdo_write", {"index": "0x2345", "sub": "0x1", "value": "0x0C"}) \
+        == "write 0x2345:0x01 = 0x0C"
+    assert _step_text("sdo_read", {"index": "0x2345", "sub": "0x10"}) == "read 0x2345:0x10"
