@@ -133,7 +133,10 @@ class EdsDemoBus(BusInterface):
     def scan(self, node_from: int = 1, node_to: int = 127) -> list[FoundDevice]:
         if not self.connected:
             return []
-        entries = [e for e in self.db.eds_list()
+        # devices_only: a row describing no device has nothing to simulate,
+        # and inventing a DUT from it would put a device on the demo bus that
+        # no EDS ever claimed to describe
+        entries = [e for e in self.db.eds_list(devices_only=True)
                    if e["enabled"] and self._load_od(e["file"]) is not None]
 
         self._devices = {}

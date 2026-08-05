@@ -3582,3 +3582,72 @@ def test_opening_a_capture_leaves_the_live_record_intact(connected_bench):
     bench.dispatch("trace_toggle", {})  # resume: back to live data
     assert bench.trace_loaded is None
     assert bench.snapshot()["trace"]["total"] == len(live)
+
+
+# -- the generic CiA 301 base EDS --------------------------------------------
+#
+# For a device whose own EDS is not to hand — a machine controller, a foreign
+# node on the same bus. It describes the standard, not that device, so the
+# whole point is that it is never assigned on the bench's own initiative.
+
+def test_base_eds_is_seeded_into_a_workspace_that_already_existed(tmp_path):
+    """Not only on a first run: a workspace made before this file existed
+    has to get it too, which is every workspace in use today."""
+    (tmp_path / "data").mkdir()
+    bench = Bench(Db(tmp_path / "data" / "b.db"))
+    assert bench.db.is_first_run is False
+    assert "CiA301Base.eds" in {e["file"] for e in bench.db.eds_list()}
+    assert (bench.db.eds_dir / "CiA301Base.eds").exists()
+
+
+def test_base_eds_claims_no_identity_so_a_scan_can_never_assign_it(connected_bench):
+    """A scanned device is matched to an EDS by the identity it reports.
+    This file claims none, so it cannot win that match — a catalog that
+    says it knows a device nobody described is worse than an empty one."""
+    bench = connected_bench
+    base = next(e for e in bench.db.eds_list() if e["file"] == "CiA301Base.eds")
+    assert base["ident"] == ""
+    assert "CiA301Base.eds" not in {d["eds"] for d in bench.devices}
+    assert "CiA301Base.eds" not in {e["file"] for e in bench.db.eds_list(devices_only=True)}
+
+
+def test_base_eds_can_be_assigned_by_hand(connected_bench):
+    """Unassignable automatically, but reachable through the device's ⋮ menu
+    — which is the only way it is meant to arrive anywhere."""
+    bench = connected_bench
+    assert "CiA301Base.eds" in bench.eds_enabled       # the ⋮ cycle reads this
+    node = bench.devices[0]["node"]
+    for _ in range(len(bench.eds_enabled)):
+        bench.dispatch("dev_menu", {"node": node, "what": "eds_next"})
+        if bench.devices[0]["eds"] == "CiA301Base.eds":
+            break
+    assert bench.devices[0]["eds"] == "CiA301Base.eds"
+
+
+def test_base_eds_browses_the_objects_a_foreign_device_can_be_asked_for(connected_bench):
+    """0x1008/0x1009/0x100A are what tell you what the unknown device on the
+    bus actually is; the rest is what CiA 301 requires or everyone ships."""
+    bench = connected_bench
+    catalog = bench._catalog_from_eds("CiA301Base.eds")
+    assert not isinstance(catalog, str), catalog
+    objects, _ = catalog
+    indices = {row[0] for group in objects.values() for row in group}
+    for idx in ("0x1000", "0x1001", "0x1005", "0x1008",
+                "0x1009", "0x100A", "0x1017", "0x1018"):
+        assert idx in indices, f"{idx} missing from the base catalog"
+    # all of it is communication-profile: nothing manufacturer-specific can
+    # be claimed about a device this file has never met
+    assert not objects["manu"] and not objects["profile"]
+
+
+def test_a_disabled_base_eds_stays_disabled(tmp_path):
+    """Seeded only when the registry has no row for it, so switching it off
+    is a decision the next start respects rather than undoes."""
+    db = Db(tmp_path / "b.db")
+    Bench(db)
+    db.eds_set_enabled("CiA301Base.eds", False)
+
+    again = Bench(db)
+
+    row = next(e for e in again.db.eds_list() if e["file"] == "CiA301Base.eds")
+    assert row["enabled"] is False

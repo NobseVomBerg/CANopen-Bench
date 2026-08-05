@@ -94,9 +94,16 @@ class Db:
     # a plain file under eds_dir, keyed by the same filename, so it stays
     # individually browsable/copyable outside the app. Renaming it on disk
     # by hand breaks the link to the DB row on purpose — see eds_write_file.
-    def eds_list(self) -> list[dict]:
+    def eds_list(self, devices_only: bool = False) -> list[dict]:
+        """Registry rows. ``devices_only`` leaves out the rows that describe
+        no device: a row without an identity is a catalog somebody may point
+        a device at (the shipped CiA 301 base), not a profile a scan, a demo
+        DUT or a first-run check may be built on."""
+        sql = "SELECT * FROM eds_files"
+        if devices_only:
+            sql += " WHERE ident != ''"
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM eds_files ORDER BY file").fetchall()
+            rows = self._conn.execute(sql + " ORDER BY file").fetchall()
         return [{
             "file": r["file"], "dev": r["dev_name"], "ident": r["ident"],
             "code": r["code"], "enabled": bool(r["enabled"]),
@@ -156,9 +163,20 @@ class Db:
             c.execute("UPDATE eds_files SET device_commands=? WHERE file=?",
                       (json.dumps(commands), file))
 
-    def eds_count(self) -> int:
+    def eds_count(self, devices_only: bool = False) -> int:
+        """Rows in the EDS registry.
+
+        ``devices_only`` counts just the rows that describe a device. A row
+        without an identity claims none — the shipped CiA 301 base describes
+        the standard, not any particular device — and callers asking "is this
+        a fresh workspace?" to decide whether to seed must not be answered
+        yes-it-has-something by a file the bench put there itself.
+        """
+        sql = "SELECT COUNT(*) AS n FROM eds_files"
+        if devices_only:
+            sql += " WHERE ident != ''"
         with self._lock:
-            row = self._conn.execute("SELECT COUNT(*) AS n FROM eds_files").fetchone()
+            row = self._conn.execute(sql).fetchone()
         return row["n"]
 
     def close(self) -> None:
