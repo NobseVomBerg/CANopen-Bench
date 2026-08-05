@@ -345,12 +345,13 @@ def _with_registers(spec: dict, regs: dict) -> dict:
     return out
 
 
-#: The steps a case spends on itself: labels, jumps, register arithmetic.
-#: Nothing of this goes out on the bus, and the report marks them as one
-#: kind (report.py, testStepFlow) so that a loop can be read as a loop —
-#: which of its lines repeat, and how often.
+#: The steps a case spends on itself: labels, jumps, register arithmetic,
+#: and reading its own registers back out. Nothing of this goes out on the
+#: bus, and the report marks them as one kind (report.py, testStepFlow) so
+#: that a loop can be read as a loop — which of its lines repeat, and how
+#: often.
 _FLOW_KEYS = (tclib._ARITH | tclib._COND_JUMPS
-              | {"label", "jump", "jump_on_error", "rand"})
+              | {"label", "jump", "jump_on_error", "rand", "dump_registers"})
 
 
 def _step_text(key: str, val) -> str:
