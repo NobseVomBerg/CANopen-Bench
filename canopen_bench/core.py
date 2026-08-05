@@ -1387,7 +1387,7 @@ class Bench:
         run over a label."""
         for plugin in self.plugins:
             try:
-                name = plugin.describe_object(idx, sub)
+                name = plugin.describe_object(idx, sub, self.symbols)
             except Exception:
                 continue
             if name:
@@ -4418,8 +4418,16 @@ class Bench:
                         val = f"0x{int(default) & ((1 << (len(var) or 8)) - 1):0{width}X}"
                     acc = var.access_type if var.access_type in ("ro", "rw", "wo") else \
                         ("ro" if not var.writable else "rw")
+                    # canopen's own qualname joins a member to its object with
+                    # a dot; the bench separates index from sub-index with a
+                    # slash everywhere — in the report line of a step and in
+                    # this table — so the two never read as different notions
+                    parent = getattr(var, "parent", None)
+                    qual = (f"{parent.name}/{var.name}"
+                            if parent is not None and hasattr(parent, "subindices")
+                            else var.name)
                     catalog[key].append([
-                        f"0x{var.index:04X}", f"{var.subindex:02X}", var.qualname,
+                        f"0x{var.index:04X}", f"{var.subindex:02X}", qual,
                         _TYPE_NAMES.get(var.data_type, f"0x{var.data_type:02X}"), acc, val,
                         var.min, var.max,
                     ])

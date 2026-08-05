@@ -334,7 +334,7 @@ def test_plot_toggle_adds_then_removes_signal(connected_bench):
     assert bench.plot_sel == []
     bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
     assert bench.plot_sel == [{"idx": "0x2040", "sub": "01",
-                                "label": "Product identification.Product code"}]
+                                "label": "Product identification/Product code"}]
     assert bench._plot_keys == {"0x2040:01"}
     assert "added" in bench.logs[-1]["msg"]
 
@@ -471,7 +471,7 @@ def test_plot_toggle_persists_selection_to_db(connected_bench):
 
     saved = bench.db.get("plot_sel")
     assert {"idx": "0x2040", "sub": "01",
-            "label": "Product identification.Product code"} in saved
+            "label": "Product identification/Product code"} in saved
 
 
 def test_emcy_codes_merge_plugin_wins_over_cia_table(tmp_path):

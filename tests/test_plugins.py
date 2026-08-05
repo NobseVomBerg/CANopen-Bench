@@ -910,7 +910,7 @@ def test_a_plugin_names_the_object_a_step_touches(tmp_path):
     class Naming(BenchPlugin):
         name = "naming"
 
-        def describe_object(self, index: str, sub: str) -> str:
+        def describe_object(self, index: str, sub: str, symbols) -> str:
             return "eObjIdx_LampControl/Mode" if index == "0x2345" else ""
 
     bench = Bench(Db(tmp_path / "n.db"), plugins=[Naming()])
@@ -924,7 +924,7 @@ def test_a_plugin_that_raises_while_naming_does_not_stop_the_run(tmp_path):
     class Broken(BenchPlugin):
         name = "broken"
 
-        def describe_object(self, index: str, sub: str) -> str:
+        def describe_object(self, index: str, sub: str, symbols) -> str:
             raise RuntimeError("headers not loaded")
 
     bench = Bench(Db(tmp_path / "b.db"), plugins=[Broken()])
