@@ -29,7 +29,7 @@ TEST_EDS_ROWS = [
 def seed_test_registry(bench: Bench) -> None:
     """Seed the historic EDS registry rows (TEST_EDS_ROWS) into an empty
     registry — data.SEED_EDS_FILES is neutralized, so tests seed their own."""
-    if bench.db.eds_count() == 0:
+    if bench.db.eds_count(devices_only=True) == 0:
         for file, dev, ident, code, enabled in TEST_EDS_ROWS:
             bench.db.eds_add(file, dev, ident, code, enabled)
 
