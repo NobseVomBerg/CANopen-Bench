@@ -901,3 +901,31 @@ def test_panel_caption_reaches_the_snapshot(tmp_path):
                              "caption": "Working tension"})
     bench = _panel_bench(tmp_path, panel)
     assert bench.snapshot()["panels"][0]["caption"] == "Working tension"
+
+
+def test_a_plugin_names_the_object_a_step_touches(tmp_path):
+    """The firmware's own identifier, where a plugin can derive it: a case
+    is written against the headers, and whoever reads the report went
+    looking for the same name in the same code."""
+    class Naming(BenchPlugin):
+        name = "naming"
+
+        def describe_object(self, index: str, sub: str) -> str:
+            return "eObjIdx_LampControl/Mode" if index == "0x2345" else ""
+
+    bench = Bench(Db(tmp_path / "n.db"), plugins=[Naming()])
+    text = bench._label_step("sdo_write", {"index": "0x2345", "sub": 1, "value": "0xC001D00D"})
+    assert text == "write 0x2345:0x01 = 0xC001D00D  (eObjIdx_LampControl/Mode)"
+    # an object the plugin does not know falls back to whatever the EDS says
+    assert "(" not in bench._label_step("sdo_read", {"index": "0x6040", "sub": 0})
+
+
+def test_a_plugin_that_raises_while_naming_does_not_stop_the_run(tmp_path):
+    class Broken(BenchPlugin):
+        name = "broken"
+
+        def describe_object(self, index: str, sub: str) -> str:
+            raise RuntimeError("headers not loaded")
+
+    bench = Bench(Db(tmp_path / "b.db"), plugins=[Broken()])
+    assert bench._label_step("sdo_read", {"index": "0x2345", "sub": 1}) == "read 0x2345:0x01"
