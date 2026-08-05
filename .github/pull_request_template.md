@@ -1,3 +1,7 @@
+<!-- Pull requests from outside the project are not accepted — see
+     CONTRIBUTING.md for what is open instead. This form is for
+     whoever holds commit access. -->
+
 **What this changes**
 
 Short summary of the change and the motivation.

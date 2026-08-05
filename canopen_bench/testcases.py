@@ -168,6 +168,21 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if isinstance(val, dict) and (unknown := set(val) - _NOTE):
             return f"dump_registers: unknown field(s) {sorted(unknown)}"
         return None
+    if key == "loop":
+        # A count, not a register: the executor keeps it, so a case cannot
+        # lose track of its own loop by writing to the wrong Rn — and the
+        # report can say how many turns are left without reading state that
+        # something else may have moved in between.
+        if isinstance(val, dict):
+            if unknown := set(val) - {"n"} - _NOTE:
+                return f"loop: unknown field(s) {sorted(unknown)}"
+            val = val.get("n")
+        return None if isinstance(val, int) and not isinstance(val, bool) and val >= 0 \
+            else "loop: needs a count (0 skips the body)"
+    if key in ("loop_end", "loop_break"):
+        if isinstance(val, dict) and (unknown := set(val) - _NOTE):
+            return f"{key}: unknown field(s) {sorted(unknown)}"
+        return None
     if key in ("label", "jump", "jump_on_error"):
         return None if isinstance(val, str) and val else f"{key}: needs a name"
     if key == "ask":
@@ -320,6 +335,36 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
     return f"unknown step primitive {key!r}"
 
 
+def _check_loops(steps: list) -> str | None:
+    """Loops balanced and flat — within one step list.
+
+    Checked at load rather than found mid-run: a ``loop`` whose ``loop_end``
+    is missing would run its body once and read in the report exactly like a
+    loop that finished, which is the kind of pass nobody questions.
+
+    Flat on purpose. A nested loop needs a counter per level and a break that
+    says which level it leaves; neither is written down in a CSV that only
+    ever had LoopBegin and LoopEnd, so allowing it here would invent a
+    meaning for a file that never carried one.
+    """
+    open_at = None
+    for i, step in enumerate(steps):
+        if not (isinstance(step, dict) and len(step) == 1):
+            continue
+        key = next(iter(step))
+        if key == "loop":
+            if open_at is not None:
+                return f"nested loop at step {i + 1} — a loop must close before the next opens"
+            open_at = i
+        elif key == "loop_end":
+            if open_at is None:
+                return f"loop_end at step {i + 1} without a loop"
+            open_at = None
+        elif key == "loop_break" and open_at is None:
+            return f"loop_break at step {i + 1} outside a loop"
+    return f"loop at step {open_at + 1} without a loop_end" if open_at is not None else None
+
+
 def _check_labels(steps: list) -> str | None:
     """Labels unique, jump targets resolvable — within one step list."""
     labels: set[str] = set()
@@ -431,6 +476,8 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
             if err := _check_step(step, extensions):
                 problems.append(err)
         if err := _check_labels(group):
+            problems.append(f"{group_name}: {err}")
+        if err := _check_loops(group):
             problems.append(f"{group_name}: {err}")
     tc.error = "; ".join(problems) or None
     return tc

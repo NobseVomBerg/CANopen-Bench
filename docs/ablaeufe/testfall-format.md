@@ -286,6 +286,9 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `add` / `sub` / `mul` / `div` / `and` / `or` / `xor` | `{to: Rn, value: <wert>}` | Rn := Rn OP value (32-bit-Wrap); `div` ist ganzzahlig, Division durch 0 → ERROR |
 | `label` | `label: <name>` | Sprungmarke (eindeutig je Schrittliste) |
 | `jump` | `jump: <name>` | unbedingter Sprung |
+| `loop` | `loop: <n>` **oder** `{n: <n>, note?}` | öffnet eine Schleife über die folgenden Schritte bis zum `loop_end`; der Rumpf läuft `n` mal. `n: 0` überspringt ihn. Der Zähler gehört dem Ausführer, nicht einem Register — ein Fall kann seine eigene Schleife also nicht durch einen Schreibzugriff auf das falsche `Rn` verlieren. Im Bericht: `LoopBegin <n>` |
+| `loop_end` | `loop_end:` | schließt die Schleife. Im Bericht: `LoopEnd, loopsLeft: <übrig>` — damit ist an den Zeilen ablesbar, dass sie eine Schleife sind und die wievielte Runde läuft |
+| `loop_break` | `loop_break:` | verlässt die Schleife und macht **hinter** dem `loop_end` weiter, nicht am Fallende — die Schritte danach sind die, die den Prüfstand zurücksetzen. Bedingt abzubrechen geht über einen bedingten Sprung auf ein Label unmittelbar vor dem `loop_break` |
 | `jump_on_error` | `jump_on_error: <name>` | springt, wenn der Fall bereits fehlgeschlagen ist. Nur mit `on_fail: continue` überhaupt erreichbar — sonst wäre der Lauf am Fehlschlag schon beendet |
 | `rand` | `{to: Rn, min?, max?}` | Zufallszahl im Bereich (inklusive), Default 0…2³²−1 |
 | `jump_eq` / `jump_ne` / `jump_gt` / `jump_lt` / `jump_ge` / `jump_le` | `{a: <wert>, b: <wert>, to: <name>}` | Sprung, wenn a == / ≠ / > / < / ≥ / ≤ b |
@@ -339,6 +342,13 @@ primitive") — gewollt, damit Vendor-Abläufe nicht stumm falsch laufen.
   Bus-Primitive `send_raw`, Empfang über den Trace (`wait_for` prüft
   gegen `Bench._match_traced`, nicht gegen den Bus), Standard-
   Adressierung über `lss_assign` (`BusInterface`).
+- Schleifen sind **flach**: eine Schleife muss geschlossen sein, bevor die
+  nächste öffnet, und ein `loop` ohne `loop_end` (oder umgekehrt) ist ein
+  Ladefehler, kein Laufzeitproblem — sonst liefe der Rumpf einmal und der
+  Bericht sähe aus wie eine fertig durchlaufene Schleife. Verschachtelung
+  bräuchte einen Zähler je Ebene und einen Abbruch, der sagt welche Ebene
+  er verlässt; beides steht in keiner CSV, die nur LoopBegin und LoopEnd
+  kennt.
 - YAML-Eigenheit: unquotierte `0x…`-Literale parst YAML als int — die
   Engine normalisiert beides; in Dateien Hex-Werte bevorzugt quoten.
   Achtung: unquotiertes `no`/`yes`/`on`/`off` parst YAML als bool.

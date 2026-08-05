@@ -139,6 +139,10 @@ def default_css() -> str:
     return resources.files(__package__).joinpath(STYLESHEET).read_text(encoding="utf-8")
 
 
+#: a plain delay ("wait 1.5s"), as opposed to "wait for frame 0x181"
+_DELAY = re.compile(r"^wait \d")
+
+
 def _e(text: object) -> str:
     return html.escape(str(text), quote=False)
 
@@ -198,7 +202,11 @@ def case_html(case: CaseRecord) -> str:
         cls = _ROW_CLASS.get(step.state, "")
         text = _rich(step.text)
         if step.note:
-            text += f"<br />{_rich(step.note)}"
+            # A delay says nothing by itself, so its note is not a remark on
+            # the step — it *is* the step ("wait 1s; the menu updates late").
+            # Two lines for four words wastes a row somebody has to read past.
+            sep = "; " if _DELAY.match(step.text) else "<br />"
+            text += sep + _rich(step.note)
         if step.detail:
             text += f"<br /><i>{_rich(step.detail)}</i>"
         head += (f"<tr class='{cls}'><td>{_e(step.ts)}</td>"

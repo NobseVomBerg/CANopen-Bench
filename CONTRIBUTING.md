@@ -1,8 +1,25 @@
 # Contributing
 
-Thanks for your interest in CANopen-Bench. Small fixes, hardware reports
-and plugin experiments are all welcome — you do not need CAN hardware to
-contribute, demo mode covers most of the tool.
+Thanks for your interest in CANopen-Bench. This file describes how the
+project is developed, so that anyone reading the code can follow what it
+expects of itself. It is not an invitation to send patches.
+
+**Pull requests from outside are not accepted.** Reviewing code is work
+this project has no capacity for, and a patch nobody can review is worse
+than no patch. That is a decision about time, not about the quality of
+what you might send.
+
+What is open instead:
+
+- **Inside the company:** commit access is granted personally. Ask.
+- **From outside, with an idea:** open an issue and say what you need.
+  Ideas, hardware reports and "this does not work with my adapter" are
+  genuinely useful and cost nobody a review.
+- **From outside, with the time to build it:** clone the repository and
+  take it wherever you need. That is what the licence is for. Nothing is
+  planned to be backported, so build without waiting for anyone here.
+
+The rest of this file is for whoever holds commit access.
 
 ## Dev setup
 
@@ -18,7 +35,7 @@ Demo mode simulates devices from real EDS files — the bundled one is
 `canopen_bench/seed/DemoDevice.eds` — so the whole flow (scan, object
 browser, trace, test runs) works without an adapter.
 
-## Before you open a PR
+## Before you push
 
 ```bash
 ruff check .
