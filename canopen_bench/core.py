@@ -211,6 +211,17 @@ def _hexstr(value) -> str:
 
 
 
+def _subhex(value) -> str:
+    """A sub-index, always two digits: 0x01, not 0x1.
+
+    The width is what makes a column of them line up, and a sub-index is a
+    byte whichever way the file wrote it — "1", 1 and "0x01" are the same
+    address, and a report that renders them three ways invites the reader
+    to wonder whether they are."""
+    number = _as_int(value)
+    return f"0x{number:02X}" if number is not None else str(value)
+
+
 def _as_int(value) -> int | None:
     if isinstance(value, int):
         return value
@@ -381,9 +392,9 @@ def _step_text(key: str, val) -> str:
             return f"NMT {val['cmd']}" + (" (all)" if val.get("node") == "all" else "")
         return f"NMT {val}"
     if key == "sdo_read":
-        return f"read {_hexstr(val['index'])}:{_hexstr(val['sub'])}"
+        return f"read {_hexstr(val['index'])}:{_subhex(val['sub'])}"
     if key == "sdo_write":
-        return f"write {_hexstr(val['index'])}:{_hexstr(val['sub'])} = {val['value']}"
+        return f"write {_hexstr(val['index'])}:{_subhex(val['sub'])} = {val['value']}"
     if key == "wait":
         secs = val.get("s") if isinstance(val, dict) else val
         return f"wait {secs:g}s" if isinstance(secs, (int, float)) else f"wait {secs}s"
