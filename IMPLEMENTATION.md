@@ -203,6 +203,16 @@ Server restarts and multiple browsers therefore always agree on the state.
 re-addressing, frame polling). Which implementation answers is decided by
 the adapter selected on the Setup page:
 
+- **A device whose EDS is not to hand** → `canopen_bench/seed/CiA301Base.eds`,
+  a generic communication-objects catalog (0x1000, 0x1001, 0x1005,
+  0x1008–0x100A, 0x1017, 0x1018) seeded into every workspace and registered
+  *without* an identity, so a scan can never assign it. Assigned by hand
+  through the device's ⋮ menu, for a machine controller or a foreign node
+  that shares the bus. A registry row with no identity describes no device
+  (`Db.eds_list(devices_only=True)`), which is also why it raises no demo
+  DUT and does not count as a seeded workspace. Manual SDO/PDO/NMT rows
+  never needed an EDS at all — they address a node directly.
+
 - **IXXAT / PCAN / Vector — plus plugin adapters like CPC-USB** →
   `CanopenBus` (`bus/canopen_bus.py`), real protocol via
   canopen/python-can. IXXAT needs the VCI4 driver (Windows); Vector
