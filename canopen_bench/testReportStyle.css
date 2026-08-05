@@ -12,7 +12,7 @@
   td.resultOk     { background-color: #40C040; }
   td.resultNok    { background-color: #C04040; }
   tr.testStepOmitted, td.testStepOmitted { color: #808080; }
-  summary         { color: #B09090; }
+  tr.testStepFlow, summary  { color: #B09090; }
 }
 @media (prefers-color-scheme: light) {
   body            { background-color: #F0F0F0; color: #000000; }
@@ -28,7 +28,7 @@
   td.resultOk     { background-color: #44FF44; }
   td.resultNok    { background-color: #FF4444; }
   tr.testStepOmitted, td.testStepOmitted { color: #808080; }
-  summary         { color: #705050; }
+  tr.testStepFlow, summary  { color: #705050; }
 }
 h1              { font-size: 1em; margin-left: 8px; }
 h2              { font-size: 1em; margin-left: 16px; }
@@ -39,7 +39,7 @@ a:link          { color: #4040FF; text-decoration: none; }
 a:visited       { color: #8040FF; text-decoration: none; }
 a:hover, a:focus { color: #FF4080; text-decoration: none; }
 td.testStepComment, tr.testStepComment { color: #40C040; }
-tr.testStepFlow { color: #b06010; }
+/* tr.testStepFlow { color: #b06010; } */
 details         { margin: 8px 0 0 8px; }
 summary         { cursor: pointer; font-weight: bold; padding: 2px 0; }
 @media print {
