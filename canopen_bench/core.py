@@ -1387,7 +1387,7 @@ class Bench:
         run over a label."""
         for plugin in self.plugins:
             try:
-                name = plugin.describe_object(idx, sub)
+                name = plugin.describe_object(idx, sub, self.symbols)
             except Exception:
                 continue
             if name:
