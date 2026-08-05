@@ -91,7 +91,11 @@ light + dark theme (toggle in the header, persisted per browser):
   with different units) against a shared, monotonic-clock time axis.
 - **Tests** — the catalog lists the `TC*.yaml` test-case files from the
   configured TestCases folder (declarative step format, see
-  `docs/ablaeufe/testfall-format.md`; demo catalog as fallback). Runs
+  `docs/ablaeufe/testfall-format.md`; demo catalog as fallback). The
+  folder is re-read by the list's own **↻ reload**, and again whenever a
+  run starts, so an edited YAML needs neither a rescan nor a restart; a
+  selected case that an edit has just made unreadable is named in the
+  state log rather than quietly left out of the run. Runs
   execute the steps for real against the selected DUT via the bus —
   NMT/SDO/heartbeat-wait/operator prompts — with per-step progress
   ("step 3/9 …"), PASS/FAIL/ERROR/SKIP verdicts, tool filter, repeats,
