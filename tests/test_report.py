@@ -512,13 +512,16 @@ def test_the_shipped_stylesheet_is_a_file_and_is_what_gets_written(tmp_path):
     write_stylesheet(tmp_path)
     written = (tmp_path / STYLESHEET).read_text(encoding="utf-8")
     assert written == default_css()
-    assert "tr.testStepFlow { color: #b06010; }" in written
 
 
-def test_a_flow_line_is_coloured_text_in_every_context(tmp_path):
-    """A loop line is set apart by its text colour alone. It carried a
-    background tint per colour scheme and a third rule for print; one rule
-    now covers all three, so the three cannot drift apart."""
-    css = default_css()
-    assert css.count("tr.testStepFlow") == 1
-    assert "background-color: #3A2E20" not in css and "background-color: #EFE2CC" not in css
+def test_a_flow_line_is_set_apart_by_text_colour_not_by_a_tint():
+    """A loop line is marked by the colour of its text. Which colour, and
+    whether it differs per colour scheme, is a matter of taste and may be
+    edited freely — a background tint is not: it competes with the tints
+    that carry meaning (a failed step, a cancelled one) and makes a loop
+    marker read as an outcome."""
+    rules = [line.strip() for line in default_css().splitlines()
+             if "tr.testStepFlow" in line and not line.strip().startswith("/*")]
+    assert rules, "a flow line needs a rule of its own, or it is not marked at all"
+    assert all("background-color" not in rule for rule in rules)
+    assert all("color:" in rule for rule in rules)
