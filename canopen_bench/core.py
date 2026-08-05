@@ -373,7 +373,8 @@ def _with_registers(spec: dict, regs: dict) -> dict:
 #: that a loop can be read as a loop — which of its lines repeat, and how
 #: often.
 _FLOW_KEYS = (tclib._ARITH | tclib._COND_JUMPS
-              | {"label", "jump", "jump_on_error", "rand", "dump_registers"})
+              | {"label", "jump", "jump_on_error", "rand", "dump_registers",
+                 "loop", "loop_end", "loop_break"})
 
 
 def _step_text(key: str, val) -> str:
@@ -409,6 +410,13 @@ def _step_text(key: str, val) -> str:
         return f"LSS assign 1..{val['count']}"
     if key in tclib._ARITH:
         return f"{key} {val['to']}, {val['value']}"
+    if key == "loop":
+        count = val.get("n") if isinstance(val, dict) else val
+        return f"LoopBegin {count}"
+    if key == "loop_end":
+        return "LoopEnd"          # the executor appends how many turns are left
+    if key == "loop_break":
+        return "LoopBreak"
     if key in ("jump", "label"):
         return f"{key} {val}"
     if key in tclib._COND_JUMPS:
@@ -1364,10 +1372,27 @@ class Bench:
             if _as_int(actual) != _as_int(val["value"]):
                 text += f" = {actual}"
         if key in ("sdo_read", "sdo_write", "adjust") and isinstance(val, dict):
-            name = self._object_label(_hexstr(val["index"]), _hexstr(val["sub"]))
+            idx, sub = _hexstr(val["index"]), _subhex(val["sub"])
+            # the firmware's own name wins where a plugin can give one: the
+            # case was written against the headers, and its author is who
+            # this line is for. The EDS name stands in when none can be
+            name = self._symbol_label(idx, sub) or self._object_label(idx, sub)
             if name:
                 text += f"  ({name})"
         return text
+
+    def _symbol_label(self, idx: str, sub: str) -> str:
+        """What a plugin's headers call this object, or "" — first answer
+        wins, and a plugin that raises is one that does not get to stop a
+        run over a label."""
+        for plugin in self.plugins:
+            try:
+                name = plugin.describe_object(idx, sub)
+            except Exception:
+                continue
+            if name:
+                return name
+        return ""
 
     def _value_note(self, idx: str, sub: str, value: object, like: object = None) -> str:
         """A value as the report should show it: what came back, and what
@@ -3571,6 +3596,23 @@ class Bench:
         registers). Returns ("ok" | "fail" | "error", reason)."""
         labels = {step["label"]: i for i, step in enumerate(steps)
                   if len(step) == 1 and "label" in step}
+        # Where each `loop` finds its `loop_end`. Loops are flat (checked at
+        # load, testcases._check_loops), so one pass pairs them and at most
+        # one is ever running — which is why the counter can live here in the
+        # frame rather than in a register a case could overwrite.
+        loop_end_of: dict[int, int] = {}
+        opened: int | None = None
+        for i, step in enumerate(steps):
+            if len(step) != 1:
+                continue
+            k = next(iter(step))
+            if k == "loop":
+                opened = i
+            elif k == "loop_end" and opened is not None:
+                loop_end_of[opened] = i
+                opened = None
+        loop_at: int | None = None   # the running loop's `loop` step
+        loop_left = 0                # turns after the one running now
         pc = 0
         executed = 0
         while pc < len(steps):
@@ -3583,6 +3625,11 @@ class Bench:
                 return "error", "aborted"
             key, val = next(iter(steps[pc].items()))
             text = self._label_step(key, val, regs, builtins)
+            if key == "loop_end" and loop_at is not None:
+                # said here rather than in _step_text, which sees the file and
+                # not the run: "how many turns are left" is a fact about this
+                # moment, and it is the whole reason the line is worth a row
+                text += f", loopsLeft: {loop_left}"
             on_step(base + pc + 1, text)
             status, info = await self._exec_one(tc, key, val, node, regs,
                                                 builtins, should_stop)
@@ -3604,6 +3651,34 @@ class Bench:
                     # reason — both belong in the file for the same reason
                     detail=info,
                     ts=datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]))
+            if key == "loop":
+                count = val.get("n") if isinstance(val, dict) else val
+                if count:
+                    loop_at, loop_left = pc, count - 1
+                    pc += 1
+                else:
+                    # `loop: 0` runs the body no times. Saying so beats making
+                    # the author write a jump around it, and a converter that
+                    # computes the count does not have to special-case zero.
+                    loop_at, loop_left = None, 0
+                    pc = loop_end_of.get(pc, pc) + 1
+                continue
+            if key == "loop_end":
+                if loop_at is not None and loop_left > 0:
+                    loop_left -= 1
+                    pc = loop_at + 1
+                else:
+                    # also the way out when a jump landed inside a body: with
+                    # no loop running this is a step that does nothing, rather
+                    # than a jump back into a loop nobody opened
+                    loop_at = None
+                    pc += 1
+                continue
+            if key == "loop_break":
+                end = loop_end_of.get(loop_at) if loop_at is not None else None
+                loop_at, loop_left = None, 0
+                pc = (end + 1) if end is not None else pc + 1
+                continue
             if status == "jump":
                 pc = labels[info]
                 continue
@@ -3787,6 +3862,10 @@ class Bench:
             return "ok", ""
         if key == "emcy_clear":
             self.emcy_seen.clear()
+            return "ok", ""
+        if key in ("loop", "loop_end", "loop_break"):
+            # nothing to execute: a loop is program counter work, and that
+            # lives in _run_program, which is the only place that has one
             return "ok", ""
         if key == "dump_registers":
             # every register, whether the case has touched it or not: the

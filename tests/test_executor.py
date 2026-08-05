@@ -1423,3 +1423,104 @@ def test_a_sub_index_is_two_digits_wide_in_read_and_write_alike():
     assert _step_text("sdo_write", {"index": "0x2345", "sub": "0x1", "value": "0x0C"}) \
         == "write 0x2345:0x01 = 0x0C"
     assert _step_text("sdo_read", {"index": "0x2345", "sub": "0x10"}) == "read 0x2345:0x10"
+
+
+# -- loops: LoopBegin / LoopEnd, as the CSV always wrote them ----------------
+
+LOOP_COUNT_TC = """\
+id: "0040"
+name: "a loop reads as a loop"
+steps:
+  - mov: {to: R1, value: 0}
+  - loop: 3
+  - add: {to: R1, value: 1}
+  - loop_end:
+  - jump_eq: {a: R1, b: 3, to: ok}
+  - fail: "the body did not run three times"
+  - label: ok
+  - end:
+"""
+
+
+def test_a_loop_runs_its_body_n_times_and_counts_down_in_the_report(tc_bench):
+    """The count is the executor's, not a register's: a case cannot lose
+    track of its own loop by writing to the wrong Rn."""
+    _add_tc(tc_bench, "TC0040_loop.yaml", LOOP_COUNT_TC)
+    run_selected(tc_bench, {"0040"})
+    assert tc_bench.results == {"0040": "PASS"}
+
+    lines = [s.text for s in tc_bench._run_cases[0].steps]
+    assert "LoopBegin 3" in lines
+    # counting down the turns still to come, which is what says "three of
+    # these rows are one loop" rather than three unrelated passes
+    assert [ln for ln in lines if ln.startswith("LoopEnd")] == [
+        "LoopEnd, loopsLeft: 2", "LoopEnd, loopsLeft: 1", "LoopEnd, loopsLeft: 0"]
+
+
+LOOP_BREAK_TC = """\
+id: "0041"
+name: "a loop can be left early"
+steps:
+  - mov: {to: R1, value: 0}
+  - loop: 10
+  - add: {to: R1, value: 1}
+  - jump_eq: {a: R1, b: 2, to: enough}
+  - jump: carry_on
+  - label: enough
+  - loop_break:
+  - label: carry_on
+  - loop_end:
+  - jump_eq: {a: R1, b: 2, to: ok}
+  - fail: "the break did not leave the loop"
+  - label: ok
+  - end:
+"""
+
+
+def test_loop_break_continues_after_the_loop_end(tc_bench):
+    """Out of the loop, not out of the case: the steps after loop_end are
+    where a case puts the bench back, and a break that skipped them would
+    leave the device wherever the loop stopped."""
+    _add_tc(tc_bench, "TC0041_break.yaml", LOOP_BREAK_TC)
+    run_selected(tc_bench, {"0041"})
+    assert tc_bench.results == {"0041": "PASS"}
+
+    lines = [s.text for s in tc_bench._run_cases[0].steps]
+    assert lines.count("LoopBreak") == 1
+    # the first turn reached loop_end normally; the break happened on the
+    # second, so the loop stopped six turns short of its ten
+    assert [ln for ln in lines if ln.startswith("LoopEnd")] == ["LoopEnd, loopsLeft: 9"]
+    # and the case carried on past the loop rather than ending there
+    assert lines[-1] == "end"
+
+
+LOOP_ZERO_TC = """\
+id: "0042"
+name: "a loop of nothing"
+steps:
+  - mov: {to: R1, value: 0}
+  - loop: 0
+  - add: {to: R1, value: 1}
+  - loop_end:
+  - jump_eq: {a: R1, b: 0, to: ok}
+  - fail: "the body ran"
+  - label: ok
+  - end:
+"""
+
+
+def test_a_loop_of_zero_skips_its_body(tc_bench):
+    """So a converter that computes the count has no zero to special-case."""
+    _add_tc(tc_bench, "TC0042_zero.yaml", LOOP_ZERO_TC)
+    run_selected(tc_bench, {"0042"})
+    assert tc_bench.results == {"0042": "PASS"}
+
+
+def test_loop_steps_read_as_flow_not_as_traffic(tc_bench):
+    """Same kind as the jumps and arithmetic around them — nothing about a
+    loop reaches the bus."""
+    _add_tc(tc_bench, "TC0040_loop.yaml", LOOP_COUNT_TC)
+    run_selected(tc_bench, {"0040"})
+    for step in tc_bench._run_cases[0].steps:
+        if step.text.startswith(("LoopBegin", "LoopEnd")):
+            assert step.state == "flow", step.text
