@@ -7,7 +7,10 @@ device, which step said what, and how it ended.
 Three decisions worth stating:
 
 * **One stylesheet, next to the files, linked.** ``testReportStyle.css``
-  is written into the results folder once and every report links it. It
+  ships as a file of that name beside this module — CSS belongs in a
+  ``.css`` file, where it can be edited, diffed and highlighted as such —
+  and is written into the results folder once, where every report links
+  it. It
   is not copied into each file: that would repeat the same block a
   thousand times over a year of runs, and it would make restyling
   impossible — the point of a stylesheet is that changing it changes the
@@ -36,6 +39,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from importlib import resources
 
 #: Verdicts, in the vocabulary the runner produces.
 PASS, FAIL, ERROR, SKIP = "PASS", "FAIL", "ERROR", "SKIP"
@@ -54,65 +58,6 @@ _ROW_CLASS = {"ok": "testStepOk", "fail": "testStepNok", "error": "testStepNok",
 
 #: written next to the reports as this file, and linked from them
 STYLESHEET = "testReportStyle.css"
-
-CSS = """\
-@media (prefers-color-scheme: dark) {
-  body            { background-color: #101010; color: #FFFFFF; }
-  h1, h2          { color: #B09090; }
-  table           { margin-top: 8px; border: 0px solid #606060; border-style: ridge; }
-  tr              { background-color: #000000; }
-  tr.testStepNok      { background-color: #C04040; }
-  tr.testStepCanceled { background-color: #C0C040; }
-  td, th          { padding: 0 8px; border-bottom: 1px dotted #606060; }
-  tr:hover        { background-color: #444; }
-  th              { background-color: #101010; text-align: left; }
-  td.resultCanceled { background-color: #C0C040; }
-  td.resultOk     { background-color: #40C040; }
-  td.resultNok    { background-color: #C04040; }
-  tr.testStepOmitted, td.testStepOmitted { color: #808080; }
-  tr.testStepFlow { background-color: #3A2E20; }
-  summary         { color: #B09090; }
-}
-@media (prefers-color-scheme: light) {
-  body            { background-color: #F0F0F0; color: #000000; }
-  h1, h2          { color: #705050; }
-  table           { margin-top: 8px; border: 8px solid #E0E0E0; border-style: ridge; }
-  tr              { background-color: #FFFFFF; }
-  tr.testStepNok      { background-color: #FF4444; }
-  tr.testStepCanceled { background-color: #FFFF44; }
-  td, th          { padding: 0 8px; border-bottom: 1px solid #A0A0A0; }
-  tr:hover        { background-color: #AAA; }
-  th              { background-color: #F0F0F0; text-align: left; }
-  td.resultCanceled { background-color: #FFFF44; }
-  td.resultOk     { background-color: #44FF44; }
-  td.resultNok    { background-color: #FF4444; }
-  tr.testStepOmitted, td.testStepOmitted { color: #808080; }
-  tr.testStepFlow { background-color: #EFE2CC; }
-  summary         { color: #705050; }
-}
-h1              { font-size: 1em; margin-left: 8px; }
-h2              { font-size: 1em; margin-left: 16px; }
-th.emptyColumn  { height: 10px; }
-th.StepLine     { width: 50px; }
-td.testCaseName { font-weight: bold; }
-a:link          { color: #4040FF; text-decoration: none; }
-a:visited       { color: #8040FF; text-decoration: none; }
-a:hover, a:focus { color: #FF4080; text-decoration: none; }
-td.testStepComment, tr.testStepComment { color: #40C040; }
-details         { margin: 8px 0 0 8px; }
-summary         { cursor: pointer; font-weight: bold; padding: 2px 0; }
-@media print {
-  h1, h2        { font-size: 1em; }
-  table         { border: none; }
-  td, th        { border: none; border-top: 1px solid #C0C0C0; }
-  tr.testStepNok   { color: #FF0000; font-weight: bold; }
-  tr.testStepFlow  { background-color: transparent; color: #705030; }
-  td.resultCanceled { color: #C0C000; font-weight: bold; }
-  td.resultOk   { color: #40C040; font-weight: bold; }
-  td.resultNok  { color: #FF0000; font-weight: bold; }
-  details[open] { display: block; }
-}
-"""
 
 
 @dataclass
@@ -179,7 +124,19 @@ def write_stylesheet(folder) -> None:
     from pathlib import Path
     target = Path(folder) / STYLESHEET
     if not target.exists():
-        target.write_text(CSS, encoding="utf-8")
+        target.write_text(default_css(), encoding="utf-8")
+
+
+def default_css() -> str:
+    """The stylesheet this bench ships, read from the file of that name
+    beside this module.
+
+    A real ``.css`` file rather than a string in here: it is edited, diffed
+    and highlighted as CSS, which a Python triple-quoted string affords
+    none of. Read through ``importlib.resources`` so it is found in an
+    installed wheel as readily as in a checkout.
+    """
+    return resources.files(__package__).joinpath(STYLESHEET).read_text(encoding="utf-8")
 
 
 def _e(text: object) -> str:
