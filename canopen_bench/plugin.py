@@ -270,6 +270,23 @@ class BenchPlugin:
         """
         return {}
 
+    def describe_object(self, index: str, sub: str) -> str:
+        """What the device's own firmware calls this object, or "".
+
+        The bench already names an object from the EDS, which is what the
+        operator sees on the device. This is the other name: the identifier
+        in the headers, which is what somebody reading the firmware searches
+        for. Where a plugin can supply it, the report step line carries it
+        instead of the EDS name, because a test case is written against the
+        firmware and its author is the person the line has to serve.
+
+        Deriving it from a symbol table means knowing that vendor's naming
+        convention (``eObj<index>_<sub>`` and the like), which is exactly
+        what the neutral core must not assume — hence a hook rather than a
+        rule. ``index`` and ``sub`` arrive as hex strings ("0x2345", "0x01").
+        """
+        return ""
+
     def symbol_dirs(self) -> list[Path]:
         """Directories with the device's own C headers, parsed into symbol
         tables (indices, sub-indices, enum values — see
