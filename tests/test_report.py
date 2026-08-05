@@ -25,6 +25,7 @@ from canopen_bench.report import (
     StepRecord,
     case_html,
     collect_overview,
+    default_css,
     load_runs,
     overview_html,
     summary_html,
@@ -438,11 +439,18 @@ def test_report_overview_end_to_end_through_the_bench(tmp_path):
     the snapshot the frontend reads, and clamps the day window."""
     bench = _bench_res(tmp_path)
     folder = Path(bench.paths["res"])
-    run = {"started": "2026-07-28T08:00:00", "cases": [
-        _case_doc(id="01", name="power off", variant="V1", verdict="PASS", file="a.html"),
-        _case_doc(id="02", name="wrong expect", variant="V2", verdict="FAIL", file="b.html"),
+    # Dated relative to today, not fixed: this path goes through the real
+    # clock (the bench action, unlike load_runs, takes no `now`), so a
+    # literal date would sit inside the window on the day it was written
+    # and outside it a week later — a test that passes until it doesn't.
+    started = datetime.now() - timedelta(days=2)
+    run = {"started": started.isoformat(), "cases": [
+        _case_doc(id="01", name="power off", variant="V1", verdict="PASS", file="a.html",
+                  started=started.isoformat()),
+        _case_doc(id="02", name="wrong expect", variant="V2", verdict="FAIL", file="b.html",
+                  started=started.isoformat()),
     ]}
-    _write_run(folder, "20260728_080000__", run)
+    _write_run(folder, started.strftime("%Y%m%d_%H%M%S") + "__", run)
 
     bench.dispatch("report_overview", {"days": 7})
 
@@ -453,8 +461,8 @@ def test_report_overview_end_to_end_through_the_bench(tmp_path):
     assert variants["V1"]["verdict"] == "PASS"
     assert variants["V2"]["verdict"] == "FAIL"
 
-    # days=0 falls back to the 7-day default: the run above (28 Jul) is
-    # inside a 7-day window from "now", so it still shows up
+    # days=0 falls back to the 7-day default: the run above is two days
+    # old, so it is inside that window and still shows up
     bench.dispatch("report_overview", {"days": 0})
     assert bench.snapshot()["tests"]["overview"]["runs"] == 1
 
@@ -494,3 +502,23 @@ def test_a_case_that_was_not_re_run_does_not_hold_the_variant_red():
     # the failure is not hidden — it is still in the case's own line
     failing = next(c for c in group.cases if c.id == "4857")
     assert failing.last_verdict == "FAIL" and failing.rate == "0/1"
+
+
+def test_the_shipped_stylesheet_is_a_file_and_is_what_gets_written(tmp_path):
+    """The look lives in canopen_bench/testReportStyle.css, not in a string
+    inside report.py, and what lands in the results folder is that file
+    unchanged — so editing the shipped stylesheet is editing what a run
+    actually produces, and it can be read and diffed as the CSS it is."""
+    write_stylesheet(tmp_path)
+    written = (tmp_path / STYLESHEET).read_text(encoding="utf-8")
+    assert written == default_css()
+    assert "tr.testStepFlow { color: #b06010; }" in written
+
+
+def test_a_flow_line_is_coloured_text_in_every_context(tmp_path):
+    """A loop line is set apart by its text colour alone. It carried a
+    background tint per colour scheme and a third rule for print; one rule
+    now covers all three, so the three cannot drift apart."""
+    css = default_css()
+    assert css.count("tr.testStepFlow") == 1
+    assert "background-color: #3A2E20" not in css and "background-color: #EFE2CC" not in css
