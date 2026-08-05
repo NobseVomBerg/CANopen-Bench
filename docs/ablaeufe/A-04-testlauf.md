@@ -40,7 +40,12 @@ UI → `Bench.act_run_start` → Step-Executor →
    `id`, `name`, `tools`, `est` wie heute aus `data.TESTS`. Fehlt der
    Ordner oder ist er leer, bleibt `data.TESTS` als Demo-Katalog aktiv.
    Nicht parsebare Dateien erscheinen im Katalog als fehlerhaft markiert
-   und sind nicht wählbar (Fehlerpfad 1).
+   und sind nicht wählbar (Fehlerpfad 1). Der Ordner wird über **↻ reload**
+   in der Katalogleiste neu eingelesen und zusätzlich bei jedem Start eines
+   Laufs — eine geänderte YAML braucht also weder Rescan noch Neustart.
+   War ein ausgewählter Fall vor dem Neueinlesen lauffähig und ist es
+   danach nicht mehr, nennt das Zustandsprotokoll ihn, statt ihn still
+   aus dem Lauf zu nehmen.
 2. **Expansion [Ist]:** `act_run_start` expandiert die Auswahl zu
    `run_order`: für jeden Run-Durchlauf (`repeat_run`) jede gewählte ID
    × `repeat_case`. Log `RUN  started — N test cases`.
