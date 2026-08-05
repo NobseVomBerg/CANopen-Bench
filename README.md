@@ -84,7 +84,7 @@ has been exercised, not what is warranted.
 |---|---|---|
 | IXXAT USB-to-CAN | VCI4 (Windows) | in regular use on the author's bench |
 | PCAN-USB | PCANBasic | wired up, never run — no such adapter here |
-| Vector VN1600 (VN1610/VN1630) | XL driver (Windows) | wired up, never run — no such adapter here |
+| Vector VN1600 (VN1610/VN1630) | XL driver (Windows) | run against a VN1630 |
 | Demo mode | — | no hardware, EDS-driven simulation |
 | other adapters (e.g. CPC-USB) | via plugin packages | separate install |
 
