@@ -48,6 +48,17 @@ VERSION = __version__  # single source: canopen_bench/__init__.py
 # nothing at all. Keep it here, and keep seed/*.eds in package-data.
 SEED_EDS = Path(__file__).resolve().parent / "seed" / "DemoDevice.eds"
 
+#: Communication objects only, for a device whose own EDS is not to hand —
+#: the machine's own controllers, a foreign node that happens to sit on the
+#: same bus. Registered *without* an identity, so a scan can never assign it:
+#: what it describes is the standard, not this device, and a catalog that
+#: claims to know a device nobody has described is worse than an empty one
+#: with a reason (see _object_catalog, "no invented placeholder objects").
+#: Assigned by hand through the device's ⋮ menu, where the name says what it
+#: is. An object the device does not implement answers with an SDO abort,
+#: which the bench shows — so the guess corrects itself at the first read.
+BASE_EDS = Path(__file__).resolve().parent / "seed" / "CiA301Base.eds"
+
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
 TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈1 h at 55 frames/s
@@ -940,7 +951,7 @@ class Bench:
         self.teach: dict | None = None  # {step, of, text} while teaching
         self._teach_abort = False
 
-        if not db.eds_count():
+        if not db.eds_count(devices_only=True):
             seed_eds = list(data.SEED_EDS_FILES) + [e for p in self.plugins
                                                     for e in p.seed_eds()]
             for e in seed_eds:
@@ -954,6 +965,9 @@ class Bench:
                     db.eds_set_variant(e["file"], variant.get("index", ""),
                                        variant.get("sub", ""),
                                        variant.get("map") or {})
+        # after the seeding above, which only runs on an empty registry: this
+        # row would otherwise make the registry non-empty and swallow it
+        self._seed_base_eds()
 
         if db.is_first_run:
             self._seed_demo_eds()
@@ -1436,7 +1450,10 @@ class Bench:
         """
         if self.adapter != "demo":
             return
-        if any(e["enabled"] and self._ods.load(e["file"]) is not None for e in self.db.eds_list()):
+        # devices_only: the shipped CiA 301 base is enabled and loads, but a
+        # demo scan cannot find anything with it — it describes no device
+        if any(e["enabled"] and self._ods.load(e["file"]) is not None
+               for e in self.db.eds_list(devices_only=True)):
             return
         if any(e["file"] == "DemoDevice.eds" for e in self.db.eds_list()):
             return  # already registered (disabled) — an explicit choice, not ours to override
@@ -2256,6 +2273,32 @@ class Bench:
         self.db.eds_set_commands(src.name, [
             {"key": "svc", "label": "Service mode", "badge": "SVC"},
         ])
+
+    def _seed_base_eds(self) -> None:
+        """Install the generic CiA 301 EDS and register it with no identity.
+
+        On every start, not only the first: a workspace made before this file
+        existed should get it too. Only when the registry has no row for it —
+        so an operator who disabled it keeps it disabled, and one who edited
+        the file keeps their edit. Removing the row brings it back on the
+        next start, the same way a deleted default flow comes back; disabling
+        is how to put it out of the way for good.
+
+        Registered directly rather than through add_eds_file, which derives
+        the identity from the file and would give this one 0x0·0x0. The empty
+        identity is the point: _rematch_devices only looks up devices that
+        report one, and no reported identity normalizes to empty, so nothing
+        can be assigned this file by accident.
+        """
+        if any(e["file"] == BASE_EDS.name for e in self.db.eds_list()):
+            return
+        try:
+            content = BASE_EDS.read_text(encoding="utf-8")
+        except OSError as exc:
+            self.log(f"EDS  base file unavailable ({BASE_EDS.name}) — {exc}", "emcy0")
+            return
+        self.db.eds_write_file(BASE_EDS.name, content)
+        self.db.eds_add(BASE_EDS.name, "CiA 301 base (generic)", "", "", True)
 
     def add_eds_file(self, filename: str, content: str) -> tuple[bool, str]:
         """Parse and register a real EDS file, stored as a plain file under

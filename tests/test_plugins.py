@@ -76,10 +76,14 @@ def test_plugin_adapter_backend_merged_into_bus(tmp_path):
 def test_plugin_seeds_eds_once(tmp_path):
     db = Db(tmp_path / "x.db")
     bench = Bench(db, plugins=[FakePlugin()])
-    assert {e["file"] for e in bench.db.eds_list()} == {"fake_dev.eds"}
+    # devices_only: the registry also carries the shipped CiA 301 base,
+    # which describes no device and is nobody's contribution but the core's
+    assert {e["file"] for e in bench.db.eds_list(devices_only=True)} == {"fake_dev.eds"}
 
     again = Bench(db, plugins=[FakePlugin()])
-    assert {e["file"] for e in again.db.eds_list()} == {"fake_dev.eds"}  # not duplicated
+    assert {e["file"] for e in again.db.eds_list(devices_only=True)} == {"fake_dev.eds"}
+    # and the core's own base EDS is seeded once, not once per start
+    assert [e["file"] for e in again.db.eds_list()].count("CiA301Base.eds") == 1
 
 
 # -- seeded variant detection (Bench.__init__ seed_eds loop, "variant" key) -
