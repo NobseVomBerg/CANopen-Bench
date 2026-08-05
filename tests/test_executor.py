@@ -1301,6 +1301,9 @@ def test_dump_registers_puts_every_register_in_the_report(tc_bench):
     step = tc_bench._run_cases[0].steps[-1]
     assert step.text == "dump registers"
     assert step.note == "state before the write"
+    # the case looking at its own registers is bookkeeping, not traffic —
+    # same kind as the jumps and arithmetic around it
+    assert step.state == "flow"
     for name in (f"R{i}" for i in range(16)):
         assert f"{name} = 0x" in step.detail, f"{name} missing from the dump"
     # both bases, because a case mixes them: a screen id reads in hex, a
