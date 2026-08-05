@@ -438,11 +438,18 @@ def test_report_overview_end_to_end_through_the_bench(tmp_path):
     the snapshot the frontend reads, and clamps the day window."""
     bench = _bench_res(tmp_path)
     folder = Path(bench.paths["res"])
-    run = {"started": "2026-07-28T08:00:00", "cases": [
-        _case_doc(id="01", name="power off", variant="V1", verdict="PASS", file="a.html"),
-        _case_doc(id="02", name="wrong expect", variant="V2", verdict="FAIL", file="b.html"),
+    # Dated relative to today, not fixed: this path goes through the real
+    # clock (the bench action, unlike load_runs, takes no `now`), so a
+    # literal date would sit inside the window on the day it was written
+    # and outside it a week later — a test that passes until it doesn't.
+    started = datetime.now() - timedelta(days=2)
+    run = {"started": started.isoformat(), "cases": [
+        _case_doc(id="01", name="power off", variant="V1", verdict="PASS", file="a.html",
+                  started=started.isoformat()),
+        _case_doc(id="02", name="wrong expect", variant="V2", verdict="FAIL", file="b.html",
+                  started=started.isoformat()),
     ]}
-    _write_run(folder, "20260728_080000__", run)
+    _write_run(folder, started.strftime("%Y%m%d_%H%M%S") + "__", run)
 
     bench.dispatch("report_overview", {"days": 7})
 
@@ -453,8 +460,8 @@ def test_report_overview_end_to_end_through_the_bench(tmp_path):
     assert variants["V1"]["verdict"] == "PASS"
     assert variants["V2"]["verdict"] == "FAIL"
 
-    # days=0 falls back to the 7-day default: the run above (28 Jul) is
-    # inside a 7-day window from "now", so it still shows up
+    # days=0 falls back to the 7-day default: the run above is two days
+    # old, so it is inside that window and still shows up
     bench.dispatch("report_overview", {"days": 0})
     assert bench.snapshot()["tests"]["overview"]["runs"] == 1
 
