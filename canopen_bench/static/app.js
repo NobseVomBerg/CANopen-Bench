@@ -1006,6 +1006,8 @@ function TestsPage({ s, ui, setUi }) {
     <span onClick=${() => send('tests_all', { ids: shown.map((r) => r[0]) })} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">all</span>
     <span onClick=${() => send('tests_none')} style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer">none</span>
     <span style="flex:1"></span>
+    <span onClick=${() => send('tc_rescan')} title="Re-read the TestCases folder — after editing a YAML, without restarting"
+      style="font-size:11px;color:var(--acc);font-weight:600;cursor:pointer;margin-right:12px">↻ reload</span>
     <span style="font:10.5px ${MONO};color:var(--faint)">${shown.length} of ${t.catalog.length}</span>
   </div>
   <div style="flex:1;display:flex;min-height:0">

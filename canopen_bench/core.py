@@ -3218,7 +3218,23 @@ class Bench:
         else:
             self.repeat_run = n
 
+    def _runnable_ids(self) -> set[str]:
+        """The ids that can actually be run: parsed without a schema error."""
+        return {tc.id for tc in self.testcases.values() if not tc.error}
+
     def act_run_start(self, p: dict) -> None:
+        # Re-read the folder first, so a case edited since the last scan runs
+        # as it stands on disk rather than as it stood at startup. Whatever
+        # the re-read costs is said out loud: the selection is narrowed to
+        # what is runnable a few lines below, and a case that a fresh typo
+        # just made unreadable would otherwise simply not run, quietly, with
+        # the count on the button still promising it.
+        selected_before = self._runnable_ids() & self.test_sel
+        self._load_testcases(log=False)
+        lost = sorted(selected_before - self._runnable_ids())
+        if lost:
+            self.log(f"RUN  {len(lost)} selected test case(s) no longer readable after "
+                     f"re-reading the folder: {', '.join(lost)}", "emcy0")
         # what is selected *and* on screen. A filter narrows the list and
         # not the selection, so a case selected before the filter was set
         # stays selected while being invisible — and ran. The button has

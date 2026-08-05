@@ -1346,3 +1346,70 @@ def test_the_answer_comes_back_in_the_base_it_was_asked_in(tc_bench):
     assert hexed.detail == "Response: 0x00260001", hexed.detail
     # nothing to go on, so it stays as the device sent it
     assert plain.detail == "Response: 0x00260001", plain.detail
+
+
+# -- the folder is re-read when a run starts ---------------------------------
+
+EDIT_TC_FIRST = """\
+id: "0031"
+name: "edited between runs"
+steps:
+  - log: "the first version"
+  - end:
+"""
+
+EDIT_TC_SECOND = """\
+id: "0031"
+name: "edited between runs"
+steps:
+  - fail: "the edited version ran"
+  - end:
+"""
+
+EDIT_TC_BROKEN = """\
+id: "0031"
+name: "edited between runs"
+steps:
+  - not_a_step: {}
+  - end:
+"""
+
+
+def test_a_case_edited_on_disk_runs_as_edited(tc_bench):
+    """Editing a YAML used to need the whole tool restarted: the catalog was
+    read at startup and at nothing else the UI could reach. A run now reads
+    the folder first, so what runs is what is on disk."""
+    _add_tc(tc_bench, "TC0031_edit.yaml", EDIT_TC_FIRST)
+    run_selected(tc_bench, {"0031"})
+    assert tc_bench.results == {"0031": "PASS"}
+
+    Path(tc_bench.paths["tc"]).joinpath("TC0031_edit.yaml").write_text(EDIT_TC_SECOND)
+    run_selected(tc_bench, {"0031"})          # no rescan, no restart
+    assert tc_bench.results == {"0031": "FAIL"}
+
+
+def test_a_case_broken_since_the_last_scan_is_named_rather_than_dropped(tc_bench):
+    """A case that a fresh typo made unreadable falls out of the catalog, and
+    the start narrows the selection to what is runnable. Silently, that is a
+    run that did less than the button promised — so it says which."""
+    _add_tc(tc_bench, "TC0031_edit.yaml", EDIT_TC_FIRST)
+    Path(tc_bench.paths["tc"]).joinpath("TC0031_edit.yaml").write_text(EDIT_TC_BROKEN)
+    tc_bench.logs = []
+
+    run_selected(tc_bench, {"0031"})
+
+    assert any(ln["type"] == "emcy0" and "no longer readable" in ln["msg"]
+               and "0031" in ln["msg"] for ln in tc_bench.logs), tc_bench.logs
+    assert tc_bench.results == {}             # and it did not run
+
+
+def test_a_case_hidden_by_the_tool_filter_is_not_reported_as_broken(tc_bench):
+    """The filter hiding a case is not the folder losing it. Only what the
+    re-read actually cost gets named, or the message cries wolf every time
+    somebody runs with a filter set."""
+    _add_tc(tc_bench, "TC0031_edit.yaml", EDIT_TC_FIRST)
+    tc_bench.logs = []
+
+    run_selected(tc_bench, {"0031"})
+
+    assert not [ln for ln in tc_bench.logs if "no longer readable" in ln["msg"]]
