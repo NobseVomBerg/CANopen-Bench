@@ -88,14 +88,23 @@ const btn = {
 function PsuBox({ psu }) {
   const fieldStyle = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);font:11px ${MONO};border-radius:5px;padding:4px 7px;outline:none;width:64px`;
   const head = (t) => html`<span style="font-size:10.5px;color:var(--dim);font-weight:600">${t}</span>`;
-  if (!psu) {
+  // A search that found nothing is still "no supply", so it belongs in this
+  // box and not in the one below: that one is built for a supply that
+  // answered, and without `found` it offered an output toggle and a refresh
+  // for a device that is not there — while the one control that helps, the
+  // search, was the one it left out. The only way back out was Release,
+  // labelled as handing the port back, which is not what a reader looks for
+  // when nothing was ever connected.
+  if (!psu || !psu.found) {
     return html`
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px">
       <span style="font-weight:600;font-size:12px;flex:none">Power supply</span>
       <span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>
       <span class="hv" onClick=${() => send('psu_search')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;flex:none">Search…</span>
-      <span style="font-size:10.5px;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-        Only ports whose description a driver recognises are opened — a serial port might be the CAN adapter.</span>
+      ${psu && psu.error
+        ? html`<span style="font-size:11px;color:var(--red);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${psu.error}</span>`
+        : html`<span style="font-size:10.5px;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        Only ports whose description a driver recognises are opened — a serial port might be the CAN adapter.</span>`}
     </div>`;
   }
   const on = psu.output;
