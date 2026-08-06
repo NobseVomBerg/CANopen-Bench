@@ -7,12 +7,22 @@ CPC-USB adapter additionally needs the cob-cpcusb driver package.
 """
 import argparse
 import os
+import signal
 import sys
+import time
 from pathlib import Path
 
 import uvicorn
 
 from .app import create_app
+
+#: How long uvicorn may wait for open connections when stopping. The state
+#: channel is a WebSocket per browser tab, and a tab left open on another
+#: screen never closes it — with uvicorn's default of "wait as long as it
+#: takes", Ctrl+C began a shutdown that never ended. The process stayed
+#: alive holding the supply's serial port, so the next start reported no
+#: power supply found, and the way out was the task manager.
+SHUTDOWN_S = 5
 
 #: Name of the lock file inside a data folder. Dot-prefixed, so it stays out
 #: of the workspace list (Bench._workspace_names skips those).
@@ -81,6 +91,33 @@ def claim_data_folder(root: Path) -> int | None:
     return None
 
 
+def take_over(root: Path, pid: int, timeout_s: float = 8.0) -> bool:
+    """Stop the bench holding this data folder, then claim it.
+
+    Safe to do by pid: the folder is locked, and only the process holding
+    that lock ever wrote the pid behind it, so it cannot be a number the
+    system has since handed to something else. That is the whole reason
+    the pid lives in the lock file rather than in one of its own.
+
+    Windows has no polite signal for this — os.kill terminates there
+    whatever is passed — so the bench does not get to run its shutdown.
+    It does not need to: the port and the bus are handles, and handles go
+    when the process does.
+    """
+    if not pid:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass    # gone already, or not ours to signal — the wait below decides
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if claim_data_folder(root) is None:
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="CANopen Bench web tool")
     ap.add_argument("--host", default="127.0.0.1")
@@ -90,22 +127,35 @@ def main() -> None:
                          "workspaces live as subfolders of ./data (or $CANOPEN_BENCH_DATA) "
                          "and are selected on the Setup page. Skips the one-bench-per-data-"
                          "folder check, since there is no data folder to speak of")
+    ap.add_argument("--takeover", action="store_true",
+                    help="stop the bench already running on this data folder and take it "
+                         "over, instead of refusing to start. What it is really for is the "
+                         "one left behind by a laptop that slept: it still holds the "
+                         "supply's serial port, and no other program can hand that back")
     args = ap.parse_args()
 
     if not (args.db or os.environ.get("CANOPEN_BENCH_DB")):
         root = Path(os.environ.get("CANOPEN_BENCH_DATA", "data"))
         held_by = claim_data_folder(root)
+        if held_by is not None and args.takeover:
+            print(f"Stopping the bench on {root.resolve()} (process {held_by}) …")
+            if take_over(root, held_by):
+                held_by = None
+            else:
+                print(f"Process {held_by} did not stop.", file=sys.stderr)
         if held_by is not None:
             who = f"as process {held_by}" if held_by else "already"
             print(f"CANopen Bench is running {who} on {root.resolve()}.\n"
                   f"Two of them share that folder's database, plugins and the hardware "
                   f"plugged into this machine.\n"
-                  f"Stop that one first, or give this one a folder and a port of its own:\n"
+                  f"Stop that one first, or start with --takeover to stop it from here.\n"
+                  f"To run both, give this one a folder and a port of its own:\n"
                   f"  CANOPEN_BENCH_DATA=<folder> canopen-bench --port <other port>",
                   file=sys.stderr)
             raise SystemExit(1)
 
-    uvicorn.run(create_app(args.db), host=args.host, port=args.port)
+    uvicorn.run(create_app(args.db), host=args.host, port=args.port,
+                timeout_graceful_shutdown=SHUTDOWN_S)
 
 
 if __name__ == "__main__":

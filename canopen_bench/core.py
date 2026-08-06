@@ -1018,11 +1018,25 @@ class Bench:
         return self.adapter == "demo"
 
     def shutdown(self) -> None:
-        """Server is stopping: close the bus connection like a disconnect."""
+        """Server is stopping: close the bus connection like a disconnect,
+        and let go of the supply's serial port.
+
+        A port this process still holds is one the next start cannot have,
+        and the search that then finds nothing says "no known power supply
+        found" — which reads as a hardware fault and sends the reader to
+        the cable. Closed, not released: ``psu_port`` stays in the
+        database, so the next start finds the same supply again.
+        """
         if self.connected:
             self.connected = False
             self.bus.disconnect()
             self.log("BUS  disconnected — server shutdown")
+        if self.psu is not None:
+            try:
+                self.psu.close()
+            except Exception as exc:  # noqa: BLE001 — nothing left to save it for
+                self.log(f"PSU  port not closed cleanly — {exc}", "emcy0")
+            self.psu, self._psu_state = None, None
 
     # ------------------------------------------------------------------
     def set_notifier(self, notify: Callable[[], Awaitable[None]]) -> None:
