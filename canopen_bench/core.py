@@ -17,7 +17,7 @@ import shutil
 import sys
 import time
 import zipfile
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
@@ -1284,7 +1284,6 @@ class Bench:
         file and a score, with nothing on disk behind it. A run nobody can
         open a week later is not a record of anything.
         """
-        passed = sum(1 for tid in order if self.results.get(tid) == "PASS")
         cases = [c for c in self._run_cases if c.id in order]
         run = reportlib.RunRecord(
             started=self._run_started or datetime.now().isoformat(timespec="seconds"),
@@ -1292,12 +1291,24 @@ class Bench:
             user=_bench_user(), workspace=self.workspace_name,
             tool=f"canopen-bench {__version__}", cases=cases)
         name = self._write_report(run)
+        if cases:
+            # counted over the same records the summary counts, so the two
+            # cannot disagree. Counting the run's ids against the verdict
+            # each of them left behind could: a case repeated 99 times is
+            # 99 entries in `order` sharing one entry in `results`, so the
+            # last run decided all 99 — 99/99 next to a summary that said
+            # 70 pass, 29 fail
+            passed, total = sum(1 for c in cases if c.verdict == reportlib.PASS), len(cases)
+        else:
+            # the demo catalog runs through the tick loop and leaves no case
+            # records behind (data.TESTS, _run_step), so its score is the
+            # one thing there is: a verdict per id
+            passed, total = sum(1 for tid in order if self.results.get(tid) == "PASS"), len(order)
         # `file` is what the UI links to, and only a run that really wrote
         # one has it — the demo's example entries name files that were
         # never on any disk, and a link to a 404 is worse than plain text
-        self.reports = [{"name": name, "file": name,
-                         "score": f"{passed}/{len(order)}",
-                         "ok": passed == len(order)}] + self.reports[:4]
+        self.reports = [{"name": name, "file": name, "score": f"{passed}/{total}",
+                         "ok": passed == total}] + self.reports[:4]
 
     def _write_report(self, run: reportlib.RunRecord) -> str:
         """One file per case, one summary, one JSON beside it. Returns the
@@ -1307,8 +1318,20 @@ class Bench:
         try:
             folder.mkdir(parents=True, exist_ok=True)
             reportlib.write_stylesheet(folder)
+            # a repeated case runs many times and each run is its own file:
+            # without the number they all carried one name, so every run
+            # after the first overwrote the one before it and all of the
+            # summary's rows — the failed ones too — linked to whichever
+            # ran last. Numbered only when the case did repeat, so an
+            # ordinary run's file names stay what they were.
+            runs_of = Counter(c.id for c in run.cases)
+            nth: Counter[str] = Counter()
             for case in run.cases:
-                case.file = f"{stamp}__{case.id}__{_slug(case.name)}.html"
+                name = f"{stamp}__{case.id}__{_slug(case.name)}"
+                if runs_of[case.id] > 1:
+                    nth[case.id] += 1
+                    name += f"__{nth[case.id]:03d}"
+                case.file = f"{name}.html"
                 (folder / case.file).write_text(reportlib.case_html(case), encoding="utf-8")
             summary = f"{stamp}__summary.html"
             (folder / summary).write_text(reportlib.summary_html(run), encoding="utf-8")

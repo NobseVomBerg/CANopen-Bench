@@ -283,6 +283,59 @@ def test_the_lines_that_turn_a_loop_are_set_apart_from_the_traffic(tmp_path):
     assert doc.count("testStepFlow") == 3 + 17 * 3
 
 
+def test_a_repeated_case_is_counted_once_per_run_it_made(tmp_path):
+    """The entry in the list counted the run's ids against the verdict each
+    of them had left behind. A case repeated 99 times is 99 entries in the
+    run order sharing one entry in `results`, so the last run decided all
+    99: the list said 99/99 next to a summary that said 70 pass, 29 fail.
+
+    Both numbers now come off the same records, so they cannot disagree.
+    """
+    bench = _bench(tmp_path)
+    bench._run_cases = [
+        CaseRecord(id="0101", name="flaky", verdict="PASS"),
+        CaseRecord(id="0101", name="flaky", verdict="FAIL", reason="expected 0x0E"),
+        CaseRecord(id="0101", name="flaky", verdict="PASS"),
+    ]
+    bench.results = {"0101": "PASS"}      # the last one, and the only one kept
+    bench._push_report(["0101"] * 3)
+
+    entry = bench.reports[0]
+    assert entry["score"] == "2/3"
+    assert entry["ok"] is False
+    summary = (Path(bench.paths["res"]) / entry["file"]).read_text(encoding="utf-8")
+    assert "2 pass · 1 fail" in summary   # and the page it links to agrees
+
+
+def test_every_run_of_a_repeated_case_gets_its_own_file(tmp_path):
+    """They were all named after the case, so each run overwrote the one
+    before it and every row in the summary — the failed ones too — linked
+    to whichever ran last. Which is how 29 red rows all opened the same
+    green report."""
+    bench = _bench(tmp_path)
+    bench._run_cases = [
+        CaseRecord(id="0101", name="flaky", verdict="PASS"),
+        CaseRecord(id="0101", name="flaky", verdict="FAIL", reason="expected 0x0E"),
+        CaseRecord(id="0101", name="flaky", verdict="PASS"),
+    ]
+    bench._push_report(["0101"] * 3)
+
+    files = [c.file for c in bench._run_cases]
+    assert len(set(files)) == 3, files
+    folder = Path(bench.paths["res"])
+    assert all((folder / f).is_file() for f in files)
+    # and the one the failed row links to is the failed one
+    failed = folder / files[1]
+    assert "expected 0x0E" in failed.read_text(encoding="utf-8")
+
+
+def test_a_case_that_ran_once_keeps_its_plain_file_name(tmp_path):
+    bench = _bench(tmp_path)
+    bench._run_cases = [CaseRecord(id="0101", name="identity readable", verdict="PASS")]
+    bench._push_report(["0101"])
+    assert bench._run_cases[0].file.endswith("__0101__identity_readable.html")
+
+
 def test_the_run_puts_the_stylesheet_beside_the_reports(tmp_path):
     bench = _bench(tmp_path)
     bench.stop_on_err = False
