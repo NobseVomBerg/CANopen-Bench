@@ -1443,8 +1443,8 @@ steps:
 
 
 def test_a_loop_runs_its_body_n_times_and_counts_down_in_the_report(tc_bench):
-    """The count is the executor's, not a register's: a case cannot lose
-    track of its own loop by writing to the wrong Rn."""
+    """The counter is the executor's: a case cannot lose track of its own
+    loop by writing to the wrong Rn."""
     _add_tc(tc_bench, "TC0040_loop.yaml", LOOP_COUNT_TC)
     run_selected(tc_bench, {"0040"})
     assert tc_bench.results == {"0040": "PASS"}
@@ -1455,6 +1455,39 @@ def test_a_loop_runs_its_body_n_times_and_counts_down_in_the_report(tc_bench):
     # these rows are one loop" rather than three unrelated passes
     assert [ln for ln in lines if ln.startswith("LoopEnd")] == [
         "LoopEnd, loopsLeft: 2", "LoopEnd, loopsLeft: 1", "LoopEnd, loopsLeft: 0"]
+
+
+LOOP_FROM_REGISTER_TC = """\
+id: "0043"
+name: "a count the case works out first"
+steps:
+  - mov: {to: R11, value: 0}
+  - add: {to: R11, value: 6}
+  - add: {to: R11, value: 11}
+  - mov: {to: R1, value: 0}
+  - loop: {n: R11}
+  - add: {to: R1, value: 1}
+  - mov: {to: R11, value: 1}
+  - loop_end:
+  - jump_eq: {a: R1, b: 17, to: ok}
+  - fail: "the body did not run seventeen times"
+  - label: ok
+  - end:
+"""
+
+
+def test_a_loop_may_count_what_the_case_worked_out(tc_bench):
+    """A case does not always know the count when it is written: 4613 asks
+    the device which variant it is and then loops over as many parameters
+    as that variant has. The body writes to that register while the loop
+    is turning, which must not move it — the executor took the number when
+    the loop opened."""
+    _add_tc(tc_bench, "TC0043_from_register.yaml", LOOP_FROM_REGISTER_TC)
+    run_selected(tc_bench, {"0043"})
+    assert tc_bench.results == {"0043": "PASS"}
+    lines = [s.text for s in tc_bench._run_cases[0].steps]
+    assert "LoopBegin R11 = 17" in lines   # the register, and what it held
+    assert lines.count("LoopEnd, loopsLeft: 0") == 1
 
 
 LOOP_BREAK_TC = """\
