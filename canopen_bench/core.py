@@ -3586,7 +3586,8 @@ class Bench:
             return verdict, why
 
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
-                                              builtins, 0, on_step, stop, rec.steps)
+                                              builtins, 0, on_step, stop, rec.steps,
+                                              lines=tc.precondition_lines)
         if status in ("fail", "skip"):
             return done("SKIP", f"precondition: {why}")
         if status == "error":
@@ -3595,7 +3596,8 @@ class Bench:
         # fails means the case does not apply, and there is nothing to undo
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
                                               len(tc.preconditions), on_step, stop,
-                                              rec.steps, allow_continue=True)
+                                              rec.steps, allow_continue=True,
+                                              lines=tc.step_lines)
         if status == "ok":
             return done("PASS")
         if status == "skip":
@@ -3605,9 +3607,15 @@ class Bench:
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
                            regs: dict, builtins: dict, base: int,
                            on_step, should_stop, record: list | None = None,
-                           allow_continue: bool = False) -> tuple[str, str]:
+                           allow_continue: bool = False,
+                           lines: list[int] | None = None) -> tuple[str, str]:
         """Program-counter loop over one step list (format v2: labels, jumps,
-        registers). Returns ("ok" | "fail" | "error", reason)."""
+        registers). Returns ("ok" | "fail" | "error", reason).
+
+        ``base`` counts steps for the progress line ("step 3/9"), ``lines``
+        names them for the report — the file's own line numbers, which a
+        reader looks up in the editor. A caller with no file behind it
+        (a built-in case, a test) passes none and gets the count."""
         labels = {step["label"]: i for i, step in enumerate(steps)
                   if len(step) == 1 and "label" in step}
         # Where each `loop` finds its `loop_end`. Loops are flat (checked at
@@ -3659,7 +3667,8 @@ class Bench:
                 if state == "ok" and key in _FLOW_KEYS:
                     state = "flow"
                 record.append(reportlib.StepRecord(
-                    line=base + pc + 1, text=text, state=state,
+                    line=lines[pc] if pc < len(lines or ()) else base + pc + 1,
+                    text=text, state=state,
                     note=val.get("note", "") if isinstance(val, dict) else "",
                     # on the passing path this is what came back, not a
                     # reason — both belong in the file for the same reason

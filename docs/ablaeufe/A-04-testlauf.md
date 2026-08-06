@@ -156,7 +156,7 @@ Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
 
 | Datei | Inhalt |
 |---|---|
-| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt). Buchhaltung des Falls (Label, Sprung, Registerrechnung) ist hellbraun abgesetzt, damit eine Schleife als Schleife lesbar bleibt |
+| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt). Buchhaltung des Falls (Label, Sprung, Registerrechnung) ist hellbraun abgesetzt, damit eine Schleife als Schleife lesbar bleibt. Spalte **Line** ist die Zeilennummer in der Testdatei (1-basiert), nicht die Nummer des ausgeführten Schritts — ein Schritt im Report und ein Schritt im Editor sind damit dasselbe zum Nachschlagen |
 | `<stamp>__summary.html` | der Lauf: eine Zeile je Testfall, verlinkt auf dessen Datei |
 | `<stamp>__summary.json` | derselbe Lauf als Daten — Grundlage der Übersicht unten |
 | `testReportStyle.css` | einmal geschrieben, von allen Reports verlinkt, **nie überschrieben** |

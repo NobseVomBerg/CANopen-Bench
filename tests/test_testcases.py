@@ -30,6 +30,40 @@ def test_parse_valid_file():
     assert tc.dut == "selected"
 
 
+def test_every_step_knows_the_line_it_stands_on():
+    """The report shows this number, and somebody looks it up in the file
+    while the run is still on screen. Counting executed steps instead was
+    off by however tall the header happened to be."""
+    text = ("id: \"0001\"\n"
+            "name: \"smoke\"\n"
+            "\n"
+            "preconditions:\n"
+            "  - nmt: start\n"
+            "\n"
+            "steps:\n"
+            "  - log: \"hello\"\n"
+            "  - wait: 0.5\n")
+    tc = parse_testcase(text, "TC0001_smoke.yaml")
+    assert tc.error is None
+    assert tc.precondition_lines == [5]
+    assert tc.step_lines == [8, 9]
+    for line, step in zip(tc.step_lines, tc.steps):
+        assert next(iter(step)) in text.splitlines()[line - 1]
+
+
+def test_a_step_written_over_more_than_one_line_reports_its_first():
+    text = ("id: \"0001\"\n"
+            "name: \"smoke\"\n"
+            "steps:\n"
+            "  - sdo_read:\n"
+            "      index: \"0x1000\"\n"
+            "      sub: \"0x00\"\n"
+            "  - wait: 0.5\n")
+    tc = parse_testcase(text, "TC0001_smoke.yaml")
+    assert tc.error is None
+    assert tc.step_lines == [4, 7]
+
+
 def test_parse_rejects_unknown_head_key():
     tc = parse_testcase('id: "1"\nname: x\nbogus: 1\nsteps: [{nmt: start}]\n', "TC1_x.yaml")
     assert tc.error and "bogus" in tc.error
