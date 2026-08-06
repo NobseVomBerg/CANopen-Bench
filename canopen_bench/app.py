@@ -141,6 +141,17 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         holder["ticker"].cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await holder["ticker"]
+        # Close the state channels rather than waiting for the browsers to
+        # do it. uvicorn's graceful shutdown waits for open connections,
+        # and a tab left open on another screen never closes this one — so
+        # Ctrl+C started a shutdown that never finished, the process stayed
+        # alive holding the supply's serial port, and the next start found
+        # no power supply. __main__ caps that wait as well; this is what
+        # makes the normal case end at once instead of at the cap.
+        for ws in tuple(clients):
+            with contextlib.suppress(Exception):
+                await ws.close()
+        clients.clear()
         holder["bench"].shutdown()
         holder["bench"].db.close()
 
