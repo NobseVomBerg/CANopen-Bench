@@ -454,17 +454,29 @@ class CanopenBus(BusInterface):
             # Driver timestamps are epoch-based only for some backends —
             # IXXAT/PCAN/CPC deliver time since adapter or driver start, which
             # fromtimestamp() would render as a bogus 1970-relative clock.
-            # Relative clocks are mapped onto wall time with an offset anchored
-            # at the first such frame, so inter-frame deltas keep the
-            # hardware's µs precision instead of the Notifier's scheduling
-            # jitter; the anchor is refreshed if the mapping drifts (PC vs.
-            # adapter clock, or an adapter uptime reset).
+            # Relative clocks are mapped onto wall time by an offset, so
+            # inter-frame deltas keep the hardware's µs precision instead of
+            # the Notifier's scheduling jitter.
+            #
+            # The offset is the *smallest* gap seen between a frame's hardware
+            # stamp and our reading it: that gap is the offset plus however
+            # long the frame waited for our thread, so the smallest one is the
+            # closest we get to the offset by itself. Anchoring on the first
+            # frame instead baked that frame's wait into every frame after it,
+            # and the first frame is the worst one to ask — the adapter's FIFO
+            # can already hold traffic when we connect. A tenth of a second of
+            # wait there put every RX in the trace that far behind the TX it
+            # answered, which reads as a tool sending faster than it can be
+            # answered. Still re-anchored on a large jump (adapter reset, or a
+            # PC clock that stepped).
             ts = msg.timestamp
             if not ts:
                 ts = arrival
             elif abs(ts - arrival) > 300:
-                if self._ts_offset is None or abs(ts + self._ts_offset - arrival) > 0.5:
-                    self._ts_offset = arrival - ts
+                gap = arrival - ts
+                if self._ts_offset is None or gap < self._ts_offset \
+                        or abs(gap - self._ts_offset) > 0.5:
+                    self._ts_offset = gap
                 ts += self._ts_offset
             out.append(Frame(
                 direction=direction,
