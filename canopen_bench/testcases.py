@@ -121,6 +121,11 @@ class TestCase:
     variants: list[str] = field(default_factory=list)
     preconditions: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
+    #: the line each of those steps stands on in the file, 1-based and
+    #: index-aligned with the list beside it. The report shows it, so a
+    #: step there and a step in the editor are the same thing to find.
+    precondition_lines: list[int] = field(default_factory=list)
+    step_lines: list[int] = field(default_factory=list)
     file: str = ""
     error: str | None = None  # parse/schema problem; entry is not runnable
 
@@ -410,6 +415,27 @@ def _substitute_symbols(doc: object, symbols) -> object:
     return doc
 
 
+def _step_lines(text: str) -> dict[str, list[int]]:
+    """Where each step stands in the file: 1-based line, per group.
+
+    The loader already has the document; this walks the same text a
+    second time for the node marks, which the constructed objects do not
+    carry. Once per file at catalog time, against a report somebody reads
+    with the file open next to it — the numbering has to be the file's,
+    not a count of what ran.
+    """
+    try:
+        root = yaml.compose(text)
+    except yaml.YAMLError:  # the load above already reported it
+        return {}
+    if not isinstance(root, yaml.MappingNode):
+        return {}
+    return {key.value: [item.start_mark.line + 1 for item in value.value]
+            for key, value in root.value
+            if key.value in ("preconditions", "steps")
+            and isinstance(value, yaml.SequenceNode)}
+
+
 def parse_testcase(text: str, filename: str, require_prefix: bool = True,
                    extensions: dict | None = None, symbols=None) -> TestCase:
     """``extensions`` maps plugin step names ("<plugin>.<key>") to their
@@ -450,6 +476,9 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
                    if isinstance(raw_variants, list) else [])
     tc.preconditions = doc.get("preconditions") or []
     tc.steps = doc.get("steps") or []
+    lines = _step_lines(text)
+    tc.precondition_lines = lines.get("preconditions", [])
+    tc.step_lines = lines.get("steps", [])
 
     problems: list[str] = []
     if not tc.id:

@@ -196,7 +196,10 @@ def case_html(case: CaseRecord) -> str:
     verdict = _e(case.verdict) + (f" — {_e(case.reason)}" if case.reason else "")
     head += _row("Result", verdict, _RESULT_CLASS.get(case.verdict, ""))
     head += "<tr><th colspan=3 class='emptyColumn'></th></tr>\n"
-    head += ("<tr><th>Timestamp</th><th class='StepLine'>StepLine</th>"
+    # the class keeps its old name on purpose: a results folder holds the
+    # stylesheet it was first written with and is never overwritten, so a
+    # new report dropped next to old ones still finds its column width
+    head += ("<tr><th>Timestamp</th><th class='StepLine'>Line</th>"
              "<th>Step Action and Comment</th></tr>\n")
     for step in case.steps:
         cls = _ROW_CLASS.get(step.state, "")
