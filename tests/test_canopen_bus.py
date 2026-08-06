@@ -171,6 +171,44 @@ def test_poll_frames_observes_sdo_traffic(master):
     assert all(f.time for f in frames)  # bus timestamps, not poll time
 
 
+def test_a_frame_read_late_does_not_shift_every_frame_after_it(master):
+    """The adapter's clock is mapped onto wall time by the smallest gap
+    seen between a hardware stamp and our reading it, not by the first one.
+
+    The first frame is the worst one to ask: the adapter's FIFO can already
+    hold traffic when we connect, so it may have been stamped long before
+    our thread reached it. Anchoring there put every later RX that far
+    behind the TX it answered — a trace in which every request appears to
+    go out before its answer comes back, which reads as a tool that does
+    not wait for one.
+    """
+    now = time.time()
+    master._trace = _TraceListener()
+    master._ts_offset = None
+    hw = 50644.0
+
+    # waiting in the adapter since before we connected: stamped 130 ms
+    # before our thread got to it
+    master._trace.queue.append(
+        ("RX", can.Message(arbitration_id=0x701, data=[0], timestamp=hw), now))
+    # our own request 10 ms later, stamped by us as it goes out
+    master._trace.queue.append(
+        ("TX", can.Message(arbitration_id=0x601, data=[0], timestamp=now + 0.010),
+         now + 0.010))
+    # its answer 1 ms after that, read with no backlog in the way
+    master._trace.queue.append(
+        ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw + 0.141),
+         now + 0.011))
+
+    frames = master.poll_frames(max_frames=16)
+    fmt = "%H:%M:%S.%f"
+    request = datetime.strptime(frames[1].time, fmt)
+    answer = datetime.strptime(frames[2].time, fmt)
+    assert answer > request, \
+        f"answer at {frames[2].time} before request at {frames[1].time}"
+    assert (answer - request).total_seconds() == pytest.approx(0.001, abs=0.0005)
+
+
 def test_poll_frames_maps_relative_driver_clock_to_wall_time(master):
     now = time.time()
     master._trace = _TraceListener()
