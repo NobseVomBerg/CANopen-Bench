@@ -1379,6 +1379,12 @@ class Bench:
             data = _frame_bytes(val, regs, builtins or {})
             if data:
                 text += f" = {_frame_text(data)}"
+        if key == "loop" and regs is not None:
+            # a count the case worked out is a register in the file, and
+            # "LoopBegin R11" says nothing about how long this run turned
+            count = val.get("n") if isinstance(val, dict) else val
+            if isinstance(count, str):
+                text += f" = {_resolve(count, regs, builtins or {})}"
         if key == "sdo_write" and regs is not None and isinstance(val, dict):
             actual = _write_value(val, regs, builtins or {})
             # only when it says something the value in the line does not —
@@ -3676,6 +3682,10 @@ class Bench:
                     ts=datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]))
             if key == "loop":
                 count = val.get("n") if isinstance(val, dict) else val
+                # resolved once, here: from now on the frame holds the
+                # number, so writing to that register does not move a loop
+                # that is already turning
+                count = _resolve(count, regs, builtins)
                 if count:
                     loop_at, loop_left = pc, count - 1
                     pc += 1
