@@ -193,6 +193,22 @@ def test_the_written_report_names_the_device_and_the_failing_step(tmp_path):
     assert "resultNok" in doc
 
 
+def test_the_line_column_is_the_line_in_the_file(tmp_path):
+    """It counted executed steps, so the number in the report and the line
+    in the editor were two different things — off by however tall the
+    header of that file happened to be, and the header is where an author
+    reads first."""
+    bench = _bench(tmp_path)
+    bench.stop_on_err = False
+    _run_all(bench)
+    passed = next(p for p in Path(bench.paths["res"]).iterdir() if "__0101__" in p.name)
+    doc = passed.read_text(encoding="utf-8")
+    assert ">Line</th>" in doc and ">StepLine</th>" not in doc
+    assert re.findall(r"</td><td>(\d+)</td><td>", doc) == ["6", "7"]
+    source = PASS_TC.splitlines()
+    assert "log:" in source[5] and "sdo_read:" in source[6]
+
+
 def test_a_written_run_opens_without_the_bench(tmp_path):
     """Every link a report makes is a bare file name, so a results folder
     read straight from the disk still works: the summary reaches its case
