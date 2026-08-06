@@ -174,16 +174,22 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return f"dump_registers: unknown field(s) {sorted(unknown)}"
         return None
     if key == "loop":
-        # A count, not a register: the executor keeps it, so a case cannot
-        # lose track of its own loop by writing to the wrong Rn — and the
-        # report can say how many turns are left without reading state that
-        # something else may have moved in between.
+        # The count may be a register, because a case does not always know
+        # it when it is written: "as often as this variant has parameters"
+        # is read from the device first. The executor still owns the
+        # counter — it takes the register's value once, when the loop
+        # opens — so a case cannot lose track of its own loop by writing
+        # to that Rn afterwards, and the report can still say how many
+        # turns are left without reading state something else may have
+        # moved in between.
         if isinstance(val, dict):
             if unknown := set(val) - {"n"} - _NOTE:
                 return f"loop: unknown field(s) {sorted(unknown)}"
             val = val.get("n")
-        return None if isinstance(val, int) and not isinstance(val, bool) and val >= 0 \
-            else "loop: needs a count (0 skips the body)"
+        if isinstance(val, int) and not isinstance(val, bool):
+            return None if val >= 0 else "loop: a count cannot be negative"
+        return None if _is_value(val) \
+            else "loop: needs a count or a register holding one (0 skips the body)"
     if key in ("loop_end", "loop_break"):
         if isinstance(val, dict) and (unknown := set(val) - _NOTE):
             return f"{key}: unknown field(s) {sorted(unknown)}"

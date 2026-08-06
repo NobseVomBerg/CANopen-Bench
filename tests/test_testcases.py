@@ -75,6 +75,21 @@ def test_parse_rejects_unknown_step_field():
     assert tc.error and "expekt" in tc.error
 
 
+def test_a_loop_count_may_be_a_register_but_not_a_word():
+    """The count is not always known when the case is written — it can be
+    read from the device first. Anything that is neither a number nor a
+    register is refused rather than turned into one pass, which is a
+    change no verdict would show."""
+    for count in ("3", "{n: 3}", "{n: R11}", "{n: $node}"):
+        tc = parse_testcase(f'id: "1"\nname: x\nsteps:\n  - loop: {count}\n'
+                            '  - nmt: start\n  - loop_end:\n', "TC1_x.yaml")
+        assert tc.error is None, f"{count}: {tc.error}"
+    for count in ("-1", "{n: nonsense}", "{n: true}"):
+        tc = parse_testcase(f'id: "1"\nname: x\nsteps:\n  - loop: {count}\n'
+                            '  - nmt: start\n  - loop_end:\n', "TC1_x.yaml")
+        assert tc.error and "loop" in tc.error, count
+
+
 def test_parse_rejects_unknown_primitive_and_bad_heartbeat():
     tc = parse_testcase('id: "1"\nname: x\nsteps: [{blink: 3}]\n', "TC1_x.yaml")
     assert tc.error and "blink" in tc.error
