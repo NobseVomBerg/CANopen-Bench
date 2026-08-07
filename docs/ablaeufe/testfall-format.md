@@ -275,8 +275,10 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `log` | `log: "Text"` | Annotation im Lauf-Log | — |
 | `emcy_clear` | `emcy_clear:` | verwirft die bis hier aufgezeichneten EMCYs | — |
 | `dump_registers` | `dump_registers:` oder `{note}` | schreibt alle 16 Register mit ihrem Inhalt in den Report — hex und dezimal, weil ein Fall beides mischt. Ein Debug-Schritt, der nichts prüft und nichts am Bus tut | keine |
-| `expect_no_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?}` | prüft, dass **keine** passende EMCY kam — ohne Feld: gar keine. Wartet nicht: kein Warten beweist, dass nichts mehr kommt; geprüft wird dasselbe Fenster wie bei `expect_emcy`, also alles seit dem letzten `emcy_clear` | passende EMCY vorhanden → FAIL, mit ihren Feldern in der Begründung |
-| `expect_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?, timeout?}` | prüft, ob seit dem letzten `emcy_clear` eine passende EMCY kam — **auch eine, die vor diesem Schritt eintraf**; sonst wird bis `timeout` (Default 1 s) darauf gewartet. Mindestens eines von `code`, `mec`, `reg` ist Pflicht (s.u.) | keine passende EMCY → FAIL, mit dem, was stattdessen kam |
+| `expect_no_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?}` | prüft, dass **keine** passende EMCY kam — ohne Feld: gar keine. Wartet nicht: kein Warten beweist, dass nichts mehr kommt. Geprüft wird der **ganze Testfall** (nicht nur die letzten Millisekunden wie bei `expect_emcy`): ein kurzes Fenster macht „ist X gekommen" strenger, „ist nichts gekommen" aber schwächer — ein Fehler früh im Fall fiele einfach aus dem Blick | passende EMCY vorhanden → FAIL, mit ihren Feldern in der Begründung |
+| `expect_emcy` | `{code?, mask?, mec?, mec_mask?, reg?, node?, timeout?}` | prüft, ob eine passende EMCY kam — **auch eine, die kurz vor diesem Schritt eintraf** (`core.FRAME_LOOKBACK_S`, 400 ms); sonst wird bis `timeout` (Default 1 s) darauf gewartet. Mindestens eines von `code`, `mec`, `reg` ist Pflicht (s.u.) | keine passende EMCY → FAIL, mit dem, was stattdessen kam |
+
+Beide EMCY-Prüfungen sehen dasselbe Fenster: **alle** EMCYs seit Fallbeginn — anders als bei einer PDO zählt nicht nur die neueste, denn ein Gerät mit drei Fehlern meldet drei EMCYs. Begrenzt wird das Fenster durch den Start des Testfalls (was davor kam, gehört zum vorherigen Lauf) und durch eine **EMCY mit Code 0x0000**: das ist die Aussage des Geräts, dass alle Fehler quittiert oder gelöscht sind, und alles davor gilt damit nicht mehr.
 
 ### Variablen, Arithmetik, Sprünge (v2)
 
