@@ -3690,6 +3690,13 @@ class Bench:
                 # moment, and it is the whole reason the line is worth a row
                 text += f", loopsLeft: {loop_left}"
             on_step(base + pc + 1, text)
+            # when the step began, not when the runner was done with it.
+            # Stamped afterwards, a row carried the moment its logging and
+            # its state push had finished — which is about when the *next*
+            # request went out, so a report line and the frame it is about
+            # sat a step apart in the trace. A step's own duration is still
+            # there to read: it is the gap to the row below.
+            started_at = datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]
             status, info = await self._exec_one(tc, key, val, node, regs,
                                                 builtins, should_stop)
             if record is not None:
@@ -3709,8 +3716,7 @@ class Bench:
                     note=val.get("note", "") if isinstance(val, dict) else "",
                     # on the passing path this is what came back, not a
                     # reason — both belong in the file for the same reason
-                    detail=info,
-                    ts=datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]))
+                    detail=info, ts=started_at))
             if key == "loop":
                 count = val.get("n") if isinstance(val, dict) else val
                 # resolved once, here: from now on the frame holds the
