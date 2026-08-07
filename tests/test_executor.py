@@ -506,13 +506,63 @@ def _emcy(bench: Bench, node: int = 1, code: int = 0x7100) -> None:
     bench._annotate_emcy(row)
 
 
+def _once(send, *args, **kw):
+    """A `during` hook that fires `send` once, after the case has begun.
+
+    After, not before: a case does not inherit what the bus said before it
+    started, so a frame fed in beforehand is a frame about whatever ran
+    last. `_sequence_started_at` is what the runner sets when a case takes
+    over, which makes it the moment to send."""
+    fired: list[bool] = []
+
+    def hook(bench: Bench) -> None:
+        if not fired and bench._sequence_started_at:
+            fired.append(True)
+            send(bench, *args, **kw)
+    return hook
+
+
 def test_an_emcy_that_already_arrived_counts(tc_bench):
     """The device sends when it is ready, not when a step happens to be
     waiting. A check that only looks forward turns timing into a failure."""
-    _emcy(tc_bench)
+    _add_tc(tc_bench, "TC0014_emcy.yaml", EMCY_TC)
+    run_selected(tc_bench, {"0014"}, during=_once(_emcy))
+    assert tc_bench.results == {"0014": "PASS"}
+
+
+def test_an_emcy_from_before_the_case_is_not_this_case_s(tc_bench):
+    """The record outlives the case. A repeat would otherwise inherit the
+    errors of its own previous pass and pass on them."""
+    _emcy(tc_bench)                      # before the run: whatever ran last
     _add_tc(tc_bench, "TC0014_emcy.yaml", EMCY_TC)
     run_selected(tc_bench, {"0014"})
+    assert tc_bench.results == {"0014": "FAIL"}
+
+
+def test_every_error_reported_counts_not_only_the_last(tc_bench):
+    """Unlike a PDO, an EMCY is a report and not a state: a device with
+    three things wrong with it says so three times, and a case may ask
+    about any of them."""
+    _add_tc(tc_bench, "TC0014_emcy.yaml", EMCY_TC)
+
+    def two(bench):
+        _emcy(bench, code=0x7100)        # the one the case asks about…
+        _emcy(bench, code=0x5000)        # …and a later one on top of it
+    run_selected(tc_bench, {"0014"}, during=_once(two))
     assert tc_bench.results == {"0014": "PASS"}
+
+
+def test_an_error_reset_ends_the_look_back(tc_bench):
+    """Code 0x0000 is the device saying every error has been accepted or
+    cleared. Nothing before it is still true, whatever the clock says —
+    which is the device's own word and beats any duration."""
+    _add_tc(tc_bench, "TC0014_emcy.yaml", EMCY_TC)
+
+    def then_cleared(bench):
+        _emcy(bench, code=0x7100)
+        _emcy(bench, code=0x0000)        # "…and it is dealt with"
+    run_selected(tc_bench, {"0014"}, during=_once(then_cleared))
+    assert tc_bench.results == {"0014": "FAIL"}
 
 
 def test_no_emcy_fails_after_the_timeout(tc_bench):
@@ -524,9 +574,8 @@ def test_no_emcy_fails_after_the_timeout(tc_bench):
 def test_a_mask_matches_the_manufacturer_part_only(tc_bench):
     """Which class byte a device puts in front of its own error number is
     not always documented — the mask is how a case says "this part I know"."""
-    _emcy(tc_bench, code=0x7100 | 0x71)
     _add_tc(tc_bench, "TC0015_emcy_mask.yaml", EMCY_MASK_TC)
-    run_selected(tc_bench, {"0015"})
+    run_selected(tc_bench, {"0015"}, during=_once(_emcy, code=0x7100 | 0x71))
     assert tc_bench.results == {"0015": "PASS"}
 
 
@@ -932,6 +981,7 @@ NO_EMCY_VIOLATED_TC = """\
 id: "0051"
 name: "something did go wrong"
 steps:
+  - wait: 0.1
   - expect_no_emcy: {}
 """
 
@@ -952,9 +1002,8 @@ def test_expect_no_emcy_passes_on_a_quiet_bus(tc_bench):
 
 
 def test_expect_no_emcy_fails_and_names_what_it_saw(tc_bench):
-    _emcy(tc_bench, code=0x1234)
     _add_tc(tc_bench, "TC0051_no_emcy_violated.yaml", NO_EMCY_VIOLATED_TC)
-    run_selected(tc_bench, {"0051"})
+    run_selected(tc_bench, {"0051"}, during=_once(_emcy, code=0x1234))
     assert tc_bench.results == {"0051": "FAIL"}
     # naming the code is the difference between "something happened" and a
     # line somebody can act on
@@ -965,9 +1014,10 @@ def test_expect_no_emcy_fails_and_names_what_it_saw(tc_bench):
 def test_expect_no_emcy_with_a_code_ignores_a_different_one(tc_bench):
     """"this error did not happen" is a narrower claim than "nothing
     happened", and an EMCY with another code must not fail it."""
-    _emcy(tc_bench, code=0x7100)      # a real EMCY, but not the one asked about
-    _add_tc(tc_bench, "TC0052_no_emcy_filtered.yaml", NO_EMCY_FILTERED_TC)
-    run_selected(tc_bench, {"0052"})
+    _add_tc(tc_bench, "TC0052_no_emcy_filtered.yaml",
+            NO_EMCY_FILTERED_TC.replace("steps:\n", "steps:\n  - wait: 0.1\n"))
+    # a real EMCY, but not the one asked about
+    run_selected(tc_bench, {"0052"}, during=_once(_emcy, code=0x7100))
     assert tc_bench.results == {"0052": "PASS"}
 
 
@@ -1061,15 +1111,15 @@ def test_the_manufacturer_error_code_is_what_a_case_can_ask_about(tc_bench):
     and reported "none seen" about an EMCY that was sitting right there.
     """
     _add_tc(tc_bench, "TC0017_mec.yaml", MEC_TC)
-    _emcy_frame(tc_bench, "00 10 01 72 00 00 00 00")
-    run_selected(tc_bench, {"0017"})
+    run_selected(tc_bench, {"0017"},
+                 during=_once(_emcy_frame, "00 10 01 72 00 00 00 00"))
     assert tc_bench.results == {"0017": "PASS"}
 
 
 def test_the_error_register_is_asked_about_separately(tc_bench):
     _add_tc(tc_bench, "TC0018_mec_reg.yaml", MEC_AND_REG_TC)
-    _emcy_frame(tc_bench, "00 10 01 6D 00 00 00 00")
-    run_selected(tc_bench, {"0018"})
+    run_selected(tc_bench, {"0018"},
+                 during=_once(_emcy_frame, "00 10 01 6D 00 00 00 00"))
     assert tc_bench.results == {"0018": "PASS"}
 
 
@@ -1088,8 +1138,8 @@ def test_the_manufacturer_code_is_two_bytes_little_endian(tc_bench):
     0x34 against 0x0134, which is "nothing arrived" about a frame that is
     right there."""
     _add_tc(tc_bench, "TC0019_wide.yaml", WIDE_MEC_TC)
-    _emcy_frame(tc_bench, "00 10 01 34 01 00 00 00")
-    run_selected(tc_bench, {"0019"})
+    run_selected(tc_bench, {"0019"},
+                 during=_once(_emcy_frame, "00 10 01 34 01 00 00 00"))
     assert tc_bench.results == {"0019": "PASS"}
 
 
@@ -1097,8 +1147,8 @@ def test_a_narrow_expectation_does_not_match_a_wide_code(tc_bench):
     """0x34 and 0x0134 are different codes, and the high byte is part of
     the number rather than something to ignore."""
     _add_tc(tc_bench, "TC0017_mec.yaml", MEC_TC.replace('"0x72"', '"0x34"'))
-    _emcy_frame(tc_bench, "00 10 01 34 01 00 00 00")
-    run_selected(tc_bench, {"0017"})
+    run_selected(tc_bench, {"0017"},
+                 during=_once(_emcy_frame, "00 10 01 34 01 00 00 00"))
     assert tc_bench.results == {"0017": "FAIL"}
 
 
@@ -1106,8 +1156,8 @@ def test_a_wrong_manufacturer_code_says_what_did_arrive(tc_bench):
     """"none seen" about a frame that arrived is the report that cost an
     evening: what is missing is not the EMCY, it is the match."""
     _add_tc(tc_bench, "TC0017_mec.yaml", MEC_TC)
-    _emcy_frame(tc_bench, "00 10 01 65 00 00 00 00")
-    run_selected(tc_bench, {"0017"})
+    run_selected(tc_bench, {"0017"},
+                 during=_once(_emcy_frame, "00 10 01 65 00 00 00 00"))
     assert tc_bench.results == {"0017": "FAIL"}
     said = " ".join(ln["msg"] for ln in tc_bench.logs)
     assert "mec 0x0065" in said, said
