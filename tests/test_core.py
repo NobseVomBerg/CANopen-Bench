@@ -3504,12 +3504,12 @@ def _stamp_ago(seconds: float) -> str:
 
 
 def _traced(bench: Bench, cob: str, data: str, *, ago: float = 0.0,
-            direction: str = "RX") -> dict:
+            direction: str = "RX", cls: str = "") -> dict:
     """Put one row into the record, `ago` seconds old."""
     row = _trace_row(cob, data)
     row["time"] = _stamp_ago(ago)
     row["dir"] = direction
-    row["cls"] = ""
+    row["cls"] = cls
     row["node"] = None
     bench.trace.append(row)
     return row
@@ -3546,6 +3546,68 @@ def test_match_traced_same_cob_different_prefix_picks_the_matching_prefix(bench)
 def test_match_traced_without_a_match_returns_none(bench):
     _traced(bench, "0x700", "01", ago=0.1)
     assert bench._match_traced([(0x783, b"\x02")], 0.5) is None
+
+
+def test_the_look_back_is_a_window_of_its_own_not_the_steps_timeout(bench):
+    """How long a case is willing to wait and how old a frame may be while
+    still describing now are two different questions. Tying the second to
+    the first meant a step with `timeout: 0.5` looked half a second back."""
+    # wide enough to bridge a device that goes quiet — a calibration holds
+    # its threads for 150 to 180 ms and nothing triggers a PDO meanwhile
+    assert core_mod.FRAME_LOOKBACK_S >= 0.2
+    _traced(bench, "0x181", "00 02 06 00 0E",
+            ago=core_mod.FRAME_LOOKBACK_S + 0.3, cls="PDO")
+    assert bench._match_traced(
+        [(0x181, bytes.fromhex("000206000E"))], core_mod.FRAME_LOOKBACK_S) is None
+
+
+def test_nothing_from_before_the_case_started_is_looked_at(bench):
+    """The record holds the runs before this one too, and their frames
+    describe a device that has since been switched, reset or re-addressed
+    — right down to a repeat of this very case, whose own previous pass
+    would otherwise answer for this one."""
+    want = [(0x181, bytes.fromhex("000206000E"))]
+    _traced(bench, "0x181", "00 02 06 00 0E", ago=0.25, cls="PDO")
+    assert bench._match_traced(want, core_mod.FRAME_LOOKBACK_S) == 0  # no floor yet
+
+    bench._sequence_started_at = time.monotonic() - 0.1   # the case began later
+    assert bench._match_traced(want, core_mod.FRAME_LOOKBACK_S) is None
+
+
+def test_only_the_newest_pdo_of_a_cob_id_gets_asked(bench):
+    """What a PDO carries is a state, and the device keeps saying it. The
+    frame before the newest one describes a moment that has passed, so a
+    step waiting for a change must not be satisfied by it — which is how
+    "the tension is reduced" was answered by the pass before the device
+    was switched off."""
+    want = [(0x181, bytes.fromhex("000206000E"))]
+    _traced(bench, "0x181", "00 02 06 00 0E", ago=0.30, cls="PDO")  # back then
+    _traced(bench, "0x181", "00 02 02 00 12", ago=0.01, cls="PDO")  # and now
+    assert bench._match_traced(want, 0.5) is None
+
+    _traced(bench, "0x181", "00 02 06 00 0E", ago=0.0, cls="PDO")   # it changed
+    assert bench._match_traced(want, 0.5) == 0
+
+
+def test_a_boot_up_is_not_buried_by_the_heartbeats_after_it(bench):
+    """A device announces itself once (0x700+id, "00") and then sends
+    heartbeats on that same COB-ID for as long as it lives. Only-the-newest
+    is a rule about state, and a boot-up is an event: applied here it would
+    hide the announcement behind the first heartbeat, and addressing would
+    lose the device it had just addressed."""
+    _traced(bench, "0x703", "00", ago=0.04, cls="HB")     # "I am here"
+    _traced(bench, "0x703", "7F", ago=0.01, cls="HB")     # …and alive, and alive
+    assert bench._match_traced([(0x703, b"\x00")], 0.5) == 0
+
+
+def test_a_cob_id_that_says_nothing_does_not_silence_another(bench):
+    """Racing pairs stay independent: one COB-ID's newest frame not
+    matching says nothing about the next one's."""
+    _traced(bench, "0x181", "00 02 02 00 12", ago=0.01, cls="PDO")
+    _traced(bench, "0x783", "02 AA", ago=0.0)
+    idx = bench._match_traced(
+        [(0x181, bytes.fromhex("000206000E")), (0x783, b"\x02")], 0.5)
+    assert idx == 1
 
 
 # -- the record keeps recording, whatever the panel is showing ---------------

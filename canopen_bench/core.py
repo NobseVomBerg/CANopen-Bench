@@ -61,6 +61,28 @@ BASE_EDS = Path(__file__).resolve().parent / "seed" / "CiA301Base.eds"
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
+#: how far back a `wait_for` on a COB-ID looks in the trace. It looks back
+#: at all because a device answers when it is ready, not when a step
+#: happens to start listening, and the answer to the step before this one
+#: can land while that step is still finishing.
+#:
+#: Deliberately not the step's timeout: a timeout says how long the case
+#: will wait, which is a patience, while this says how old a frame may be
+#: and still describe now, which is a property of the traffic. Tying the
+#: two together made a `timeout: 0.5` look half a second back, far enough
+#: to reach the run before it.
+#:
+#: Long enough to bridge a device that goes quiet for a moment — a
+#: calibration can hold its threads for 150 to 180 ms, and what the PDOs
+#: carry stops being updated for that long, so nothing triggers them and
+#: the newest frame is simply old without being wrong.
+#:
+#: It can afford to be generous because it is not what keeps an old frame
+#: from answering the wrong question. Two other things do: of a PDO only
+#: the newest frame is asked, so a stale one counts exactly when nothing
+#: has changed since — which is what "the state is still X" means — and
+#: the window never reaches past the start of the case doing the waiting.
+FRAME_LOOKBACK_S = 0.4
 TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈1 h at 55 frames/s
 TRACE_VIEW = 400     # rows per snapshot to the browser — enough scrollback to
                      # follow a multi-step sequence (e.g. addressing) end to end
@@ -833,6 +855,9 @@ class Bench:
         self._run_cases: list[reportlib.CaseRecord] = []
         self._run_record: reportlib.CaseRecord | None = None
         self._run_started = ""
+        #: monotonic start of the case or flow now running — the floor for
+        #: how far a `wait_for` looks back (0.0 = nothing running, no floor)
+        self._sequence_started_at = 0.0
         self.results: dict[str, str] = {}
         self.run_prog: dict | None = None       # {tid, step, of, text} while executing
         self.manual_prompt: dict | None = None  # {tid, text} while waiting for the operator
@@ -2688,6 +2713,9 @@ class Bench:
         # session identity is vendor-specific — without an addressing
         # provider (plugin) the run has none, and flows that reference
         # $session fail with a clear message instead
+        # a flow is a sequence like a case is, and its look-backs get the
+        # same floor: nothing from before it started — see _match_traced
+        self._sequence_started_at = time.monotonic()
         session = self.addressing.new_session(self.db) if self.addressing else None
         via = f", new session {_bytes_str(session)}" if session is not None else ""
         how = f"up to {expected} device(s) (address range)" if adopt_after \
@@ -3573,6 +3601,8 @@ class Bench:
     async def _exec_case(self, tid: str) -> tuple[str, str]:
         tc = self.testcases.get(tid)
         started = time.time()
+        # the floor for every look-back this case does — see _match_traced
+        self._sequence_started_at = time.monotonic()
         rec = reportlib.CaseRecord(id=tid, started=datetime.now().isoformat(timespec="seconds"),
                                    user=_bench_user())
         self._run_record = rec
@@ -4003,11 +4033,9 @@ class Bench:
                          bytes.fromhex(str(d).replace(" ", "")) if d else b"")
                         for c, d in zip(cob_list, data_list, strict=True)]
                 into = val.get("into")
-                # The window reaches as far back as the step is prepared to
-                # wait forward: a step willing to give a device 0.5 s will
-                # equally take an answer that came 0.5 s early, and there is
-                # no second number to get wrong. Measured from the step's
-                # start, so the window does not slide while it waits.
+                # Anchored at the step's start, so the window does not
+                # slide while the step waits: FRAME_LOOKBACK_S back from
+                # there, and everything that arrives from there on.
                 started = loop.time()
                 while True:
                     if should_stop():
@@ -4018,7 +4046,8 @@ class Bench:
                     # tick — at TICK_S the answer could otherwise arrive in
                     # the trace only after this step has already timed out
                     self._drain_frames()
-                    idx = self._match_traced(pairs, timeout + (loop.time() - started))
+                    idx = self._match_traced(
+                        pairs, FRAME_LOOKBACK_S + (loop.time() - started))
                     if idx is not None:
                         if into:
                             regs[into] = idx
@@ -4138,20 +4167,47 @@ class Bench:
 
     # -- trace --------------------------------------------------------------------
     def _match_traced(self, pairs: list[tuple[int, bytes]], max_age: float) -> int | None:
-        """Which of `pairs` the newest received frame no older than
-        `max_age` matches, or None.
+        """Which of `pairs` is satisfied by the newest frame its COB-ID
+        carried inside `max_age`, or None.
 
         Reads the trace, not the wire. A device answers when it is ready,
-        not when a step happens to start listening: a reply to something two
-        steps back is already in the record, and only a step that looks back
-        can find it. Scans from the newest row and stops at the first one
-        outside the window, so the cost is the window, not the buffer.
+        not when a step happens to start listening, and the answer to the
+        step before this one can land while that step is still finishing.
+        Scans from the newest row and stops at the first one outside the
+        window, so the cost is the window, not the buffer.
+
+        **Of a PDO, only the newest frame is asked.** A PDO carries a
+        state and the device keeps saying it, so the frame before the
+        newest describes a moment that has passed and is not evidence
+        about now: reading further back let "the tension is reduced" be
+        answered by the pass before the device was switched off. An older
+        PDO of a COB-ID whose newest one does not match is therefore
+        skipped rather than consulted.
+
+        Everything else keeps its say, because it is an event and not a
+        state — and on one COB-ID the two even share the wire. A device
+        announces itself once with a boot-up (0x700+id, ``00``) and then
+        sends heartbeats on the same COB-ID for as long as it lives. Ask
+        only the newest there and the boot-up is gone behind the first
+        heartbeat, which is how addressing loses the device it just
+        addressed.
+
+        The window is bounded twice over: by ``max_age``, and by the start
+        of the case or flow doing the waiting.
 
         TX rows are skipped — our own frame is not an answer to itself,
         which a `can_send` immediately followed by a `wait_for` on the same
         COB-ID would otherwise make it.
         """
+        # Never past the start of the case (or flow) doing the waiting. The
+        # record holds the runs before this one too, and their frames
+        # describe a device that has since been switched, reset or
+        # re-addressed — right down to a repeat of this very case, whose
+        # own previous pass would otherwise answer for this one.
+        if self._sequence_started_at:
+            max_age = min(max_age, time.monotonic() - self._sequence_started_at)
         now_tod = _tod_seconds(now_us_str()) or 0.0
+        answered: set[int] = set()   # COB-IDs whose newest frame we have seen
         for row in reversed(self.trace):
             stamp = _tod_seconds(row["time"])
             if stamp is None:
@@ -4168,9 +4224,15 @@ class Bench:
                 data = bytes.fromhex(row["data"].replace(" ", ""))
             except ValueError:
                 continue
+            if cob in answered:
+                continue         # this PDO's newest frame has had its say
             for i, (want, prefix) in enumerate(pairs):
-                if cob == want and data.startswith(prefix):
+                if cob != want:
+                    continue
+                if data.startswith(prefix):
                     return i
+                if row.get("cls") == "PDO":
+                    answered.add(cob)
         return None
 
     def _trace_view(self) -> tuple[list[dict], dict]:
