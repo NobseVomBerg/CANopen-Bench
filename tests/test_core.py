@@ -3554,11 +3554,24 @@ def test_the_look_back_is_a_window_of_its_own_not_the_steps_timeout(bench):
     the first meant a step with `timeout: 0.5` looked half a second back."""
     # wide enough to bridge a device that goes quiet — a calibration holds
     # its threads for 150 to 180 ms and nothing triggers a PDO meanwhile
-    assert 0.18 <= core_mod.FRAME_LOOKBACK_S <= 0.3
+    assert core_mod.FRAME_LOOKBACK_S >= 0.2
     _traced(bench, "0x181", "00 02 06 00 0E",
             ago=core_mod.FRAME_LOOKBACK_S + 0.3, cls="PDO")
     assert bench._match_traced(
         [(0x181, bytes.fromhex("000206000E"))], core_mod.FRAME_LOOKBACK_S) is None
+
+
+def test_nothing_from_before_the_case_started_is_looked_at(bench):
+    """The record holds the runs before this one too, and their frames
+    describe a device that has since been switched, reset or re-addressed
+    — right down to a repeat of this very case, whose own previous pass
+    would otherwise answer for this one."""
+    want = [(0x181, bytes.fromhex("000206000E"))]
+    _traced(bench, "0x181", "00 02 06 00 0E", ago=0.25, cls="PDO")
+    assert bench._match_traced(want, core_mod.FRAME_LOOKBACK_S) == 0  # no floor yet
+
+    bench._sequence_started_at = time.monotonic() - 0.1   # the case began later
+    assert bench._match_traced(want, core_mod.FRAME_LOOKBACK_S) is None
 
 
 def test_only_the_newest_pdo_of_a_cob_id_gets_asked(bench):
