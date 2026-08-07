@@ -307,6 +307,27 @@ def test_a_repeated_case_is_counted_once_per_run_it_made(tmp_path):
     assert "2 pass · 1 fail" in summary   # and the page it links to agrees
 
 
+def test_a_skipped_case_does_not_turn_the_entry_red(tmp_path):
+    """A skip did not fail, so a run that otherwise passed stays green and
+    the score simply says how many did: "2/3" in green is a reader's cue
+    that one case did not apply. A run with nothing but skips has shown
+    nothing, and does not get to look like a pass."""
+    bench = _bench(tmp_path)
+    bench._run_cases = [CaseRecord(id="0101", name="here", verdict="PASS"),
+                        CaseRecord(id="0102", name="elsewhere", verdict="SKIP"),
+                        CaseRecord(id="0103", name="here too", verdict="PASS")]
+    bench._push_report(["0101", "0102", "0103"])
+    assert bench.reports[0]["score"] == "2/3"
+    assert bench.reports[0]["ok"] is True
+    summary = (Path(bench.paths["res"]) / bench.reports[0]["file"]).read_text(encoding="utf-8")
+    assert "2 pass · 1 skip" in summary   # each verdict counted on its own
+    assert ">PASS<" in summary
+
+    bench._run_cases = [CaseRecord(id="0102", name="elsewhere", verdict="SKIP")]
+    bench._push_report(["0102"])
+    assert bench.reports[0]["ok"] is False
+
+
 def test_every_run_of_a_repeated_case_gets_its_own_file(tmp_path):
     """They were all named after the case, so each run overwrote the one
     before it and every row in the summary — the failed ones too — linked
