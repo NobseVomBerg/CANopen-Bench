@@ -1299,16 +1299,24 @@ class Bench:
             # last run decided all 99 — 99/99 next to a summary that said
             # 70 pass, 29 fail
             passed, total = sum(1 for c in cases if c.verdict == reportlib.PASS), len(cases)
+            # green once the run has something green to show and nothing
+            # red: a skipped case did not fail, so it must not turn the
+            # entry red — but a run that only skipped has demonstrated
+            # nothing and does not get to look like a pass either. The
+            # score counts every run, so "48/50" in green says by itself
+            # that two of them did not apply.
+            ok = run.verdict == reportlib.PASS
         else:
             # the demo catalog runs through the tick loop and leaves no case
             # records behind (data.TESTS, _run_step), so its score is the
             # one thing there is: a verdict per id
             passed, total = sum(1 for tid in order if self.results.get(tid) == "PASS"), len(order)
+            ok = passed == total
         # `file` is what the UI links to, and only a run that really wrote
         # one has it — the demo's example entries name files that were
         # never on any disk, and a link to a 404 is worse than plain text
-        self.reports = [{"name": name, "file": name, "score": f"{passed}/{total}",
-                         "ok": passed == total}] + self.reports[:4]
+        self.reports = [{"name": name, "file": name,
+                         "score": f"{passed}/{total}", "ok": ok}] + self.reports[:4]
 
     def _write_report(self, run: reportlib.RunRecord) -> str:
         """One file per case, one summary, one JSON beside it. Returns the
