@@ -21,7 +21,7 @@ from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ODVariable
@@ -514,11 +514,20 @@ def _mec(mfr: bytes) -> int:
     return (mfr[0] if mfr else 0) | ((mfr[1] << 8) if len(mfr) > 1 else 0)
 
 
-def _emcy_str(entry: tuple[int, int, int, bytes]) -> str:
+class Emcy(NamedTuple):
+    """One EMCY as the record kept it. ``at`` is monotonic, and only the
+    bench's own bookkeeping reads it — a case asks about the frame."""
+    node: int
+    code: int
+    reg: int
+    mfr: bytes
+    at: float = 0.0
+
+
+def _emcy_str(entry: Emcy) -> str:
     """One recorded EMCY, in the terms a case is written in."""
-    node, code, reg, mfr = entry
-    return (f"0x{code:04X} reg 0x{reg:02X} mec 0x{_mec(mfr):04X} "
-            f"from node {node:02d}")
+    return (f"0x{entry.code:04X} reg 0x{entry.reg:02X} "
+            f"mec 0x{_mec(entry.mfr):04X} from node {entry.node:02d}")
 
 
 def _emcy_wanted(val: dict) -> str:
@@ -836,7 +845,7 @@ class Bench:
         #: family puts its own error code, and that is what a case is
         #: usually about — CiA 301 says nothing about their content, so
         #: only the frame carries it.
-        self.emcy_seen: deque[tuple[int, int, int, bytes]] = deque(maxlen=200)
+        self.emcy_seen: deque[Emcy] = deque(maxlen=200)
         self.obj_vals: dict[str, str] = {}
         # bench instruments beside the bus (canopen_bench/instruments): the
         # port that once answered is remembered, so a restart reconnects to
@@ -1856,7 +1865,8 @@ class Bench:
         row["val"] = reg
         if not live:
             return
-        self.emcy_seen.append((row["node"], code, payload[2], payload[3:8]))
+        self.emcy_seen.append(
+            Emcy(row["node"], code, payload[2], payload[3:8], time.monotonic()))
         node = f"node {row['node']:02d}" if row["node"] else "node ?"
         # an error reset clears, it doesn't alarm — log it without the badge
         self.log(f"EMCY {node}  0x{code:04X}  {text}", "emcy" if code else "info")
@@ -3559,6 +3569,39 @@ class Bench:
             self._manual_event = None
             self._changed()
 
+    def _emcy_window(self, max_age: float | None = None) -> list[Emcy]:
+        """The EMCYs that describe the device right now, newest last.
+
+        An EMCY is not a state the way a PDO is — it is a report, and a
+        device that has three things wrong with it says so three times.
+        So unlike a PDO's newest frame, all of them count. What ends the
+        window is a *reset*: error code 0x0000 says every error has been
+        accepted or cleared, so nothing before it is still true. That is
+        the device's own word on the subject, and it beats any duration.
+
+        Two more bounds, both because the record outlives the question:
+        nothing from before the case started (a repeat of a case would
+        otherwise inherit the errors of its own previous pass), and,
+        where the caller asks for one, nothing older than `max_age`.
+
+        Without `max_age` the window is the whole case — which is what
+        "nothing has gone wrong" has to mean, or an error early in a case
+        would fall out of sight and the check would pass on a device that
+        had already failed.
+        """
+        out: list[Emcy] = []
+        now = time.monotonic()
+        for entry in reversed(self.emcy_seen):
+            if not entry.code:
+                break                      # error reset: nothing before it stands
+            if self._sequence_started_at and entry.at < self._sequence_started_at:
+                break                      # belongs to whatever ran before this
+            if max_age is not None and now - entry.at > max_age:
+                break
+            out.append(entry)
+        out.reverse()
+        return out
+
     def _emcy_matcher(self, val: dict, regs: dict, builtins: dict):
         """One predicate over a recorded EMCY, from the fields a step gave.
 
@@ -3584,16 +3627,15 @@ class Bench:
         reg = num("reg") if "reg" in val else None
         want_node = num("node") if "node" in val else None
 
-        def match(entry: tuple[int, int, int, bytes]) -> bool:
-            node, got_code, got_reg, mfr = entry
-            if want_node not in (None, node):
+        def match(entry: Emcy) -> bool:
+            if want_node not in (None, entry.node):
                 return False
-            if code is not None and got_code & mask != code & mask:
+            if code is not None and entry.code & mask != code & mask:
                 return False
-            if reg is not None and got_reg != reg:
+            if reg is not None and entry.reg != reg:
                 return False
             if mec is not None:
-                if _mec(mfr) & mec_mask != mec & mec_mask:
+                if _mec(entry.mfr) & mec_mask != mec & mec_mask:
                     return False
             return True
         return match
@@ -3984,11 +4026,11 @@ class Bench:
             deadline = loop.time() + timeout
 
             def seen() -> bool:
-                return any(match(e) for e in self.emcy_seen)
+                return any(match(e) for e in self._emcy_window(FRAME_LOOKBACK_S))
 
-            # an EMCY that arrived before this step is a hit too: the device
-            # sends it when it feels like it, and a check that only looks
-            # forward turns a timing difference into a test failure
+            # an EMCY that arrived shortly before this step is a hit too:
+            # the device sends it when it feels like it, and a check that
+            # only looks forward turns a timing difference into a failure
             while True:
                 if seen():
                     return "ok", ""
@@ -3999,17 +4041,23 @@ class Bench:
                 if not self.connected:
                     return "error", "connection lost"
                 await asyncio.sleep(0.05)
-            seen_now = ", ".join(_emcy_str(e) for e in list(self.emcy_seen)[-3:])
+            seen_now = ", ".join(_emcy_str(e) for e in self._emcy_window()[-3:])
             return "fail", (f"{_emcy_wanted(val)} — none seen within {timeout:g}s"
                             + (f"; saw {seen_now}" if seen_now
                                else "; nothing arrived at all"))
         if key == "expect_no_emcy":
             # the opposite of expect_emcy, and it cannot wait: no amount of
-            # waiting proves nothing will arrive. It asks what expect_emcy
-            # asks — of the same window, everything since the last
-            # emcy_clear — and fails if anything in it matches.
+            # waiting proves nothing will arrive.
+            #
+            # It asks of the whole case rather than the last fraction of a
+            # second. The two questions are not mirror images: a short
+            # window makes "did it report X" stricter, and makes "did it
+            # report nothing" weaker — an error early in a long case would
+            # simply fall out of sight and the step would pass on a device
+            # that had already failed. What ends this window is the device
+            # saying so itself, with an error reset.
             match = self._emcy_matcher(val, regs, builtins)
-            hits = [e for e in self.emcy_seen if match(e)]
+            hits = [e for e in self._emcy_window() if match(e)]
             if not hits:
                 return "ok", ""
             return "fail", ("expected no EMCY, saw "
