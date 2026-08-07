@@ -307,6 +307,53 @@ def test_a_repeated_case_is_counted_once_per_run_it_made(tmp_path):
     assert "2 pass · 1 fail" in summary   # and the page it links to agrees
 
 
+WAITING_TC = """\
+id: "0104"
+name: "a step that takes its time"
+steps:
+  - log: "before"
+  - wait: 0.3
+  - log: "after"
+"""
+
+
+def test_a_step_carries_the_time_it_started(tmp_path):
+    """A row used to be stamped once the runner had finished with the step
+    — logging and state push included — which lands about when the *next*
+    request goes out. Reading a report against a trace then put every line
+    next to the frame belonging to the line below it.
+
+    The waiting step is the one that shows which end is stamped: its own
+    row moves with the step before it, and the 0.3 s appear as the gap to
+    the row after."""
+    bench = Bench(Db(tmp_path / "r.db"))
+    write_seed_eds_files(bench)
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0104_waiting.yaml").write_text(WAITING_TC)
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    bench.dispatch("set_path", {"which": "res", "value": str(tmp_path / "res")})
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.test_sel = {"0104"}
+
+    import asyncio
+
+    async def go():
+        bench.dispatch("run_start", {})
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 20
+        while bench.running and loop.time() < deadline:
+            await asyncio.sleep(0.02)
+    asyncio.run(go())
+
+    fmt = "%Y%m%d_%H%M%S.%f"
+    before, waiting, after = (datetime.strptime(s.ts, fmt)
+                              for s in bench._run_cases[0].steps)
+    assert (waiting - before).total_seconds() < 0.1     # stamped as it began
+    assert (after - waiting).total_seconds() >= 0.25    # the wait is the gap
+
+
 def test_a_skipped_case_does_not_turn_the_entry_red(tmp_path):
     """A skip did not fail, so a run that otherwise passed stays green and
     the score simply says how many did: "2/3" in green is a reader's cue
