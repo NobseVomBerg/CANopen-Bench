@@ -17,7 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # 3.10 is the floor (requires-python) and the one that catches
+        # you; 3.14 is the ceiling anyone is actually running. Both ends
+        # are in because a version this claims support for and never
+        # runs is a claim, not a fact.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
         with:
