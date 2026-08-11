@@ -86,7 +86,12 @@ def _sdo_frame(node: int, is_request: bool, cmd: int, idx: int, sub: int, data: 
         direction="TX" if is_request else "RX",
         cob_id=f"0x{cob:03X}", length="8",
         data=" ".join(f"{b:02X}" for b in payload),
-        decoded=f"SDO {'rx' if is_request else 'tx'} node {node:02d}",
+        # through the shared decoder, not a second spelling of it: the demo
+        # bus exists to be indistinguishable from real hardware in the trace,
+        # and a label it formats itself drifts from the real one unnoticed —
+        # which is how "SDO tx"/"SDO rx" survived here after the real decoder
+        # had already been renamed, with a green test asserting the old text
+        decoded=_decode_cob(cob),
     )
 
 

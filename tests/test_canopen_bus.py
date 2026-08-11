@@ -379,3 +379,66 @@ def test_plugin_backend_may_carry_extra_arguments(monkeypatch):
     bus.connect("fancy", 500)
     assert seen["receive_own_messages"] is True
     assert seen["channel"] == 2
+
+
+def test_poll_frames_offset_follows_a_drifting_driver_clock(master, monkeypatch):
+    """The adapter's crystal is not the PC's. A hundred ppm apart is
+    ordinary, and it is a third of a second an hour — all in one
+    direction. An offset taken as the smallest gap ever seen can only
+    follow that downwards, so RX frames slid steadily earlier until a
+    response was stamped before the request that caused it. The window
+    lets the estimate rise again.
+    """
+    monkeypatch.setattr(cb, "_TS_WINDOW_S", 1.0)
+    master._trace = _TraceListener()
+    hw, host = 50644.0, time.time()          # relative driver clock, wall clock
+
+    def rx(hw_at: float, arrival_at: float) -> None:
+        master._trace.queue.append(
+            ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw_at), arrival_at))
+
+    rx(hw, host)                              # anchors: offset == true_offset
+    # a minute of the driver clock running 200 ppm slow: the gap grows by
+    # 12 ms, and every frame is stamped correctly only if the offset follows
+    for i in range(1, 7):
+        t = 10.0 * i
+        rx(hw + t - t * 200e-6, host + t)
+    frames = master.poll_frames(max_frames=16)
+
+    fmt = "%H:%M:%S.%f"
+    late = datetime.strptime(frames[-1].time, fmt)
+    want = datetime.strptime(datetime.fromtimestamp(host + 60.0).strftime(fmt), fmt)
+    drift_ms = abs((late - want).total_seconds()) * 1000
+    assert drift_ms < 1.0, f"stamp drifted {drift_ms:.1f} ms behind the frame's arrival"
+
+
+def test_poll_frames_offset_still_drops_at_once_on_a_better_sample(master, monkeypatch):
+    """Downwards it must not wait for a window: a smaller gap is a closer
+    reading of the offset itself, and everything above it was queueing."""
+    monkeypatch.setattr(cb, "_TS_WINDOW_S", 60.0)
+    master._trace = _TraceListener()
+    hw, host = 50644.0, time.time()
+    master._trace.queue.append(
+        ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw), host + 0.100))
+    master._trace.queue.append(   # same hardware instant, read 100 ms sooner
+        ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw + 1.0), host + 1.0))
+    frames = master.poll_frames(max_frames=8)
+
+    fmt = "%H:%M:%S.%f"
+    assert frames[1].time == datetime.fromtimestamp(host + 1.0).strftime(fmt)
+
+
+def test_poll_frames_reanchors_when_the_clock_steps(master):
+    """An adapter reset or a stepped PC clock is not drift — the whole
+    mapping is wrong and waiting out a window would stamp every frame in
+    it against the old anchor."""
+    master._trace = _TraceListener()
+    hw, host = 50644.0, time.time()
+    master._trace.queue.append(
+        ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw), host))
+    master._trace.queue.append(     # driver clock restarted near zero
+        ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=12.5), host + 0.5))
+    frames = master.poll_frames(max_frames=8)
+
+    fmt = "%H:%M:%S.%f"
+    assert frames[1].time == datetime.fromtimestamp(host + 0.5).strftime(fmt)
