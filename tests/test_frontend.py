@@ -68,3 +68,20 @@ def test_the_filter_chip_memoises_its_select():
     # the options arrive as a fresh array every tick, so the dependency has
     # to compare their contents — the array itself never matches
     assert "options.join(" in body
+
+
+def test_a_typed_number_is_decimal_unless_it_says_0x():
+    """One rule for a number a person types, and the box says it. The base
+    chip used to decide it too, so with the table in hex a typed 12345678
+    came back as 0x12345678 — the same digits, a different number, and the
+    hint beside it promised the opposite ("hex needs 0x").
+
+    Both boxes take a number, so both carry the same sentence, and the
+    chip is beside each of them rather than only above the table.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "hex needs 0x" not in app, "the old hint read as if it were the rule"
+    assert "0x… for hex" in app and "otherwise decimal" in app
+    assert "Typing is unaffected" in app     # the chip says what it does not do
+    assert app.count("numberHint") == 3      # the definition and both boxes
+    assert app.count("baseChip") == 3        # the definition and both headers

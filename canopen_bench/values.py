@@ -172,15 +172,21 @@ class ValueError_(ValueError):
     """Input that could not be read. The message is shown to the operator."""
 
 
-def parse_value(text: str, base: str, fields: list[Field], symbols) -> int:
+def parse_value(text: str, fields: list[Field], symbols) -> int:
     """Typed input to a number.
 
     Accepts, in this order: an explicit ``0x``/``0b`` literal, a symbol
     name (optionally ``origin:NAME``), several of those joined with ``+``
-    for flag registers, and finally bare digits — which follow the
-    operator's chosen base, because "10" is genuinely ambiguous and the
-    tool must not pretend otherwise. The caller echoes what came out
-    before anything is written.
+    for flag registers, and finally bare digits — which are **decimal**.
+
+    That is the same rule the write path has always had (core's
+    ``_typed_number``): everywhere a *file* supplies a value a bare
+    string is hex, because it was written against a datasheet and the
+    format says so, and everywhere a *person* types one it is not. This
+    used to follow the display base instead, so with the table showing
+    hex a typed 12345678 became 0x12345678 — the same digits, a
+    different number, and nothing on screen admitting it. Which base the
+    values are *shown* in is a separate question and stays one.
     """
     raw = text.strip()
     if not raw:
@@ -188,7 +194,7 @@ def parse_value(text: str, base: str, fields: list[Field], symbols) -> int:
     if "+" in raw:
         total = 0
         for part in raw.split("+"):
-            total |= parse_value(part, base, fields, symbols)
+            total |= parse_value(part, fields, symbols)
         return total
 
     lowered = raw.lower()
@@ -204,7 +210,7 @@ def parse_value(text: str, base: str, fields: list[Field], symbols) -> int:
         return _resolve_symbol(raw, fields, symbols)
 
     try:
-        return int(raw, 16 if base == "hex" else 10)
+        return int(raw, 10)
     except ValueError:
         raise ValueError_(
             f'"{raw}" is neither a number nor a known symbol') from None
