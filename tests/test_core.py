@@ -3651,3 +3651,45 @@ def test_a_disabled_base_eds_stays_disabled(tmp_path):
 
     row = next(e for e in again.db.eds_list() if e["file"] == "CiA301Base.eds")
     assert row["enabled"] is False
+
+
+# -- the supply in the sidebar ----------------------------------------------
+
+def _bench_with_supply(tmp_path) -> Bench:
+    from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
+    bench = Bench(Db(tmp_path / "psu.db"))
+    bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
+    assert bench._psu_connect("COM6")
+    return bench
+
+
+def test_the_supply_is_not_in_the_sidebar_until_asked(tmp_path):
+    """A bench with no supply in play should not have the room taken."""
+    bench = _bench_with_supply(tmp_path)
+    assert bench.snapshot()["psu"]["sidebar"] is False
+
+
+def test_asking_for_quick_access_is_remembered(tmp_path):
+    """A view preference outlives the session that set it — otherwise the
+    box has to be asked for again every morning."""
+    bench = _bench_with_supply(tmp_path)
+    bench.dispatch("psu_sidebar_toggle", {})
+    assert bench.snapshot()["psu"]["sidebar"] is True
+
+    again = Bench(Db(tmp_path / "psu.db"))
+    assert again.psu_sidebar is True
+
+    bench.dispatch("psu_sidebar_toggle", {})
+    assert bench.snapshot()["psu"]["sidebar"] is False
+
+
+def test_the_sidebar_box_has_what_it_needs_and_not_what_it_does_not(tmp_path):
+    """Name, channels and output state — the port and serial number stay in
+    Setup, where there is room to read them."""
+    bench = _bench_with_supply(tmp_path)
+    bench.dispatch("psu_sidebar_toggle", {})
+    psu = bench.snapshot()["psu"]
+    assert psu["name"] and psu["output"] is not None
+    assert len(psu["channels"]) == 2
+    for ch in psu["channels"]:
+        assert ch["volt"] is not None and ch["curr"] is not None

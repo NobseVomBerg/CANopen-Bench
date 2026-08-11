@@ -824,6 +824,11 @@ class Bench:
         self._psu_state: instruments.SupplyState | None = None
         self._psu_opener = None            # tests inject a fake serial port
         self._psu_ports = None
+        #: whether the supply also gets a box in the sidebar. A run that has
+        #: to watch the voltage should not have to leave the page it is
+        #: watching to do it — but a bench with no supply in play does not
+        #: want the room taken, so it is a choice and it is remembered.
+        self.psu_sidebar = bool(db.get("psu_sidebar", False))
         self._psu_connect(str(db.get("psu_port") or ""), announce=False)
         self.test_sel: set[str] = set()   # demo seeds below, once the catalog is known
         self.running = False
@@ -2747,15 +2752,16 @@ class Bench:
         if self.psu is None:
             return {"found": False, "error": self.psu_error} if self.psu_error else None
         st = self._psu_state
+        base = {"found": True, "name": self.psu.name, "error": self.psu_error,
+                "sidebar": self.psu_sidebar}
         if st is None:
-            return {"found": True, "name": self.psu.name, "error": self.psu_error,
-                    "port": self.psu.link.port, "channels": []}
-        return {"found": True, "name": self.psu.name, "error": self.psu_error,
-                "model": st.model, "sn": st.serial, "fw": st.firmware,
-                "port": st.port, "output": st.output, "raw": st.raw,
-                "channels": [{"volt": ch.volt, "curr": ch.curr, "limit": ch.limit,
-                              "mvolt": ch.meas_volt, "mcurr": ch.meas_curr,
-                              "extra": ch.extra} for ch in st.channels]}
+            return base | {"port": self.psu.link.port, "channels": []}
+        return base | {
+            "model": st.model, "sn": st.serial, "fw": st.firmware,
+            "port": st.port, "output": st.output, "raw": st.raw,
+            "channels": [{"volt": ch.volt, "curr": ch.curr, "limit": ch.limit,
+                          "mvolt": ch.meas_volt, "mcurr": ch.meas_curr,
+                          "extra": ch.extra} for ch in st.channels]}
 
     def act_psu_search(self, p: dict) -> None:
         try:
@@ -2773,6 +2779,12 @@ class Bench:
         self.db.set("psu_port", psu.link.port)
         self._psu_read()
         self.log(f"PSU  {psu.name} on {psu.link.port} — {idn}")
+
+    def act_psu_sidebar_toggle(self, p: dict) -> None:
+        """Show the supply in the sidebar, or stop showing it. A view
+        preference, so it is remembered and says nothing in the log."""
+        self.psu_sidebar = not self.psu_sidebar
+        self.db.set("psu_sidebar", self.psu_sidebar)
 
     def act_psu_refresh(self, p: dict) -> None:
         self._psu_read()
