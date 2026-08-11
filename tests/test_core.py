@@ -1417,6 +1417,72 @@ def test_trace_snapshot_unfiltered_caps_at_view_size(bench):
     assert snap["total"] == len(bench.trace) == total
 
 
+# -- scrolling back further than one snapshot -------------------------------
+
+def test_trace_page_reads_back_past_the_snapshot_window(bench):
+    """The point of the whole thing: the panel can reach frames the
+    snapshot never carried."""
+    total = core_mod.TRACE_VIEW * 3
+    for i in range(total):
+        _append_trace(bench, f"Heartbeat node 02 #{i}")
+
+    assert len(bench.snapshot()["trace"]["rows"]) == core_mod.TRACE_VIEW  # all it ever sends
+    deep = bench._trace_page(end=total - 3, n=3)
+
+    assert [r["dec"] for r in deep["rows"]] == [
+        "Heartbeat node 02 #2", "Heartbeat node 02 #1", "Heartbeat node 02 #0"]
+    assert deep["total"] == total
+
+
+def test_trace_page_counts_back_from_the_newest_row(bench):
+    for i in range(10):
+        _append_trace(bench, f"NMT #{i}")
+
+    page = bench._trace_page(end=0, n=3)
+
+    # newest first, which is the order the panel draws them in
+    assert [r["dec"] for r in page["rows"]] == ["NMT #9", "NMT #8", "NMT #7"]
+    assert [r["dec"] for r in bench._trace_page(end=3, n=2)["rows"]] == ["NMT #6", "NMT #5"]
+    assert bench._trace_page(end=10, n=5)["rows"] == []  # past the oldest
+
+
+def test_trace_page_and_snapshot_agree_on_what_the_filter_hides(bench):
+    for i in range(30):
+        _append_trace(bench, f"Heartbeat node 02 #{i}")
+        _append_trace(bench, f"SDO tx node 01 #{i}")
+    bench.dispatch("trace_filter", {"hide": ["HB"]})
+
+    page = bench._trace_page(end=0, n=100)
+    snap = bench.snapshot()["trace"]
+
+    assert all(r["cls"] == "SDO" for r in page["rows"])
+    assert page["total"] == snap["match"] == 30
+    # the filtered walk and the unfiltered slice are two branches of one
+    # method; they have to describe the same rows in the same order
+    assert [r["dec"] for r in page["rows"][:3]] == [r["dec"] for r in reversed(snap["rows"][-3:])]
+    # and `end` counts hidden rows out too, not just the ones it returns
+    assert [r["dec"] for r in bench._trace_page(end=28, n=5)["rows"]] == [
+        "SDO tx node 01 #1", "SDO tx node 01 #0"]
+
+
+def test_trace_page_reads_an_open_capture_not_the_live_record(bench):
+    """Hours of scrollback come from a capture — the live record is a ring,
+    an autosaved capture is not."""
+    _append_trace(bench, "live frame")
+    bench.trace_dir.mkdir(parents=True, exist_ok=True)
+    rows = [dict(_trace_row("0x181", "0A"), dec=f"captured #{i}", cls="PDO", node=1)
+            for i in range(500)]
+    (bench.trace_dir / "capture.json").write_text(
+        json.dumps({"v": 1, "rows": rows}), encoding="utf-8")
+    bench.dispatch("trace_load", {"file": "capture.json"})
+
+    page = bench._trace_page(end=497, n=3)
+
+    assert [r["dec"] for r in page["rows"]] == ["captured #2", "captured #1", "captured #0"]
+    assert page["total"] == 500
+    assert bench.trace[-1]["dec"] == "live frame"  # the record is untouched underneath
+
+
 def test_trace_clear_resets_rows_and_counts(bench):
     _append_trace(bench, "NMT")
     _append_trace(bench, "Heartbeat node 02")

@@ -114,9 +114,26 @@ light + dark theme (toggle in the header, persisted per browser):
   always visible) and an ms/µs timestamp toggle. Filtering happens
   server-side over the full retained ring buffer (200k frames,
   `core.TRACE_CAP`), so a hidden class or device never pushes visible
-  frames out of the browser window (`core.TRACE_VIEW`, 400 rows —
-  enough scrollback to follow a multi-step sequence like addressing
-  end to end). Captures can be saved to and
+  frames out of the browser window.
+  The table shows the **newest frame at the top** and only the rows on
+  screen: an hour of bus is 200k rows, which no browser lays out, so the
+  scrollbar is a spacer of the full height (`ROW_H` per row) and the drawn
+  rows are placed at the offset the scroll position asks for. Reading
+  downwards is going back in time, and the live end stays where the eye
+  already is instead of running off the bottom — with the scroll position
+  compensated by each arriving frame, so history held under the cursor
+  does not walk. Where rows come from is split: the newest
+  `core.TRACE_VIEW` (400) ride along in the state snapshot, so the live
+  end costs no request and updates at the tick rate, while anything older
+  is fetched for the window being looked at (`GET /api/trace/rows?end=&n=`
+  → `Bench._trace_page`, capped at `app.TRACE_PAGE_MAX`). Deliberately
+  uncached: the record is still growing and, at the ring's cap, still
+  being trimmed at the far end, so a kept page's meaning changes
+  underneath it — one small request per scroll beats being wrong about
+  which frames these are. The page endpoint reads the same source as the
+  panel (`_trace_view`), so an open capture answers there too, which is
+  where hours of scrollback actually come from.
+  Captures can be saved to and
   reloaded from `<workspace>/traces/*.json` (loading pauses the trace).
   Autosave (`core._autosave_write`, off by default, the setting persists)
   answers what the ring buffer cannot: an hour in, the beginning is gone,
