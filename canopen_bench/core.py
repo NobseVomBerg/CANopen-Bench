@@ -2950,8 +2950,7 @@ class Bench:
             self.obj_vals[key] = ""
             return
         try:
-            value = parse_value(text, self.num_base, self._object_fields.get(key, []),
-                                self.symbols)
+            value = parse_value(text, self._object_fields.get(key, []), self.symbols)
         except ValueError as exc:
             self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
             return
