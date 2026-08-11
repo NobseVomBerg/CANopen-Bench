@@ -70,10 +70,12 @@ and every access shows up in the Trace like real bus traffic.
   `canopen_bench/instruments/`.
 - **SWDL** — firmware download; protocols are manufacturer-specific and
   ship as vendor extension packages (see the note on the page).
-- **Trace** — live monitor with class + device filters over a 200k-frame
-  ring buffer, ms/µs timestamps, capture save/load, and autosave — every
-  recorded frame written to a capture file as it arrives, kept for two
-  weeks, for the endurance runs that are longer than the ring is deep.
+- **Trace** — live monitor, newest frame at the top, scrollable back
+  through the whole 200k-frame ring buffer or an opened capture rather
+  than a screenful. Class + device filters, ms/µs timestamps, capture
+  save/load, and autosave — every recorded frame written to a capture
+  file as it arrives, kept for two weeks, for the endurance runs that are
+  longer than the ring is deep.
 
 ## Hardware
 

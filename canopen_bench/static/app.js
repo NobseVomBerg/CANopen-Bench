@@ -1,6 +1,6 @@
 // CANopen Bench frontend — pixel-faithful port of the Claude Design prototype.
 // Server (FastAPI) owns all bench state; this file renders it and sends actions.
-import { html, render, useState, useEffect, useMemo, useRef } from '/static/vendor/preact-htm.module.js';
+import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from '/static/vendor/preact-htm.module.js';
 
 const MONO = "'IBM Plex Mono',monospace";
 
@@ -1535,6 +1535,119 @@ function TraceStats({ st, connected }) {
   </div>`;
 }
 
+// One trace row is exactly this tall, border included. The number is not
+// cosmetic: the table below places rows by index rather than by stacking
+// them, so this constant and the row's own style have to agree or the
+// scroll position drifts away from what is on screen. Hence the fixed
+// height and the single-line cells — a row that could wrap would break it.
+const ROW_H = 21;
+const OVERSCAN = 8;   // rows drawn beyond the viewport, so a flick doesn't show gaps
+
+// The trace table: newest at the top, and only what is on screen in the DOM.
+//
+// Newest first because this is a live record. Reading downwards used to
+// mean the interesting end was off the bottom and ran further away with
+// every frame; the operator's job was to keep scrolling. Upside down, the
+// newest frame is where the eye already is, and scrolling down is going
+// back in time — which is what "rewind" means anyway.
+//
+// Only the visible rows exist: an hour of bus is 200k of them and no
+// browser lays that out. The scrollbar is a spacer of the full height and
+// the drawn rows are placed at the offset the scroll position asks for.
+//
+// Where the rows come from is deliberately split. The newest TRACE_VIEW of
+// them ride along in the state snapshot, so the live end — where the panel
+// sits almost all the time — needs no request at all and updates at the
+// tick rate. Anything older is fetched for the window actually being
+// looked at, and not cached: the record is still growing and, once the
+// ring is full, still being trimmed at the far end, so a cached page's
+// meaning changes underneath it. One small request per scroll is cheaper
+// than being wrong about which frames these are.
+function TraceTable({ s, cols, fmtTime }) {
+  const box = useRef(null);
+  const head = useRef(null);
+  const [first, setFirst] = useState(0);   // index of the top drawn row, 0 = newest
+  const [view, setView] = useState(600);   // viewport height in px
+  const [page, setPage] = useState({ end: -1, rows: [] });
+  const total = s.trace.match;
+  // the snapshot sends rows oldest-first, the order everything server-side
+  // works in; the panel is the only place that wants them the other way
+  const live = useMemo(() => (s.trace.rows || []).slice().reverse(), [s.trace.rows]);
+
+  const measure = () => {
+    const el = box.current;
+    if (!el) return;
+    setView(el.clientHeight);
+    const headH = head.current ? head.current.offsetHeight : 0;
+    setFirst(Math.max(0, Math.floor((el.scrollTop - headH) / ROW_H)));
+  };
+  useEffect(() => {
+    const el = box.current;
+    if (!el || !window.ResizeObserver) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Frames arriving push the whole list down by one row each. Left alone
+  // that walks whatever is being read off the bottom of the screen, so the
+  // scroll position follows by the same amount and the frames under the
+  // eye stay put. Only away from the live end: at the top there is nothing
+  // to hold still, and the new rows are the point.
+  const prevTotal = useRef(total);
+  useLayoutEffect(() => {
+    const el = box.current;
+    const grew = total - prevTotal.current;
+    prevTotal.current = total;
+    if (el && grew > 0 && el.scrollTop > 0) el.scrollTop += grew * ROW_H;
+  }, [total]);
+
+  const count = Math.min(total, Math.ceil(view / ROW_H) + OVERSCAN);
+  // the source can shrink under a scroll position — a capture closed, the
+  // trace cleared — and the browser only corrects scrollTop on its own next
+  // frame, so the index is clamped here rather than trusted
+  const start = Math.min(first, Math.max(0, total - count));
+  const covered = start + count <= live.length;   // still inside the snapshot's window
+
+  useEffect(() => {
+    if (covered) return;
+    const end = Math.max(0, start - OVERSCAN);
+    const n = Math.min(2000, count + 2 * OVERSCAN);
+    let alive = true;
+    fetch(`/api/trace/rows?end=${end}&n=${n}`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setPage(d); })
+      .catch(() => {});   // a dropped request just leaves the last window up
+    return () => { alive = false; };
+  }, [covered, start, count, total, s.trace.loaded]);
+
+  // A page that does not reach the current position draws nothing until the
+  // next one lands. Twenty milliseconds of blank is a gap the eye reads as
+  // loading; rows from the wrong offset are timestamps that quietly lie.
+  const off = start - page.end;
+  const rows = covered ? live.slice(start, start + count)
+    : off >= 0 ? page.rows.slice(off, off + count) : [];
+
+  return html`
+  <div ref=${box} onScroll=${measure} style="flex:1;min-height:0;overflow:auto;background:var(--panel2)">
+    <div ref=${head} style="display:grid;grid-template-columns:${cols};padding:6px 0 6px 18px;border-bottom:1px solid var(--bd);font:600 10px ${MONO};color:var(--faint);letter-spacing:.08em;position:sticky;top:0;z-index:1;background:var(--panel)">
+      <span>TIME</span><span>DIR</span><span>COB-ID</span><span>LEN</span><span>DATA</span><span>DECODED</span><span>OBJECT</span><span>DEC</span>
+    </div>
+    <div style="height:${total * ROW_H}px;position:relative">
+      <div style="position:absolute;left:0;right:0;top:${start * ROW_H}px">
+        ${rows.map((r) => { const pdoN = r.cls === 'PDO' ? (r.dec.match(/PDO([1-4])/) || [])[1] : null;
+          const bg = r.cls === 'EMCY' ? 'var(--red-soft)' : pdoN ? `var(--pdo${pdoN})` : 'transparent';
+          const cell = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; return html`
+          <div style="display:grid;grid-template-columns:${cols};height:${ROW_H}px;box-sizing:border-box;line-height:${ROW_H - 1}px;padding-left:18px;border-bottom:1px solid var(--bd2);font:11px ${MONO};background:${bg};color:${r.flag === 'red' ? 'var(--red)' : 'var(--mid)'}">
+            <span style="color:var(--faint);${cell}">${fmtTime(r.time)}</span><span style=${cell}>${r.dir}</span><span style="color:var(--acc);${cell}">${r.cob}</span><span style=${cell}>${r.len}</span>${r.cls === 'SDO' && r.flag !== 'red' && r.data.length > 12
+              ? html`<span style=${cell}>${r.data.slice(0, 12)}<span style="color:var(--hl);font-weight:600">${r.data.slice(12)}</span></span>`
+              : html`<span style=${cell}>${r.data}</span>`}<span style=${cell} title=${r.dec}>${r.dec}</span><span style="color:var(--hl);${cell}" title=${r.obj || ''}>${r.obj || ''}</span><span style="color:${(r.val || '').startsWith('abort') ? 'var(--red)' : 'var(--acc)'};${cell}">${r.val || ''}</span>
+          </div>`; })}
+      </div>
+    </div>
+  </div>`;
+}
+
 function TracePage({ s }) {
   const [usTime, setUsTime] = useState(localStorage.getItem('cb-us-time') === '1');
   const [view, setView] = useState(localStorage.getItem('cb-trace-view') || 'trace');
@@ -1546,7 +1659,6 @@ function TracePage({ s }) {
   const cols = `${usTime ? '124px' : '96px'} 38px 60px 32px 200px 200px minmax(260px,420px) 92px`;
   const hide = s.trace.hide || [];
   const toggle = (f) => send('trace_filter', { hide: hide.includes(f) ? hide.filter((x) => x !== f) : [...hide, f] });
-  const rows = s.trace.rows;
   const saved = s.trace.saved || [];
   const auto = s.trace.auto || {};
   const handleImportFile = (ev) => {
@@ -1623,19 +1735,7 @@ function TracePage({ s }) {
   </div>
   ${view === 'stats' && html`<${TraceStats} st=${s.trace.stats} connected=${s.connected} />`}
   ${view === 'plot' && html`<${TracePlot} plot=${s.trace.plot} connected=${s.connected} />`}
-  ${view === 'trace' && html`
-  <div style="flex:1;min-height:0;overflow:auto;background:var(--panel2)">
-    <div style="display:grid;grid-template-columns:${cols};padding:6px 0 6px 18px;border-bottom:1px solid var(--bd);font:600 10px ${MONO};color:var(--faint);letter-spacing:.08em;position:sticky;top:0;background:var(--panel)">
-      <span>TIME</span><span>DIR</span><span>COB-ID</span><span>LEN</span><span>DATA</span><span>DECODED</span><span>OBJECT</span><span>DEC</span>
-    </div>
-    ${rows.map((r) => { const pdoN = r.cls === 'PDO' ? (r.dec.match(/PDO([1-4])/) || [])[1] : null;
-      const bg = r.cls === 'EMCY' ? 'var(--red-soft)' : pdoN ? `var(--pdo${pdoN})` : 'transparent'; return html`
-      <div style="display:grid;grid-template-columns:${cols};padding:3.5px 0 3.5px 18px;border-bottom:1px solid var(--bd2);font:11px ${MONO};background:${bg};color:${r.flag === 'red' ? 'var(--red)' : 'var(--mid)'}">
-        <span style="color:var(--faint)">${fmtTime(r.time)}</span><span>${r.dir}</span><span style="color:var(--acc)">${r.cob}</span><span>${r.len}</span>${r.cls === 'SDO' && r.flag !== 'red' && r.data.length > 12
-          ? html`<span>${r.data.slice(0, 12)}<span style="color:var(--hl);font-weight:600">${r.data.slice(12)}</span></span>`
-          : html`<span>${r.data}</span>`}<span>${r.dec}</span><span style="color:var(--hl);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.obj || ''}</span><span style="color:${(r.val || '').startsWith('abort') ? 'var(--red)' : 'var(--acc)'}">${r.val || ''}</span>
-      </div>`; })}
-  </div>`}`;
+  ${view === 'trace' && html`<${TraceTable} s=${s} cols=${cols} fmtTime=${fmtTime} />`}`;
 }
 
 // server-side directory picker behind the Browse… buttons: the browser can't
