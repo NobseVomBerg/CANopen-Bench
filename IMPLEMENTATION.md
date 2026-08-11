@@ -111,7 +111,17 @@ light + dark theme (toggle in the header, persisted per browser):
   live CAN frame monitor with decode column, RX and own TX
   frames, bus timestamps, class filters (NMT/SDO/PDO/EMCY/HB),
   pause/clear, plus a device filter (all / selected devices, broadcasts
-  always visible) and an ms/µs timestamp toggle. Filtering happens
+  always visible) and an ms/µs timestamp toggle. Timestamps are
+  comparable across directions, which is not free: our own TX frames are
+  stamped by us in epoch time, while RX frames carry the adapter's own
+  relative clock and are mapped onto wall time by an offset
+  (`CanopenBus.poll_frames`). The offset is the smallest gap seen between
+  a frame's hardware stamp and our reading it — everything above that
+  minimum is queueing — taken over `canopen_bus._TS_WINDOW_S` rather than
+  over the whole session: the two crystals drift apart in one direction,
+  so a lifetime minimum can only follow the drift downwards and RX frames
+  slide steadily earlier, until a response is stamped before the request
+  that caused it. Filtering happens
   server-side over the full retained ring buffer (200k frames,
   `core.TRACE_CAP`), so a hidden class or device never pushes visible
   frames out of the browser window.

@@ -57,6 +57,24 @@ _NMT_COMMAND_BY_KEY = {
 
 _SCAN_SETTLE_S = 0.5  # time to let SDO responses to a broadcast scan trickle in
 
+#: How long an estimate of the driver-clock offset is used before it has to
+#: be earned again (see ``CanopenBus.poll_frames``).
+#:
+#: The offset is the smallest gap seen between a frame's hardware stamp and
+#: our reading it, because everything else in that gap is queueing. Taken
+#: over all time, though, that minimum can only ever fall — and the adapter's
+#: crystal is not the PC's. A hundred ppm apart is ordinary for the part and
+#: comes to a third of a second an hour, all of it in one direction, so RX
+#: frames slid steadily earlier until a response was stamped before the
+#: request that caused it. Five minutes of that is ~30 ms, which is exactly
+#: what it looked like on the bench.
+#:
+#: So the minimum is taken over a window and re-earned in the next one. It
+#: still drops the moment a better sample arrives; it can now also rise, by
+#: at most a window's worth of drift at a time — half a millisecond at
+#: 100 ppm, far below anything the panel shows.
+_TS_WINDOW_S = 5.0
+
 # canopen heartbeat states -> the tokens used by the test-step format
 _NMT_STATE_TOKENS = {
     "OPERATIONAL": "operational",
@@ -175,6 +193,8 @@ class CanopenBus(BusInterface):
         self.network: canopen.Network | None = None
         self._trace: _TraceListener | None = None
         self._ts_offset: float | None = None  # relative driver clock → epoch, per connection
+        self._ts_win_min: float | None = None  # smallest gap in the window running now
+        self._ts_win_start = 0.0
         self.adapter = ""
         self.bitrate = 500
         self._detach_lock = threading.Lock()  # one winner detaches the network
@@ -200,7 +220,7 @@ class CanopenBus(BusInterface):
         self.network = network
         self.adapter = adapter
         self.bitrate = bitrate
-        self._ts_offset = None
+        self._ts_offset = self._ts_win_min = None
 
     def _install_listeners(self, network: canopen.Network) -> None:
         """All listener wiring, before ``network.connect()`` starts the
@@ -467,16 +487,29 @@ class CanopenBus(BusInterface):
             # can already hold traffic when we connect. A tenth of a second of
             # wait there put every RX in the trace that far behind the TX it
             # answered, which reads as a tool sending faster than it can be
-            # answered. Still re-anchored on a large jump (adapter reset, or a
-            # PC clock that stepped).
+            # answered.
+            #
+            # Smallest *within a window* (_TS_WINDOW_S), not smallest ever: the
+            # two clocks drift apart, always in the same direction, and a
+            # minimum kept for the whole session can only follow that drift
+            # downwards. Re-anchored outright on a large jump — adapter reset,
+            # or a PC clock that stepped.
             ts = msg.timestamp
             if not ts:
                 ts = arrival
             elif abs(ts - arrival) > 300:
                 gap = arrival - ts
-                if self._ts_offset is None or gap < self._ts_offset \
-                        or abs(gap - self._ts_offset) > 0.5:
-                    self._ts_offset = gap
+                if self._ts_offset is None or abs(gap - self._ts_offset) > 0.5:
+                    self._ts_offset = self._ts_win_min = gap
+                    self._ts_win_start = arrival
+                elif gap < self._ts_offset:
+                    self._ts_offset = self._ts_win_min = gap   # better sample, at once
+                else:
+                    self._ts_win_min = gap if self._ts_win_min is None \
+                        else min(self._ts_win_min, gap)
+                    if arrival - self._ts_win_start >= _TS_WINDOW_S:
+                        self._ts_offset, self._ts_win_min = self._ts_win_min, None
+                        self._ts_win_start = arrival
                 ts += self._ts_offset
             out.append(Frame(
                 direction=direction,
@@ -498,7 +531,13 @@ def _decode_cob(cob_id: int) -> str:
     labels = {
         0x000: "NMT", 0x180: "TxPDO1", 0x200: "RxPDO1",
         0x280: "TxPDO2", 0x300: "RxPDO2", 0x380: "TxPDO3", 0x400: "RxPDO3",
-        0x480: "TxPDO4", 0x500: "RxPDO4", 0x580: "SDO tx", 0x600: "SDO rx",
+        # "resp"/"req" rather than CiA's "tx"/"rx": those are named from the
+        # *node's* side, so a response read "SDO tx" while the DIR column two
+        # columns to its left said RX — two direction words per row, appearing
+        # to contradict each other. Which end sent it is what DIR is for; what
+        # this frame *is* holds whoever sent it, including another master's
+        # request arriving as RX.
+        0x480: "TxPDO4", 0x500: "RxPDO4", 0x580: "SDO resp", 0x600: "SDO req",
         0x700: "Heartbeat",
     }
     label = labels.get(function, f"0x{function:03X}")

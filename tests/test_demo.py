@@ -361,11 +361,11 @@ def test_demo_sdo_read_queues_annotated_request_response_frames(demo_bench):
     assert req.direction == "TX"
     assert req.cob_id == "0x601"
     assert req.data == "40 00 20 00 00 00 00 00"
-    assert req.decoded == "SDO rx node 01"
+    assert req.decoded == "SDO req node 01"
 
     assert resp.direction == "RX"
     assert resp.cob_id == "0x581"
-    assert resp.decoded == "SDO tx node 01"
+    assert resp.decoded == "SDO resp node 01"
 
     req_row, resp_row = _frame_row(req), _frame_row(resp)
     demo_bench._annotate_sdo(req_row)
