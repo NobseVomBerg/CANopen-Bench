@@ -189,6 +189,28 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         return Response(content=body, media_type=media_type, headers={
             "Content-Disposition": f'attachment; filename="trace_{stamp}.{suffix}"'})
 
+    #: Most rows one request may ask for. A window is what fits on a screen
+    #: plus a little either side; anything larger is someone asking for the
+    #: whole buffer a page at a time, which is what the exports are for.
+    TRACE_PAGE_MAX = 2000
+
+    async def trace_rows(request: Request) -> JSONResponse:
+        """The slice of the trace the panel is scrolled to, newest first.
+
+        A GET rather than an action, for the same reason as the exports: it
+        reads, it does not mutate, and the answer belongs to the one panel
+        that asked rather than in the snapshot every browser receives ten
+        times a second.
+        """
+        def _int(name: str, default: int, lo: int, hi: int) -> int:
+            try:
+                return max(lo, min(hi, int(request.query_params[name])))
+            except (KeyError, TypeError, ValueError):
+                return default
+
+        return JSONResponse(holder["bench"]._trace_page(
+            _int("end", 0, 0, 100_000_000), _int("n", 200, 1, TRACE_PAGE_MAX)))
+
     async def export_csv(request: Request) -> Response:
         return _download(holder["bench"]._trace_csv(), "text/csv", "csv")
 
@@ -233,6 +255,7 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         Route("/", index),
         Route("/api/state", state),
         Route("/api/action", action, methods=["POST"]),
+        Route("/api/trace/rows", trace_rows),
         Route("/api/trace/export.csv", export_csv),
         Route("/api/trace/export/candump", export_candump),
         Route("/api/report/{name}", report),

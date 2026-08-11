@@ -30,7 +30,9 @@ development; the version counts from here.
   real EDS files
 - Object browser from EDS catalogs with identity matching (0x1018),
   favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id)
-- Trace monitor: 200k-frame ring buffer, server-side class/node filters,
+- Trace monitor: 200k-frame ring buffer, newest frame at the top and the
+  whole buffer (or an opened capture) scrollable rather than a screenful,
+  server-side class/node filters,
   µs timestamps, PDO/EMCY row coloring, capture save/load, and autosave —
   every recorded frame appended to a capture file as it arrives and kept
   for two weeks, so an endurance run longer than the ring is deep still

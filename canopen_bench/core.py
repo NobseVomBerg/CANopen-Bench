@@ -4761,12 +4761,60 @@ class Bench:
 
         return passes
 
+    def _trace_match(self) -> tuple[int, int]:
+        """(rows matching the filter, rows in the shown source). The match
+        count comes from the per-(class, node) counters rather than from
+        walking the rows — the buffer holds 200k of them and this is read
+        on every snapshot."""
+        shown, counts = self._trace_view()
+        if not (self.trace_hide or self.trace_dev_filter):
+            return len(shown), len(shown)
+        passes = self._trace_filter_predicate()
+        return (sum(n for (cls, node), n in counts.items() if passes(cls, node)),
+                len(shown))
+
+    def _trace_page(self, end: int, n: int) -> dict:
+        """A window of the filtered trace, counted back from the newest row:
+        skip `end` matching rows from the new end, then take `n`. Newest
+        first, the order the panel shows them in.
+
+        This is what makes a scrollback longer than one snapshot possible.
+        The snapshot carries the last TRACE_VIEW rows and is pushed ten
+        times a second — it cannot also carry the hour behind them. So the
+        panel asks for the window it is actually scrolled to, on demand,
+        and only once the operator has left the live end; up there the rows
+        it already has are the newest ones.
+
+        Reading the same source as the panel (`_trace_view`) is the point:
+        a capture that is open answers here too, which is where hours of
+        scrollback actually come from — the live record is a ring, an
+        autosaved capture is not.
+        """
+        shown, _ = self._trace_view()
+        match, _total = self._trace_match()
+        if not (self.trace_hide or self.trace_dev_filter):
+            hi = max(0, len(shown) - end)
+            rows = shown[max(0, hi - n):hi][::-1]
+        else:
+            passes = self._trace_filter_predicate()
+            rows, skipped = [], 0
+            for row in reversed(shown):
+                if not passes(row["cls"], row["node"]):
+                    continue
+                if skipped < end:
+                    skipped += 1
+                    continue
+                rows.append(row)
+                if len(rows) >= n:
+                    break
+        return {"rows": rows, "end": end, "total": match}
+
     def _trace_snapshot(self) -> dict:
         """Last TRACE_VIEW rows *matching the filters* — scanned from the end
         of the full retained buffer, so hidden classes or devices don't push
         visible frames out of the window. The device filter never hides
         broadcast frames (node None: NMT, SYNC, …)."""
-        shown, counts = self._trace_view()
+        shown, _counts = self._trace_view()
         passes = self._trace_filter_predicate()
         if self.trace_hide or self.trace_dev_filter:
             rows: list[dict] = []
@@ -4776,11 +4824,9 @@ class Bench:
                     if len(rows) == TRACE_VIEW:
                         break
             rows.reverse()
-            match = sum(n for (cls, node), n in counts.items()
-                        if passes(cls, node))
         else:
             rows = shown[-TRACE_VIEW:]
-            match = len(shown)
+        match, _ = self._trace_match()
         return {"rows": rows, "paused": self.trace_paused, "hide": sorted(self.trace_hide),
                 "devSel": self.trace_dev_filter,
                 "total": len(shown), "match": match,
