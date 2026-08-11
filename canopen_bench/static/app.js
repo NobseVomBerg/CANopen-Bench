@@ -159,18 +159,28 @@ function PsuBox({ psu }) {
 function psuBox(psu) {
   const chans = psu.channels || [];
   const on = psu.output;
-  const val = (v, unit) => html`
-    <div style="display:flex;align-items:baseline;gap:3px">
-      <span style="font:600 13px ${MONO};color:var(--tx)">${v ?? '—'}</span>
-      <span style="font-size:10px;color:var(--dim)">${unit}</span>
+  const fieldStyle = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);font:600 12px ${MONO};border-radius:4px;padding:2px 5px;outline:none;width:52px;text-align:right`;
+  // The same set values the Setup box edits, and edited the same way: a
+  // supply worth watching from here is one worth nudging from here, and
+  // walking to Setup to change 57 V to 55 V is the walk this box exists
+  // to save.
+  const field = (c, i, key, unit) => html`
+    <div style="display:flex;align-items:center;gap:4px">
+      <${SyncInput} value=${String(c[key] ?? '')} style=${fieldStyle}
+        title=${`set ${key === 'volt' ? 'voltage' : 'current'}${chans.length > 1 ? ` · channel ${i + 1}` : ''}`}
+        onCommit=${(v) => send('psu_set', { ch: i + 1, [key]: v })} />
+      <span style="font-size:10px;color:var(--dim);width:8px">${unit}</span>
     </div>`;
-  // two channels stand side by side, each with its volts over its amps; a
-  // single channel has the room to put them next to each other instead
+  // Two channels stand side by side, each with its volts over its amps; a
+  // single channel has the room to put them next to each other instead.
+  // Each column is left-aligned within itself but sits off the box edge —
+  // a value pinned to the border reads as the start of the box rather than
+  // the start of a column.
   const channel = (c, i) => html`
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+    <div style="min-width:0;display:flex;flex-direction:column;gap:4px">
       ${chans.length > 1 && html`<span style="font:600 9.5px ${MONO};color:var(--faint)">CH ${i + 1}</span>`}
-      <div style="display:flex;${chans.length > 1 ? 'flex-direction:column;gap:3px' : 'align-items:baseline;gap:14px'}">
-        ${val(c.volt, 'V')}${val(c.curr, 'A')}
+      <div style="display:flex;${chans.length > 1 ? 'flex-direction:column;gap:4px' : 'align-items:center;gap:12px'}">
+        ${field(c, i, 'volt', 'V')}${field(c, i, 'curr', 'A')}
       </div>
     </div>`;
   return html`
@@ -187,7 +197,7 @@ function psuBox(psu) {
     </div>
     ${psu.error
       ? html`<div style="padding:8px 10px;font-size:11px;color:var(--red)">${psu.error}</div>`
-      : html`<div style="display:flex;gap:12px;padding:8px 10px">${chans.map(channel)}</div>`}
+      : html`<div style="display:flex;justify-content:space-around;gap:10px;padding:9px 8px">${chans.map(channel)}</div>`}
   </div>`;
 }
 
