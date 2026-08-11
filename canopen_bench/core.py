@@ -4425,13 +4425,21 @@ class Bench:
                              for f in self._capture_files()]
 
     def _saved_listing(self) -> list[dict]:
-        """The cached listing, with the open autosave segment's size taken
-        from what has been written rather than from the last `stat()` — it
-        is the one file that grows between refreshes, and a capture listed
-        at the 0 bytes it had when it was created reads as an empty one."""
+        """The cached listing, with the open autosave segment flagged
+        rather than measured.
+
+        It is the one file that grows between refreshes, so a size here
+        would be either the 0 bytes it was created with — a capture that
+        reads as empty — or a number that moves every tick. This list
+        fills the capture dropdown, and a dropdown whose entries change
+        ten times a second is rebuilt under the pointer. So the panel
+        writes "recording" for this one instead, and the live figure sits
+        on the autosave chip beside it, where nothing depends on it
+        holding still.
+        """
         if not self._autosave_name:
             return self._trace_saved
-        return [{**f, "size": self._autosave_bytes} if f["file"] == self._autosave_name else f
+        return [{**f, "live": True} if f["file"] == self._autosave_name else f
                 for f in self._trace_saved]
 
     # -- autosave ----------------------------------------------------------
