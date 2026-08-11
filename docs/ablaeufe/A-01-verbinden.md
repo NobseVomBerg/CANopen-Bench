@@ -61,11 +61,16 @@ UI → `Bench.act_connect_toggle` → `CanopenBus.connect`
    und eine leere Datei würde nur verwischen, wo die Lücke liegt.
    Beim Öffnen wird aufgeräumt: Segmente älter als 14 Tage
    (`AUTOSAVE_KEEP_DAYS`) fallen weg, und solange weniger als 2 GB frei
-   sind (`AUTOSAVE_FREE_BYTES`) auch jüngere, das älteste zuerst. Reicht
-   das nicht, schaltet sich der Autosave ab, statt die Platte
-   vollzuschreiben — das jüngste Segment und von Hand gespeicherte
-   Captures bleiben in jedem Fall stehen, jede Löschung steht mit Grund
-   im State-Log.
+   sind (`AUTOSAVE_FREE_BYTES`) auch jüngere, das älteste zuerst. Das
+   jüngste Segment und von Hand gespeicherte Captures bleiben in jedem
+   Fall stehen, jede Löschung steht mit Grund im State-Log.
+7. **[Ist]** Reicht das nicht, **pausiert** der Autosave, statt sich
+   abzuschalten (`_autosave_wait`): Chip rot mit Grund, **eine** Zeile im
+   State-Log, und alle `AUTOSAVE_RETRY_S` ein neuer Versuch — sobald
+   wieder Platz da ist, schreibt er weiter und sagt es. Ein Dauerlauf
+   läuft womöglich monatelang; ein Rekorder, der sich in der einen engen
+   Nacht abschaltet, ist auch Wochen später noch aus, wenn der gesuchte
+   Fehler endlich auftritt. Abgeschaltet wird nur vom Bediener.
 
 ## Ablauf: Trennen
 

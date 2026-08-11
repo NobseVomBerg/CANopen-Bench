@@ -103,3 +103,6 @@ def test_the_trace_toolbar_offers_autosave():
     # and what it costs: a feature that quietly eats a disk for two weeks
     # has to say so where it is switched on, not only in the docs
     assert "14 days" in app and "2 GB clear" in app
+    # …and a run left alone for months has to see at a glance that nothing
+    # is reaching the disk — the chip goes red, it does not go quiet
+    assert "auto.warn" in app and "never switches itself off" in app
