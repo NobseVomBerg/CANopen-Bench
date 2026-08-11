@@ -48,7 +48,7 @@ def test_the_page_loads_the_module_it_is_served(tmp_path):
     assert 'type="module" src="/static/app.js"' in index
 
 
-def test_the_filter_chip_memoises_its_select():
+def test_every_dropdown_goes_through_the_one_memoised_select():
     """Preact clears and rewrites ``option.value`` while diffing an
     ``<option>``'s text child, on every render, changed or not. The page
     re-renders on every state snapshot, so an open native dropdown is
@@ -56,18 +56,28 @@ def test_the_filter_chip_memoises_its_select():
     the current selection — you cannot pick anything unless you click
     inside one tick.
 
-    Returning the identical vnode while the chip's inputs are unchanged
-    makes Preact skip the subtree. Nothing else in the suite would notice
-    if that came back out: the file still parses, every Python test still
-    passes, and the filter is simply unusable again.
+    Returning the identical vnode while the options and the selection are
+    unchanged makes Preact skip the subtree. This was fixed once per
+    dropdown, which meant the next dropdown someone wrote started broken
+    again — and it did, twice. So there is exactly one ``<select>`` in the
+    file and everything else uses it.
+
+    Nothing else in the suite would notice if a raw ``<select>`` came
+    back: the file still parses, every Python test still passes, and that
+    dropdown is simply unusable.
     """
     src = (STATIC / "app.js").read_text(encoding="utf-8")
-    start = src.index("function FilterChip(")
+    assert src.count("<select") == 1, "a dropdown outside OptionSelect — see this docstring"
+    start = src.index("function OptionSelect(")
     body = src[start:src.index("\nfunction ", start + 1)]
-    assert "useMemo" in body, "FilterChip must memoise, see this test's docstring"
+    assert "useMemo" in body
     # the options arrive as a fresh array every tick, so the dependency has
     # to compare their contents — the array itself never matches
-    assert "options.join(" in body
+    assert "JSON.stringify(options)" in body
+    assert "[key," in body and "[options," not in body
+    # …and the handler through a ref, or the memo pins the first render's
+    # closure and the dropdown acts on state that has since moved on
+    assert "useRef" in body and "pick.current" in body
 
 
 def test_a_typed_number_is_decimal_unless_it_says_0x():
