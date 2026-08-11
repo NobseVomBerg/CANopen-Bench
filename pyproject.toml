@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.78"
+version = "1.0.79"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Embedded Systems",
     "Topic :: System :: Hardware",
 ]

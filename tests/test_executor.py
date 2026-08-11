@@ -144,14 +144,31 @@ def test_run_without_selected_device_refuses(tc_bench):
 
 
 def test_progress_is_published_during_run(tc_bench):
+    """The panel must move while the run does, not jump to the end.
+
+    Which steps reach a client is deliberately not fixed: `Bench._changed`
+    coalesces, so a request arriving while a push is in flight becomes one
+    trailing push rather than a queue of them (see its docstring — a run
+    that pushes every step floods the socket and the page never repaints).
+    So this asserts what the executor promises — progress that is about
+    this case, that advances, and that is visible *before* the last step —
+    and not which particular steps a given event loop let through. It used
+    to demand the first push be step 1, which held on 3.10 to 3.12 by
+    scheduling accident and stopped holding on 3.13.
+    """
     seen: list[dict] = []
 
-    async def notify():  # the executor pushes state after every step
+    async def notify():  # the executor asks for a push after every step
         if tc_bench.run_prog:
             seen.append(dict(tc_bench.run_prog))
     tc_bench.set_notifier(notify)
     run_selected(tc_bench, {"0001"})
-    assert seen and seen[0] == {"tid": "0001", "step": 1, "of": 4, "text": "NMT start"}
+
+    assert seen, "no progress reached a client during the run"
+    assert all(p["tid"] == "0001" and p["of"] == 4 for p in seen)
+    steps = [p["step"] for p in seen]
+    assert steps == sorted(steps), f"progress went backwards: {steps}"
+    assert steps[0] < 4, f"nothing was published before the last step: {steps}"
     assert tc_bench.run_prog is None  # cleared after the run
 
 
