@@ -1711,24 +1711,128 @@ def test_trace_autosave_rolls_over_at_the_segment_size(connected_bench, monkeypa
     assert _cobs(bench._trace_view()[0], "0x181")
 
 
-def test_trace_autosave_budget_removes_the_oldest_segments_and_says_so(connected_bench, monkeypatch):
-    bench = connected_bench
+def _seed_segments(bench: Bench, *ages_in_days: float, size: int = 900) -> list[Path]:
+    """Autosave segments of a given age, oldest first. Age is the file's
+    mtime — what the retention window is measured against."""
     bench.trace_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("auto_20260101_000000.jsonl", "auto_20260102_000000.jsonl"):
-        (bench.trace_dir / name).write_text("x" * 900, encoding="utf-8")
+    made = []
+    for i, days in enumerate(ages_in_days):
+        path = bench.trace_dir / f"auto_2026010{i + 1}_000000.jsonl"
+        path.write_text("x" * size, encoding="utf-8")
+        when = time.time() - days * 86400
+        os.utime(path, (when, when))
+        made.append(path)
+    return made
+
+
+def test_trace_autosave_drops_segments_past_the_retention_window(connected_bench):
+    bench = connected_bench
+    old, recent = _seed_segments(bench, 15, 13)  # the window is 14 days
     hand_saved = bench.trace_dir / "trace_20260101_000000_1f.json"
     hand_saved.write_text(json.dumps({"v": 1, "rows": []}), encoding="utf-8")
-    monkeypatch.setattr(core_mod, "AUTOSAVE_KEEP_BYTES", 1000)
     bench.dispatch("trace_autosave", {})
 
     bench.bus.queue_raw(0x181, b"\x01")
     bench._drain_frames()  # opens a segment → prunes
 
-    left = sorted(f.name for f in bench.trace_dir.glob("auto_*.jsonl"))
-    assert left == ["auto_20260102_000000.jsonl", bench._autosave_name]  # oldest gone
+    assert not old.exists()
+    assert recent.exists()      # inside the window, kept whatever the disk says
     assert hand_saved.exists()  # a capture saved by hand is never a candidate
-    assert any("budget reached" in ln["msg"] and "auto_20260101_000000.jsonl" in ln["msg"]
+    assert any(f"{old.name} removed, older than 14 days" in ln["msg"] for ln in bench.logs)
+
+
+def test_trace_autosave_keeps_two_weeks_when_the_disk_is_roomy(connected_bench):
+    bench = connected_bench
+    kept = _seed_segments(bench, 13.9, 5, 0.5)
+    bench.dispatch("trace_autosave", {})
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    assert all(f.exists() for f in kept)
+
+
+def test_trace_autosave_gives_up_the_oldest_early_when_the_disk_fills(connected_bench, monkeypatch):
+    """The two weeks are a promise to the operator, not to the disk."""
+    bench = connected_bench
+    oldest, middle, newest = _seed_segments(bench, 3, 2, 1)  # all well inside the window
+    free = [1_000_000_000]  # under the 2 GB reserve, until enough has gone
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: free[0])
+
+    def drop_one(self, path, why, _real=Bench._drop_segment):
+        free[0] += 1_500_000_000  # one segment's worth is enough to get clear
+        return _real(self, path, why)
+
+    monkeypatch.setattr(Bench, "_drop_segment", drop_one)
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    assert not oldest.exists()  # oldest first
+    assert middle.exists() and newest.exists()
+    assert bench.trace_autosave is True  # room was made, nothing else to do
+    assert any(f"{oldest.name} removed, only 0.9 GB free" in ln["msg"] for ln in bench.logs)
+
+
+def test_trace_autosave_keeps_the_newest_segment_and_stops_instead(connected_bench, monkeypatch):
+    """When even that is not enough: the last thing to throw away is the
+    most recent record, so autosave stops rather than eat it — or the disk."""
+    bench = connected_bench
+    oldest, newest = _seed_segments(bench, 3, 1)
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: 1_000_000_000)
+    bench.dispatch("trace_autosave", {})
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    assert not oldest.exists()
+    assert newest.exists()               # never a candidate
+    assert bench._autosave_name is None  # and no new segment was started
+    assert bench.trace_autosave is False and bench.db.get("trace_autosave") is False
+    assert any(ln["type"] == "emcy0" and "0.9 GB free, below the 2.0 GB" in ln["msg"]
                for ln in bench.logs)
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()  # and it stays off rather than retrying every batch
+    assert list(bench.trace_dir.glob("auto_*.jsonl")) == [newest]
+
+
+def test_trace_autosave_rolls_early_when_the_free_space_runs_down(connected_bench, monkeypatch):
+    """Pruning happens when a segment opens, so a segment that would run to
+    64 MB has to be cut short — otherwise the reserve is undercut by a
+    whole segment before anything gives way."""
+    bench = connected_bench
+    monkeypatch.setattr(core_mod, "AUTOSAVE_SPACE_EVERY_BYTES", 1)  # look after every batch
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: 9_000_000_000)
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    first = bench._autosave_name
+    assert first is not None
+
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: 1_000_000_000)
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()
+
+    assert bench._autosave_name is None  # closed mid-segment, well short of 64 MB
+    assert any("0.9 GB free — rolling early" in ln["msg"] for ln in bench.logs)
+    assert _cobs(_autosave_rows_of(bench, first), "0x182")  # the batch still got written
+
+
+def test_trace_autosave_unreadable_free_space_is_not_treated_as_full(connected_bench, monkeypatch):
+    """Unknown is not the same as no room. A guard that cannot read the
+    number must not act as though it read a small one."""
+    bench = connected_bench
+    kept = _seed_segments(bench, 3, 1)
+    monkeypatch.setattr(core_mod.shutil, "disk_usage",
+                        lambda p: (_ for _ in ()).throw(OSError("nope")))
+    bench.dispatch("trace_autosave", {})
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    assert all(f.exists() for f in kept)
+    assert bench.trace_autosave is True
+    assert bench._autosave_name is not None
 
 
 def test_trace_autosave_toggle_off_closes_the_segment_and_persists(bench, tmp_path):

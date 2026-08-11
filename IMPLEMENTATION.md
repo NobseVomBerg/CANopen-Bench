@@ -126,12 +126,20 @@ light + dark theme (toggle in the header, persisted per browser):
   single JSON object, and a capture cut short by a crash still has to
   read. What goes in is the *record*, unfiltered: a trace filter is a
   property of the panel. A segment starts on the first frame after a
-  connect, rolls over at `core.AUTOSAVE_SEGMENT_BYTES`, and the segments
-  together are held to `core.AUTOSAVE_KEEP_BYTES` — oldest first, each
-  removal logged, hand-saved captures never touched. A write error
-  (disk full, read-only) switches autosave off with a log line instead of
-  disturbing the run. Segments are ordinary captures: they appear in the
-  same list and load the same way.
+  connect and rolls over at `core.AUTOSAVE_SEGMENT_BYTES`. Retention is
+  `core.AUTOSAVE_KEEP_DAYS` (14 — the length of an endurance run, since
+  the fault worth autosaving for is the one that shows up once, days in),
+  bounded by `core.AUTOSAVE_FREE_BYTES` (2 GB): under that reserve the
+  oldest segments go early, a segment mid-write is rolled short so the
+  reserve cannot be undercut by a whole one
+  (`core.AUTOSAVE_SPACE_EVERY_BYTES` between checks), and if that still
+  is not enough autosave switches itself off rather than take the last of
+  the disk. The newest segment is never a candidate; nor are hand-saved
+  captures; every removal is logged with its reason. Free space that the
+  filesystem will not report is treated as unknown, not as full. A write
+  error (disk full, read-only) switches autosave off with a log line
+  instead of disturbing the run. Segments are ordinary captures: they
+  appear in the same list and load the same way.
   The filtered trace (full matching set, not just the browser scrollback)
   can also be exported as CSV or a SocketCAN `candump -l` log
   (`GET /api/trace/export.csv` / `/api/trace/export/candump`, plain
