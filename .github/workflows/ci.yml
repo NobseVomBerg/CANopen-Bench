@@ -20,6 +20,12 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history, not the single commit checkout fetches by default:
+          # test_the_version_moves_when_the_tool_does compares this commit's
+          # version against the main it merges into, and cannot read a
+          # pyproject.toml from a commit that was never fetched.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
