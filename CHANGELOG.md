@@ -32,8 +32,10 @@ development; the version counts from here.
   favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id)
 - Trace monitor: 200k-frame ring buffer, server-side class/node filters,
   µs timestamps, PDO/EMCY row coloring, capture save/load, and autosave —
-  every recorded frame appended to a capture file as it arrives, so a run
-  longer than the ring is deep still has a beginning
+  every recorded frame appended to a capture file as it arrives and kept
+  for two weeks, so an endurance run longer than the ring is deep still
+  has a beginning; the retention gives way early if the disk falls below
+  a 2 GB reserve
 - EMCY decoding: CiA-301 error-code texts and error-register bits in the
   trace and state log (badge counts real emergencies); vendor-specific
   codes contributable via the `emcy_codes` plugin hook

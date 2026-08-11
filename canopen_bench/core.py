@@ -92,13 +92,25 @@ TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈1 h at 55 fra
 #: editor — or this tool's own capture loader — will open, and each one is a
 #: complete capture on its own.
 AUTOSAVE_SEGMENT_BYTES = 64 * 1024 * 1024
-#: What the segments together may occupy. A connected bench writes roughly
-#: 40 MB an hour, and autosave is meant to be switched on and forgotten, so
-#: unbounded it would fill the disk it exists to keep the record on. The
-#: oldest segments give way first and every removal is logged — a gap in the
-#: record must not be silent. Captures saved by hand are never touched: those
-#: are a decision, not a by-product.
-AUTOSAVE_KEEP_BYTES = 1024 * 1024 * 1024
+#: How far back the autosaved record reaches. Two weeks, because that is
+#: the length of an endurance run — the whole case for autosaving is the
+#: fault that shows up once, days in, and a window shorter than the test
+#: throws away the part nobody knew to keep. A connected bench writes
+#: roughly 40 MB an hour, so a fortnight of one is on the order of 13 GB.
+AUTOSAVE_KEEP_DAYS = 14
+#: …unless the disk says otherwise. This is the free space autosave will
+#: not eat into: below it the oldest segments give way early, before the
+#: two weeks are up, and if that is not enough autosave switches itself off
+#: rather than take the last of the disk. A bench tool filling the volume
+#: it runs on is a worse outcome than a shorter record. Every removal and
+#: the shutdown are logged — a gap in the record must not be silent — and
+#: captures saved by hand are never candidates: those are a decision, not
+#: a by-product.
+AUTOSAVE_FREE_BYTES = 2 * 1024 * 1024 * 1024
+#: How much gets written between two looks at the free space. Cheap enough
+#: to be frequent, fine enough that the reserve cannot be overshot by more
+#: than this before a segment is rolled early.
+AUTOSAVE_SPACE_EVERY_BYTES = 4 * 1024 * 1024
 TRACE_VIEW = 400     # rows per snapshot to the browser — enough scrollback to
                      # follow a multi-step sequence (e.g. addressing) end to end
 PLOT_SEL_MAX = 4     # concurrently plotted signals — keeps the chart legible
@@ -125,6 +137,13 @@ def now_us_str() -> str:
     """Full µs resolution — trace rows carry 6 decimals, the UI decides
     whether to show ms or µs."""
     return datetime.now().strftime("%H:%M:%S.%f")
+
+
+def _gb(n: int) -> str:
+    """Bytes as GB, for the log lines about disk space. One decimal: the
+    reserve is a round number of gigabytes and the reader is comparing
+    against it, not counting bytes."""
+    return f"{n / (1024 * 1024 * 1024):.1f} GB"
 
 
 def _tod_seconds(stamp: str) -> float | None:
@@ -955,6 +974,7 @@ class Bench:
         self._autosave_fh: TextIO | None = None
         self._autosave_name: str | None = None
         self._autosave_bytes = 0
+        self._autosave_checked = 0  # bytes written at the last free-space look
         self._refresh_trace_saved()
         self.raw_rows: list[dict] = db.get("raw_sdo", [{"i": "0x2040", "s": "01", "l": "4", "v": "0x00260001"}])
         self._cyc_seq = 0  # id source for raw rows (cyclic scheduler key)
@@ -4417,10 +4437,13 @@ class Bench:
                 self._autosave_close("segment full")
             if self._autosave_fh is None:
                 self._autosave_open()
+                if self._autosave_fh is None:  # no room for one — _autosave_open said so
+                    return
             text = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows)
             self._autosave_fh.write(text)
             self._autosave_fh.flush()
             self._autosave_bytes += len(text.encode("utf-8"))
+            self._autosave_watch_space()
         except OSError as exc:
             # a full or read-only disk is not a reason to stop testing:
             # switch autosave off, say so once, go on recording into memory
@@ -4436,7 +4459,21 @@ class Bench:
             self.log(f"TRACE autosave off — {exc}", "emcy0")
 
     def _autosave_open(self) -> None:
+        """Start a segment — after making room for it, and only if there is
+        room. Leaves `_autosave_fh` at None when there is not, which the
+        caller reads as "autosave is over"."""
         self.trace_dir.mkdir(parents=True, exist_ok=True)
+        self._autosave_prune()
+        free = self._free_bytes()
+        if free is not None and free < AUTOSAVE_FREE_BYTES:
+            # nothing left to give and still under the reserve: stop, and
+            # say which number it is, because the operator just lost the
+            # feature and "autosave off" alone does not explain why
+            self.trace_autosave = False
+            self.db.set("trace_autosave", False)
+            self.log(f"TRACE autosave off — {_gb(free)} free, below the "
+                     f"{_gb(AUTOSAVE_FREE_BYTES)} the bench keeps clear", "emcy0")
+            return
         stem = datetime.now().strftime("auto_%Y%m%d_%H%M%S")
         path = self.trace_dir / f"{stem}.jsonl"
         n = 0
@@ -4452,7 +4489,7 @@ class Bench:
                           separators=(",", ":")) + "\n"
         self._autosave_fh.write(head)
         self._autosave_bytes = len(head)
-        self._autosave_prune()
+        self._autosave_checked = self._autosave_bytes
         self._refresh_trace_saved()
         self.log(f"TRACE autosave → {path.name}")
 
@@ -4470,28 +4507,69 @@ class Bench:
 
     def _autosave_forget(self) -> None:
         self._autosave_fh, self._autosave_name, self._autosave_bytes = None, None, 0
+        self._autosave_checked = 0
+
+    def _free_bytes(self) -> int | None:
+        """Free space where the captures go, or None if the filesystem will
+        not say. Unknown is not the same as full: a guard that cannot read
+        the number must not act as though it read a small one."""
+        try:
+            return shutil.disk_usage(self.trace_dir).free
+        except OSError:
+            return None
+
+    def _autosave_watch_space(self) -> None:
+        """Roll the segment early when the disk is filling up.
+
+        Pruning happens when a segment opens, so on its own the reserve
+        could be undercut by up to a whole segment before anything gave
+        way. Closing early brings that forward: the next batch opens a
+        segment, opening prunes, and the two weeks shorten to what fits.
+        """
+        if self._autosave_bytes - self._autosave_checked < AUTOSAVE_SPACE_EVERY_BYTES:
+            return
+        self._autosave_checked = self._autosave_bytes
+        free = self._free_bytes()
+        if free is not None and free < AUTOSAVE_FREE_BYTES:
+            self._autosave_close(f"{_gb(free)} free — rolling early")
 
     def _autosave_prune(self) -> None:
-        """Hold the autosave segments to AUTOSAVE_KEEP_BYTES, oldest first.
+        """Drop autosaved segments past AUTOSAVE_KEEP_DAYS, and then, while
+        the free space is under AUTOSAVE_FREE_BYTES, keep dropping the
+        oldest — the disk decides when two weeks is too long to promise.
 
-        Only files autosave wrote itself are candidates, and never the one
-        currently open. Runs when a segment opens, which is also the only
-        moment the total can have grown by a whole segment.
+        The newest segment is never a candidate, even when the reserve
+        cannot be met: at that point the run is about to stop autosaving
+        anyway, and the last thing to throw away is the most recent record.
+        Only files autosave wrote itself are considered — a capture saved
+        by hand is a decision, not a by-product — and each removal is
+        logged with the reason, so a hole in the record is never silent.
         """
-        segments = sorted(self.trace_dir.glob("auto_*.jsonl"), key=lambda f: f.name)
-        total = sum(f.stat().st_size for f in segments)
-        for old in segments:
-            if total <= AUTOSAVE_KEEP_BYTES:
+        try:  # stat once, oldest first — the directory can change underneath
+            dated = sorted((f.stat().st_mtime, f) for f in self.trace_dir.glob("auto_*.jsonl"))
+        except OSError:
+            return
+        segments = [f for _, f in dated]
+        cutoff = time.time() - AUTOSAVE_KEEP_DAYS * 86400
+        for mtime, old in dated:
+            if mtime >= cutoff:
+                break                       # sorted by age: the rest are younger
+            if self._drop_segment(old, f"older than {AUTOSAVE_KEEP_DAYS} days"):
+                segments.remove(old)
+        while len(segments) > 1:            # never the newest one
+            free = self._free_bytes()
+            if free is None or free >= AUTOSAVE_FREE_BYTES:
                 return
-            if old.name == self._autosave_name:
-                continue
-            size = old.stat().st_size
-            try:
-                old.unlink()
-            except OSError:
-                continue
-            total -= size
-            self.log(f"TRACE autosave budget reached — oldest capture {old.name} removed")
+            old = segments.pop(0)
+            self._drop_segment(old, f"only {_gb(free)} free")
+
+    def _drop_segment(self, path: Path, why: str) -> bool:
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        self.log(f"TRACE autosave — capture {path.name} removed, {why}")
+        return True
 
     def act_trace_save(self, p: dict) -> None:
         rows, _ = self._trace_view()  # what is on screen is what gets saved
