@@ -98,6 +98,23 @@ def master(channel, slave):
     bus.disconnect()
 
 
+@pytest.fixture()
+def unplugged():
+    """A bus with a trace queue and no interface behind it.
+
+    Everything about mapping a frame's timestamp happens in `poll_frames`,
+    out of a queue a test can fill by hand — no adapter, no Notifier, no
+    protocol. Borrowing `master` for those cost a virtual network per test
+    and, worse, its teardown: `Network.disconnect()` joins the reader
+    thread, and python-can's Notifier only looks at its stop flag between
+    one-second receive timeouts. Two seconds per test, twelve of them, for
+    a connection five of them never touch.
+    """
+    bus = CanopenBus()
+    bus._trace = _TraceListener()
+    return bus
+
+
 def test_sdo_read_scalar(master):
     res = master.sdo_read(SLAVE_NODE_ID, "0x2000", "00")
     assert res.ok
@@ -171,7 +188,7 @@ def test_poll_frames_observes_sdo_traffic(master):
     assert all(f.time for f in frames)  # bus timestamps, not poll time
 
 
-def test_a_frame_read_late_does_not_shift_every_frame_after_it(master):
+def test_a_frame_read_late_does_not_shift_every_frame_after_it(unplugged):
     """The adapter's clock is mapped onto wall time by the smallest gap
     seen between a hardware stamp and our reading it, not by the first one.
 
@@ -183,24 +200,24 @@ def test_a_frame_read_late_does_not_shift_every_frame_after_it(master):
     not wait for one.
     """
     now = time.time()
-    master._trace = _TraceListener()
-    master._ts_offset = None
+    unplugged._trace = _TraceListener()
+    unplugged._ts_offset = None
     hw = 50644.0
 
     # waiting in the adapter since before we connected: stamped 130 ms
     # before our thread got to it
-    master._trace.queue.append(
+    unplugged._trace.queue.append(
         ("RX", can.Message(arbitration_id=0x701, data=[0], timestamp=hw), now))
     # our own request 10 ms later, stamped by us as it goes out
-    master._trace.queue.append(
+    unplugged._trace.queue.append(
         ("TX", can.Message(arbitration_id=0x601, data=[0], timestamp=now + 0.010),
          now + 0.010))
     # its answer 1 ms after that, read with no backlog in the way
-    master._trace.queue.append(
+    unplugged._trace.queue.append(
         ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw + 0.141),
          now + 0.011))
 
-    frames = master.poll_frames(max_frames=16)
+    frames = unplugged.poll_frames(max_frames=16)
     fmt = "%H:%M:%S.%f"
     request = datetime.strptime(frames[1].time, fmt)
     answer = datetime.strptime(frames[2].time, fmt)
@@ -209,13 +226,13 @@ def test_a_frame_read_late_does_not_shift_every_frame_after_it(master):
     assert (answer - request).total_seconds() == pytest.approx(0.001, abs=0.0005)
 
 
-def test_poll_frames_maps_relative_driver_clock_to_wall_time(master):
+def test_poll_frames_maps_relative_driver_clock_to_wall_time(unplugged):
     now = time.time()
-    master._trace = _TraceListener()
+    unplugged._trace = _TraceListener()
 
     # First relative frame anchors the offset: renders exactly at arrival.
     first_relative = can.Message(arbitration_id=0x580 + SLAVE_NODE_ID, data=[0], timestamp=50644.609)
-    master._trace.queue.append(("RX", first_relative, now))
+    unplugged._trace.queue.append(("RX", first_relative, now))
 
     # Second relative frame, 150us later on the hardware clock but with 3ms
     # of Notifier scheduling jitter on arrival — the mapped time must track
@@ -223,17 +240,17 @@ def test_poll_frames_maps_relative_driver_clock_to_wall_time(master):
     second_relative = can.Message(
         arbitration_id=0x580 + SLAVE_NODE_ID, data=[0], timestamp=50644.609150
     )
-    master._trace.queue.append(("RX", second_relative, now + 0.003))
+    unplugged._trace.queue.append(("RX", second_relative, now + 0.003))
 
     # Epoch-based stamp, close to arrival: kept as-is.
     epoch_msg = can.Message(arbitration_id=0x600 + SLAVE_NODE_ID, data=[0], timestamp=now - 0.0005)
-    master._trace.queue.append(("TX", epoch_msg, now))
+    unplugged._trace.queue.append(("TX", epoch_msg, now))
 
     # No usable timestamp: falls back to arrival.
     zero_msg = can.Message(arbitration_id=0x700 + SLAVE_NODE_ID, data=[0], timestamp=0)
-    master._trace.queue.append(("RX", zero_msg, now))
+    unplugged._trace.queue.append(("RX", zero_msg, now))
 
-    frames = master.poll_frames(max_frames=16)
+    frames = unplugged.poll_frames(max_frames=16)
     assert len(frames) == 4
 
     fmt = "%H:%M:%S.%f"
@@ -381,7 +398,7 @@ def test_plugin_backend_may_carry_extra_arguments(monkeypatch):
     assert seen["channel"] == 2
 
 
-def test_poll_frames_offset_follows_a_drifting_driver_clock(master, monkeypatch):
+def test_poll_frames_offset_follows_a_drifting_driver_clock(unplugged, monkeypatch):
     """The adapter's crystal is not the PC's. A hundred ppm apart is
     ordinary, and it is a third of a second an hour — all in one
     direction. An offset taken as the smallest gap ever seen can only
@@ -390,11 +407,11 @@ def test_poll_frames_offset_follows_a_drifting_driver_clock(master, monkeypatch)
     lets the estimate rise again.
     """
     monkeypatch.setattr(cb, "_TS_WINDOW_S", 1.0)
-    master._trace = _TraceListener()
+    unplugged._trace = _TraceListener()
     hw, host = 50644.0, time.time()          # relative driver clock, wall clock
 
     def rx(hw_at: float, arrival_at: float) -> None:
-        master._trace.queue.append(
+        unplugged._trace.queue.append(
             ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw_at), arrival_at))
 
     rx(hw, host)                              # anchors: offset == true_offset
@@ -403,7 +420,7 @@ def test_poll_frames_offset_follows_a_drifting_driver_clock(master, monkeypatch)
     for i in range(1, 7):
         t = 10.0 * i
         rx(hw + t - t * 200e-6, host + t)
-    frames = master.poll_frames(max_frames=16)
+    frames = unplugged.poll_frames(max_frames=16)
 
     fmt = "%H:%M:%S.%f"
     late = datetime.strptime(frames[-1].time, fmt)
@@ -412,33 +429,33 @@ def test_poll_frames_offset_follows_a_drifting_driver_clock(master, monkeypatch)
     assert drift_ms < 1.0, f"stamp drifted {drift_ms:.1f} ms behind the frame's arrival"
 
 
-def test_poll_frames_offset_still_drops_at_once_on_a_better_sample(master, monkeypatch):
+def test_poll_frames_offset_still_drops_at_once_on_a_better_sample(unplugged, monkeypatch):
     """Downwards it must not wait for a window: a smaller gap is a closer
     reading of the offset itself, and everything above it was queueing."""
     monkeypatch.setattr(cb, "_TS_WINDOW_S", 60.0)
-    master._trace = _TraceListener()
+    unplugged._trace = _TraceListener()
     hw, host = 50644.0, time.time()
-    master._trace.queue.append(
+    unplugged._trace.queue.append(
         ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw), host + 0.100))
-    master._trace.queue.append(   # same hardware instant, read 100 ms sooner
+    unplugged._trace.queue.append(   # same hardware instant, read 100 ms sooner
         ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw + 1.0), host + 1.0))
-    frames = master.poll_frames(max_frames=8)
+    frames = unplugged.poll_frames(max_frames=8)
 
     fmt = "%H:%M:%S.%f"
     assert frames[1].time == datetime.fromtimestamp(host + 1.0).strftime(fmt)
 
 
-def test_poll_frames_reanchors_when_the_clock_steps(master):
+def test_poll_frames_reanchors_when_the_clock_steps(unplugged):
     """An adapter reset or a stepped PC clock is not drift — the whole
     mapping is wrong and waiting out a window would stamp every frame in
     it against the old anchor."""
-    master._trace = _TraceListener()
+    unplugged._trace = _TraceListener()
     hw, host = 50644.0, time.time()
-    master._trace.queue.append(
+    unplugged._trace.queue.append(
         ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=hw), host))
-    master._trace.queue.append(     # driver clock restarted near zero
+    unplugged._trace.queue.append(     # driver clock restarted near zero
         ("RX", can.Message(arbitration_id=0x581, data=[0], timestamp=12.5), host + 0.5))
-    frames = master.poll_frames(max_frames=8)
+    frames = unplugged.poll_frames(max_frames=8)
 
     fmt = "%H:%M:%S.%f"
     assert frames[1].time == datetime.fromtimestamp(host + 0.5).strftime(fmt)
