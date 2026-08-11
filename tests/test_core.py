@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import os
+import re
 import time
 from collections import deque
 from datetime import datetime, timedelta
@@ -3371,6 +3372,39 @@ def test_frontend_fetches_nothing_from_the_internet():
     for face in faces:
         assert f"fonts/{face}" in css, f"{face} ships but no @font-face references it"
     assert (fonts / "LICENSE.txt").is_file(), "OFL requires the license to ship with the fonts"
+
+
+def test_every_theme_colour_the_ui_asks_for_exists_in_both_themes():
+    """A `var(--typo)` renders as nothing at all, silently.
+
+    The frontend styles almost everything inline, so a colour that is
+    misspelled or only defined for one theme does not fail anywhere — the
+    property is simply dropped and the element comes out transparent, or
+    right in light mode and invisible in dark. Nothing on the page and
+    nothing in the console says so.
+
+    So the two are checked against each other: every custom property the
+    markup asks for has to be declared, and declared in both themes.
+    Names built at runtime (`var(--pdo${n})`) are the one thing this
+    cannot see and are skipped.
+    """
+    import canopen_bench
+
+    static = Path(canopen_bench.__file__).resolve().parent / "static"
+    css = (static / "styles.css").read_text(encoding="utf-8")
+    used = set()
+    for text in (css, (static / "app.js").read_text(encoding="utf-8")):
+        used |= {m for m in re.findall(r"var\(\s*(--[\w-]+\$?)", text) if not m.endswith("$")}
+
+    def declared(selector: str) -> set[str]:
+        block = re.search(re.escape(selector) + r"\s*\{(.*?)\}", css, re.S)
+        assert block, f"{selector} block not found in styles.css"
+        return set(re.findall(r"(--[\w-]+)\s*:", block.group(1)))
+
+    light, dark = declared(':root, [data-theme="light"]'), declared('[data-theme="dark"]')
+    assert not (used - light), f"used but never declared: {sorted(used - light)}"
+    assert not (used - dark), f"missing from the dark theme: {sorted(used - dark)}"
+    assert light == dark, f"themes disagree: {sorted(light ^ dark)}"
 
 
 def test_demo_seed_eds_ships_inside_the_package():
