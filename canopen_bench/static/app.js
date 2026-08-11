@@ -1493,6 +1493,7 @@ function TracePage({ s }) {
   const toggle = (f) => send('trace_filter', { hide: hide.includes(f) ? hide.filter((x) => x !== f) : [...hide, f] });
   const rows = s.trace.rows;
   const saved = s.trace.saved || [];
+  const auto = s.trace.auto || {};
   const handleImportFile = (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
@@ -1505,10 +1506,17 @@ function TracePage({ s }) {
     ev.target.value = '';
   };
   return html`
-  <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;padding:9px 18px">
+  <!-- wrap, and every control nowrap: this row is long enough that on a
+       narrow window flex would otherwise shrink each button until its own
+       label broke in two ("⤓" over "Save"). A second row of intact
+       controls reads; a row of two-line stumps does not. -->
+  <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 18px;white-space:nowrap">
     <span onClick=${() => send('trace_toggle')} style="${btn.acc}font-size:11.5px;padding:5px 14px;border-radius:6px;cursor:pointer">${s.trace.paused ? '▶ Resume' : '❚❚ Pause'}</span>
     <span class="hv" onClick=${() => send('trace_clear')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">Clear</span>
     <span class="hv" onClick=${() => send('trace_save')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤓ Save</span>
+    <span onClick=${() => send('trace_autosave')}
+      title=${`Autosave: write every recorded frame to a capture file as it arrives, unfiltered. The trace in memory is a ring buffer, so on a long run the beginning is gone by the time anything is worth looking at. A new file starts on connect; the oldest autosaved ones give way once they add up to 1 GB.${auto.file ? `\n\nwriting to ${auto.file}` : ''}`}
+      style="border:1px solid ${auto.on ? 'var(--acc-bd)' : 'var(--inp)'};background:${auto.on ? 'var(--acc-soft)' : 'transparent'};color:${auto.on ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer;white-space:nowrap">${auto.on ? '⏺' : '⭘'} autosave${auto.on && auto.file ? ` · ${fmtSize(auto.bytes || 0)}` : ''}</span>
     ${saved.length > 0 && html`
       <select onChange=${(e) => { if (e.target.value) send('trace_load', { file: e.target.value }); e.target.value = ''; }}
         style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 6px;font:11px ${MONO};outline:none;max-width:240px">

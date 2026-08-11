@@ -1565,6 +1565,307 @@ def test_trace_save_on_empty_trace_is_a_no_op(bench):
     assert bench.snapshot()["trace"]["saved"] == []
 
 
+# -- autosave: the record on disk, not only in the ring ----------------------
+
+def _autosave_rows_of(bench: Bench, name: str) -> list[dict]:
+    """The frame rows of one autosave segment, read back off disk. The demo
+    bus keeps its own heartbeats going, so a test that queued one frame gets
+    that frame plus whatever else the bus carried — which is the point."""
+    path = bench.trace_dir / name
+    return [row for row in (json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln)
+            if "cob" in row]
+
+
+def _autosave_rows(bench: Bench) -> list[dict]:
+    return _autosave_rows_of(bench, bench._autosave_name)
+
+
+def _cobs(rows: list[dict], cob: str) -> list[dict]:
+    return [r for r in rows if r["cob"] == cob]
+
+
+def test_trace_autosave_writes_every_drained_frame_as_it_arrives(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    assert bench.trace_autosave is True
+
+    bench.bus.queue_raw(0x181, b"\x01\x02")
+    bench._drain_frames()
+    first = _autosave_rows(bench)
+    assert first == bench.trace  # the record, frame for frame
+    assert _cobs(first, "0x181")
+
+    bench.bus.queue_raw(0x182, b"\x03")
+    bench._drain_frames()
+
+    # appended, not rewritten — and flushed, so the file is current without
+    # anyone having closed it
+    rows = _autosave_rows(bench)
+    assert rows == bench.trace
+    assert rows[:len(first)] == first
+    assert _cobs(rows, "0x182")
+    assert bench._autosave_bytes == (bench.trace_dir / bench._autosave_name).stat().st_size
+
+
+def test_trace_autosave_off_by_default_and_writes_nothing(connected_bench):
+    bench = connected_bench
+    assert bench.trace_autosave is False
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    assert bench._autosave_name is None
+    assert not bench.trace_dir.exists() or list(bench.trace_dir.glob("auto_*.jsonl")) == []
+
+
+def test_trace_autosave_keeps_what_the_ring_buffer_drops(connected_bench, monkeypatch):
+    """The reason autosave exists: memory is capped, the file is not."""
+    bench = connected_bench
+    monkeypatch.setattr(core_mod, "TRACE_CAP", 2)
+    bench.dispatch("trace_autosave", {})
+
+    for i in range(5):
+        bench.bus.queue_raw(0x181, bytes([i]))
+        bench._drain_frames()
+
+    assert len(bench.trace) == 2  # the ring dropped everything before that
+    assert [r["data"] for r in _cobs(_autosave_rows(bench), "0x181")] == \
+        ["00", "01", "02", "03", "04"]
+
+
+def test_trace_autosave_writes_the_record_not_the_filtered_view(connected_bench):
+    """A filter is a property of the panel. A record that kept only what
+    someone happened to be looking at answers no question asked later."""
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    bench.dispatch("trace_filter", {"hide": ["PDO"]})
+    bench.dispatch("trace_toggle", {})  # and paused on top of it
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    assert [r["cls"] for r in _cobs(_autosave_rows(bench), "0x181")] == ["PDO"]
+    assert all(r["cls"] != "PDO" for r in bench.snapshot()["trace"]["rows"])
+
+
+def test_trace_autosave_rows_carry_the_decode_the_panel_shows(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+
+    bench.bus.queue_raw(0x581, bytes.fromhex("43 50 20 00 2A 00 00 00"))
+    bench._drain_frames()
+
+    on_disk = _cobs(_autosave_rows(bench), "0x581")[0]
+    assert on_disk == _cobs(bench.trace, "0x581")[0]  # annotated first, written second
+    assert on_disk["obj"] == "0x2050:00 Variant id"
+
+
+def test_trace_autosave_segment_loads_back_as_a_capture(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    for i in range(3):
+        bench.bus.queue_raw(0x181, bytes([i]))
+    bench._drain_frames()
+    name = bench._autosave_name
+    assert name.endswith(".jsonl")
+    recorded = len(bench.trace)
+
+    listed = [f["file"] for f in bench.snapshot()["trace"]["saved"]]
+    assert name in listed
+    bench.dispatch("trace_load", {"file": name})
+
+    snap = bench.snapshot()["trace"]
+    assert snap["loaded"] == name
+    assert snap["total"] == recorded  # every frame, and the header is not one
+    assert bench._trace_view()[1][("PDO", 1)] == 3
+
+
+def test_trace_autosave_listing_shows_the_open_segment_growing(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    entry = next(f for f in bench.snapshot()["trace"]["saved"] if f["file"] == bench._autosave_name)
+    assert entry["size"] == bench._autosave_bytes  # not the 0 bytes it was created with
+    assert bench.snapshot()["trace"]["auto"] == {
+        "on": True, "file": bench._autosave_name, "bytes": bench._autosave_bytes}
+
+
+def test_trace_autosave_rolls_over_at_the_segment_size(connected_bench, monkeypatch):
+    bench = connected_bench
+    monkeypatch.setattr(core_mod, "AUTOSAVE_SEGMENT_BYTES", 1)  # roll after every batch
+    bench.dispatch("trace_autosave", {})
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    first = bench._autosave_name
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()
+
+    assert bench._autosave_name != first
+    assert len(list(bench.trace_dir.glob("auto_*.jsonl"))) == 2
+    # each segment is a capture in its own right, not half of one
+    assert _cobs(_autosave_rows(bench), "0x182") and not _cobs(_autosave_rows(bench), "0x181")
+    bench.dispatch("trace_load", {"file": first})
+    assert _cobs(bench._trace_view()[0], "0x181")
+
+
+def test_trace_autosave_budget_removes_the_oldest_segments_and_says_so(connected_bench, monkeypatch):
+    bench = connected_bench
+    bench.trace_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("auto_20260101_000000.jsonl", "auto_20260102_000000.jsonl"):
+        (bench.trace_dir / name).write_text("x" * 900, encoding="utf-8")
+    hand_saved = bench.trace_dir / "trace_20260101_000000_1f.json"
+    hand_saved.write_text(json.dumps({"v": 1, "rows": []}), encoding="utf-8")
+    monkeypatch.setattr(core_mod, "AUTOSAVE_KEEP_BYTES", 1000)
+    bench.dispatch("trace_autosave", {})
+
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()  # opens a segment → prunes
+
+    left = sorted(f.name for f in bench.trace_dir.glob("auto_*.jsonl"))
+    assert left == ["auto_20260102_000000.jsonl", bench._autosave_name]  # oldest gone
+    assert hand_saved.exists()  # a capture saved by hand is never a candidate
+    assert any("budget reached" in ln["msg"] and "auto_20260101_000000.jsonl" in ln["msg"]
+               for ln in bench.logs)
+
+
+def test_trace_autosave_toggle_off_closes_the_segment_and_persists(bench, tmp_path):
+    connect_and_scan(bench)
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    name = bench._autosave_name
+
+    bench.dispatch("trace_autosave", {})
+
+    assert bench.trace_autosave is False
+    assert bench._autosave_name is None and bench._autosave_fh is None
+    assert (bench.trace_dir / name).exists()  # the capture stays, it just stops growing
+    assert bench.db.get("trace_autosave") is False
+    # the setting outlives a restart; the open segment does not
+    again = Bench(Db(tmp_path / "test.db"))
+    assert again.trace_autosave is False
+    bench.dispatch("trace_autosave", {})
+    restarted = Bench(Db(tmp_path / "test.db"))
+    assert restarted.trace_autosave is True
+    assert restarted._autosave_name is None
+
+
+def test_trace_autosave_starts_a_new_segment_per_connection(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    first = bench._autosave_name
+
+    bench.dispatch("connect_toggle", {})  # disconnect
+    assert bench._autosave_name is None
+    bench.dispatch("connect_toggle", {})  # and back
+    bench.bus.queue_raw(0x181, b"\x02")
+    bench._drain_frames()
+
+    assert bench.trace_autosave is True
+    assert bench._autosave_name != first
+    # each session's frames go to its own file, none of them to both
+    assert [r["data"] for r in _cobs(_autosave_rows(bench), "0x181")] == ["02"]
+    assert [r["data"] for r in _cobs(_autosave_rows_of(bench, first), "0x181")] == ["01"]
+
+
+def test_trace_autosave_closes_the_segment_on_shutdown(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    name = bench._autosave_name
+
+    bench.shutdown()
+
+    assert bench._autosave_fh is None
+    assert _cobs(_autosave_rows_of(bench, name), "0x181")
+
+
+def test_trace_autosave_deleting_the_open_segment_starts_a_fresh_one(connected_bench):
+    """Windows will not unlink an open file, and a handle pointing at a
+    deleted path writes into nothing."""
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    name = bench._autosave_name
+
+    bench.dispatch("trace_del_saved", {"file": name})
+
+    assert not (bench.trace_dir / name).exists()
+    assert bench._autosave_fh is None
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()
+    assert bench._autosave_name is not None
+    rows = _autosave_rows(bench)
+    assert _cobs(rows, "0x182") and not _cobs(rows, "0x181")
+
+
+def test_trace_autosave_gives_up_on_a_write_error_without_stopping_the_bench(connected_bench):
+    bench = connected_bench
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+
+    class Broken:
+        def write(self, text):
+            raise OSError("No space left on device")
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+
+    bench._autosave_fh = Broken()
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()
+
+    assert bench.trace_autosave is False
+    assert bench.db.get("trace_autosave") is False
+    assert any(ln["type"] == "emcy0" and "autosave off" in ln["msg"] for ln in bench.logs)
+    assert _cobs(bench.trace, "0x182")  # recording into memory carried on
+    bench.bus.queue_raw(0x183, b"\x03")
+    bench._drain_frames()  # and a second batch does not raise either
+    assert _cobs(bench.trace, "0x183")
+
+
+def test_capture_listing_is_newest_first_across_prefixes(bench):
+    bench.trace_dir.mkdir(parents=True, exist_ok=True)
+    for i, name in enumerate(("trace_20260101_000000_1f.json",
+                              "auto_20260102_000000.jsonl",
+                              "import_20260103_000000_1f.json")):
+        path = bench.trace_dir / name
+        path.write_text("{}", encoding="utf-8")
+        os.utime(path, (1_700_000_000 + i, 1_700_000_000 + i))
+    (bench.trace_dir / "notes.txt").write_text("not a capture", encoding="utf-8")
+
+    bench._refresh_trace_saved()
+
+    assert [f["file"] for f in bench._trace_saved] == [
+        "import_20260103_000000_1f.json", "auto_20260102_000000.jsonl",
+        "trace_20260101_000000_1f.json"]
+
+
+def test_trace_load_rejects_a_corrupt_jsonl_capture(bench):
+    _append_trace(bench, "NMT")
+    before = list(bench.trace)
+    bench.trace_dir.mkdir(parents=True, exist_ok=True)
+    (bench.trace_dir / "auto_broken.jsonl").write_text(
+        '{"v":1,"kind":"autosave"}\nnot json\n', encoding="utf-8")
+
+    bench.dispatch("trace_load", {"file": "auto_broken.jsonl"})
+
+    assert bench.trace == before
+    assert bench.trace_loaded is None
+    assert any(ln["type"] == "emcy0" and "load failed" in ln["msg"] for ln in bench.logs)
+
+
 @pytest.mark.parametrize("cob,expected", [
     ("0x000", None),   # NMT: node bits zero
     ("0x080", None),   # SYNC: node bits zero

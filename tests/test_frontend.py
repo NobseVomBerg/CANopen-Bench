@@ -85,3 +85,18 @@ def test_a_typed_number_is_decimal_unless_it_says_0x():
     assert "Typing is unaffected" in app     # the chip says what it does not do
     assert app.count("numberHint") == 3      # the definition and both boxes
     assert app.count("baseChip") == 3        # the definition and both headers
+
+
+def test_the_trace_toolbar_offers_autosave():
+    """Autosave has no visible effect on the page it runs on — the trace
+    looks the same either way — so the chip is the only thing that says
+    whether the record is being kept. Its state comes from the server
+    (`trace.auto`), not from a local `useState`: a browser reloaded
+    mid-run must not claim autosave is off while the file goes on
+    growing.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "send('trace_autosave')" in app
+    assert "s.trace.auto" in app
+    assert "auto.on" in app and "auto.file" in app  # chip state and the open segment
+    assert "ring buffer" in app                     # the tooltip says why it exists
