@@ -69,7 +69,7 @@ development; the version counts from here.
 - Multi-workspace mode under `data/` — each workspace is a complete,
   self-contained configuration (db, EDS folder, traces, test cases,
   results)
-- Plugin system (`canopen_bench.plugins` entry-point group, 15 hooks)
+- Plugin system (`canopen_bench.plugins` entry-point group, 16 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed

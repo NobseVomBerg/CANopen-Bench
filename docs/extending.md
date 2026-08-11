@@ -42,6 +42,7 @@ only what you provide.
 | `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits |
 | `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables; seeded into the workspace like flows |
+| `describe_object(index, sub, symbols)` | `str` | What the device's own firmware calls this object, from the symbol tables. The bench already names it from the EDS, which is what the operator sees; this is the identifier somebody reading the firmware searches for, and the report's step line carries it where a plugin supplies one |
 | `object_fields(symbols)` | `dict[str, list[Field]]` | How to read an object's value symbolically — a whole-value enum, fields packed into one word, or a flag register |
 | `addressing_provider()` | `AddressingProvider \| None` | Session identity for (re-)addressing runs (`$session` in flows); first plugin wins |
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |

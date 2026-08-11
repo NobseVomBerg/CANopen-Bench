@@ -228,3 +228,29 @@ def test_the_version_moves_when_the_tool_does():
         f"{'.'.join(map(str, there))}, which is {what} ({base[:8]}). "
         f"Two states of the tool would answer to the same number — bump "
         f"pyproject.toml, see CONTRIBUTING.md under Versioning.")
+
+
+def test_the_hook_table_lists_every_hook():
+    """`docs/extending.md` is the plugin API's only prose, and its table is
+    the part somebody writing a plugin actually reads. A hook missing from
+    it does not exist as far as they are concerned — `describe_object` sat
+    there undocumented for exactly that long, while the count in
+    CHANGELOG.md went on saying fifteen.
+
+    Nothing else notices: the code works, the suite passes, the table is
+    simply short. Docs go stale because nothing checks them, so where one
+    states a fact that can be checked, this checks it.
+    """
+    from canopen_bench.plugin import BenchPlugin
+
+    hooks = {name for name in vars(BenchPlugin) if not name.startswith("_")
+             and callable(getattr(BenchPlugin, name))}
+    doc = (ROOT / "docs" / "extending.md").read_text(encoding="utf-8")
+    listed = set(re.findall(r"^\| `([a-z_]+)\(", doc, re.M))
+
+    assert not hooks - listed, \
+        f"hooks missing from the table in docs/extending.md: {sorted(hooks - listed)}"
+    assert not listed - hooks, \
+        f"the table names hooks BenchPlugin does not have: {sorted(listed - hooks)}"
+    assert f"{len(hooks)} hooks" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), \
+        f"CHANGELOG.md does not say '{len(hooks)} hooks'"
