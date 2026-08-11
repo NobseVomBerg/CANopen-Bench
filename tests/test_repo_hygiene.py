@@ -159,6 +159,30 @@ def _version_at(rev: str) -> tuple[int, ...] | None:
         return None
 
 
+def _installed_part(text: str) -> str:
+    """The sections of a pyproject.toml that decide what a `pip install`
+    produces — everything except the version line and the sections that
+    only configure development tools.
+
+    `[tool.ruff]` and `[tool.coverage]` leave the wheel byte-for-byte
+    identical, so a lint-rule tweak must not demand a version bump; the
+    prose in CONTRIBUTING says "what gets installed" and this is that,
+    read literally. `[tool.setuptools*]` does belong here — it says which
+    packages and package data go in.
+    """
+    keep, section = [], ""
+    for line in text.splitlines():
+        header = re.match(r"\s*\[([^]]+)]", line)
+        if header:
+            section = header.group(1)
+        if section.startswith("tool.") and not section.startswith("tool.setuptools"):
+            continue
+        if re.match(r'\s*version\s*=', line):
+            continue
+        keep.append(line)
+    return "\n".join(keep)
+
+
 def _tool_changed(base: str) -> str:
     """What changed between `base` and HEAD that the version has to answer
     for: the package itself, or the parts of pyproject.toml that decide
@@ -167,13 +191,9 @@ def _tool_changed(base: str) -> str:
     names = _git("diff", "--name-only", base, "HEAD").stdout.split()
     changed = [n for n in names if n.startswith("canopen_bench/")]
     if "pyproject.toml" in names:
-        # every changed line except the version itself — a dependency, an
-        # entry point or package data moves what a `pip install` produces
-        body = _git("diff", "-U0", base, "HEAD", "--", "pyproject.toml").stdout
-        edits = [ln for ln in body.splitlines()
-                 if ln[:1] in "+-" and not ln.startswith(("+++", "---"))
-                 and not re.match(r'^[-+]version\s*=', ln)]
-        if edits:
+        before = _git("show", f"{base}:pyproject.toml").stdout
+        after = _git("show", "HEAD:pyproject.toml").stdout
+        if _installed_part(before) != _installed_part(after):
             changed.append("pyproject.toml")
     return ", ".join(sorted(changed)[:6])
 
