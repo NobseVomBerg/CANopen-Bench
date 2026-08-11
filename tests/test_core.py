@@ -1689,7 +1689,7 @@ def test_trace_autosave_listing_shows_the_open_segment_growing(connected_bench):
     entry = next(f for f in bench.snapshot()["trace"]["saved"] if f["file"] == bench._autosave_name)
     assert entry["size"] == bench._autosave_bytes  # not the 0 bytes it was created with
     assert bench.snapshot()["trace"]["auto"] == {
-        "on": True, "file": bench._autosave_name, "bytes": bench._autosave_bytes}
+        "on": True, "file": bench._autosave_name, "bytes": bench._autosave_bytes, "warn": ""}
 
 
 def test_trace_autosave_rolls_over_at_the_segment_size(connected_bench, monkeypatch):
@@ -1774,9 +1774,11 @@ def test_trace_autosave_gives_up_the_oldest_early_when_the_disk_fills(connected_
     assert any(f"{oldest.name} removed, only 0.9 GB free" in ln["msg"] for ln in bench.logs)
 
 
-def test_trace_autosave_keeps_the_newest_segment_and_stops_instead(connected_bench, monkeypatch):
-    """When even that is not enough: the last thing to throw away is the
-    most recent record, so autosave stops rather than eat it — or the disk."""
+def test_trace_autosave_keeps_the_newest_segment_and_waits_instead(connected_bench, monkeypatch):
+    """When even that is not enough, autosave waits — it does not switch
+    itself off, and it does not eat the last of the record or of the disk.
+    A run can last months; a recorder that gave up the one night the disk
+    was tight would be off for every week after it."""
     bench = connected_bench
     oldest, newest = _seed_segments(bench, 3, 1)
     monkeypatch.setattr(Bench, "_free_bytes", lambda self: 1_000_000_000)
@@ -1788,12 +1790,81 @@ def test_trace_autosave_keeps_the_newest_segment_and_stops_instead(connected_ben
     assert not oldest.exists()
     assert newest.exists()               # never a candidate
     assert bench._autosave_name is None  # and no new segment was started
-    assert bench.trace_autosave is False and bench.db.get("trace_autosave") is False
+    assert bench.trace_autosave is True and bench.db.get("trace_autosave") is True
+    assert bench.snapshot()["trace"]["auto"]["warn"] == "low disk space"
     assert any(ln["type"] == "emcy0" and "0.9 GB free, below the 2.0 GB" in ln["msg"]
                for ln in bench.logs)
+
+
+def test_trace_autosave_waiting_does_not_flood_the_state_log(connected_bench, monkeypatch):
+    """The state log is evidence too — a warning that repeats every retry
+    pushes out what it was warning about."""
+    bench = connected_bench
+    monkeypatch.setattr(core_mod, "AUTOSAVE_RETRY_S", 0.0)  # retry on every batch
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: 1_000_000_000)
+    bench.dispatch("trace_autosave", {})
+
+    for i in range(6):
+        bench.bus.queue_raw(0x181, bytes([i]))
+        bench._drain_frames()
+
+    assert sum("autosave paused" in ln["msg"] for ln in bench.logs) == 1
+
+
+def test_trace_autosave_picks_itself_up_when_the_disk_frees(connected_bench, monkeypatch):
+    bench = connected_bench
+    free = [1_000_000_000]
+    monkeypatch.setattr(core_mod, "AUTOSAVE_RETRY_S", 0.0)
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: free[0])
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    assert bench._autosave_name is None
+
+    free[0] = 9_000_000_000  # somebody cleared the disk
     bench.bus.queue_raw(0x182, b"\x02")
-    bench._drain_frames()  # and it stays off rather than retrying every batch
-    assert list(bench.trace_dir.glob("auto_*.jsonl")) == [newest]
+    bench._drain_frames()
+
+    assert bench._autosave_name is not None
+    assert bench.snapshot()["trace"]["auto"]["warn"] == ""
+    assert _cobs(_autosave_rows(bench), "0x182")
+    assert any("writing again" in ln["msg"] for ln in bench.logs)
+
+
+def test_trace_autosave_waits_out_the_retry_delay_between_attempts(connected_bench, monkeypatch):
+    """Retrying on every drained batch would mean a stat() and a directory
+    scan ten times a second for as long as the disk stays full."""
+    bench = connected_bench
+    calls = []
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: calls.append(1) or 1_000_000_000)
+    bench.dispatch("trace_autosave", {})
+
+    for i in range(5):
+        bench.bus.queue_raw(0x181, bytes([i]))
+        bench._drain_frames()
+
+    assert len(calls) == 1  # one attempt, then AUTOSAVE_RETRY_S of quiet
+
+
+def test_trace_autosave_switched_on_again_retries_at_once(connected_bench, monkeypatch):
+    """The operator toggling the chip has probably just made room — that
+    is not the moment to sit out the rest of a 30 s back-off."""
+    bench = connected_bench
+    free = [1_000_000_000]
+    monkeypatch.setattr(Bench, "_free_bytes", lambda self: free[0])
+    bench.dispatch("trace_autosave", {})
+    bench.bus.queue_raw(0x181, b"\x01")
+    bench._drain_frames()
+    assert bench._autosave_warn == "low disk space"
+
+    free[0] = 9_000_000_000
+    bench.dispatch("trace_autosave", {})  # off
+    bench.dispatch("trace_autosave", {})  # and on again
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()
+
+    assert bench._autosave_name is not None
+    assert bench._autosave_warn == ""
 
 
 def test_trace_autosave_rolls_early_when_the_free_space_runs_down(connected_bench, monkeypatch):
@@ -1910,13 +1981,17 @@ def test_trace_autosave_deleting_the_open_segment_starts_a_fresh_one(connected_b
     assert _cobs(rows, "0x182") and not _cobs(rows, "0x181")
 
 
-def test_trace_autosave_gives_up_on_a_write_error_without_stopping_the_bench(connected_bench):
+def test_trace_autosave_waits_out_a_write_error_without_stopping_the_bench(connected_bench,
+                                                                          monkeypatch):
     bench = connected_bench
+    monkeypatch.setattr(core_mod, "AUTOSAVE_RETRY_S", 0.0)
     bench.dispatch("trace_autosave", {})
     bench.bus.queue_raw(0x181, b"\x01")
     bench._drain_frames()
 
     class Broken:
+        closed = False
+
         def write(self, text):
             raise OSError("No space left on device")
 
@@ -1924,19 +1999,26 @@ def test_trace_autosave_gives_up_on_a_write_error_without_stopping_the_bench(con
             pass
 
         def close(self):
-            pass
+            Broken.closed = True
 
-    bench._autosave_fh = Broken()
+    broken = Broken()
+    bench._autosave_fh = broken
     bench.bus.queue_raw(0x182, b"\x02")
     bench._drain_frames()
 
-    assert bench.trace_autosave is False
-    assert bench.db.get("trace_autosave") is False
-    assert any(ln["type"] == "emcy0" and "autosave off" in ln["msg"] for ln in bench.logs)
+    assert Broken.closed  # the handle is let go of, not leaked
+    assert bench.trace_autosave is True and bench.db.get("trace_autosave") is True
+    assert bench._autosave_warn == "cannot write"
+    assert any(ln["type"] == "emcy0" and "No space left on device" in ln["msg"]
+               for ln in bench.logs)
     assert _cobs(bench.trace, "0x182")  # recording into memory carried on
+
     bench.bus.queue_raw(0x183, b"\x03")
-    bench._drain_frames()  # and a second batch does not raise either
+    bench._drain_frames()  # the retry gets a working file again
+
     assert _cobs(bench.trace, "0x183")
+    assert bench._autosave_warn == ""
+    assert _cobs(_autosave_rows(bench), "0x183")
 
 
 def test_capture_listing_is_newest_first_across_prefixes(bench):

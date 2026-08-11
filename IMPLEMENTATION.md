@@ -130,16 +130,23 @@ light + dark theme (toggle in the header, persisted per browser):
   `core.AUTOSAVE_KEEP_DAYS` (14 — the length of an endurance run, since
   the fault worth autosaving for is the one that shows up once, days in),
   bounded by `core.AUTOSAVE_FREE_BYTES` (2 GB): under that reserve the
-  oldest segments go early, a segment mid-write is rolled short so the
-  reserve cannot be undercut by a whole one
-  (`core.AUTOSAVE_SPACE_EVERY_BYTES` between checks), and if that still
-  is not enough autosave switches itself off rather than take the last of
-  the disk. The newest segment is never a candidate; nor are hand-saved
-  captures; every removal is logged with its reason. Free space that the
-  filesystem will not report is treated as unknown, not as full. A write
-  error (disk full, read-only) switches autosave off with a log line
-  instead of disturbing the run. Segments are ordinary captures: they
-  appear in the same list and load the same way.
+  oldest segments go early, and a segment mid-write is rolled short so
+  the reserve cannot be undercut by a whole one
+  (`core.AUTOSAVE_SPACE_EVERY_BYTES` between checks). The newest segment
+  is never a candidate; nor are hand-saved captures; every removal is
+  logged with its reason. Free space the filesystem will not report is
+  treated as unknown, not as full.
+  Autosave never switches *itself* off — only the operator does. An
+  endurance run can go on for months, and a recorder that gave up the one
+  night the disk was tight would still be off weeks later, when the fault
+  it exists for finally happens. So a full disk, a read-only mount or a
+  reserve that cannot be met is a **pause** (`Bench._autosave_wait`): the
+  chip goes red with a short, stable reason (`trace.auto.warn`), one line
+  goes to the state log — one, not one per retry, because the state log is
+  evidence too — and every `core.AUTOSAVE_RETRY_S` it tries again,
+  resuming and saying so the moment it can. The trace in memory is
+  unaffected throughout. Segments are ordinary captures: they appear in
+  the same list and load the same way.
   The filtered trace (full matching set, not just the browser scrollback)
   can also be exported as CSV or a SocketCAN `candump -l` log
   (`GET /api/trace/export.csv` / `/api/trace/export/candump`, plain

@@ -100,17 +100,26 @@ AUTOSAVE_SEGMENT_BYTES = 64 * 1024 * 1024
 AUTOSAVE_KEEP_DAYS = 14
 #: …unless the disk says otherwise. This is the free space autosave will
 #: not eat into: below it the oldest segments give way early, before the
-#: two weeks are up, and if that is not enough autosave switches itself off
-#: rather than take the last of the disk. A bench tool filling the volume
-#: it runs on is a worse outcome than a shorter record. Every removal and
-#: the shutdown are logged — a gap in the record must not be silent — and
-#: captures saved by hand are never candidates: those are a decision, not
-#: a by-product.
+#: two weeks are up. A bench tool filling the volume it runs on is a worse
+#: outcome than a shorter record. Every removal is logged — a gap in the
+#: record must not be silent — and captures saved by hand are never
+#: candidates: those are a decision, not a by-product.
 AUTOSAVE_FREE_BYTES = 2 * 1024 * 1024 * 1024
 #: How much gets written between two looks at the free space. Cheap enough
 #: to be frequent, fine enough that the reserve cannot be overshot by more
 #: than this before a segment is rolled early.
 AUTOSAVE_SPACE_EVERY_BYTES = 4 * 1024 * 1024
+#: How long autosave waits before trying again after it could not write.
+#:
+#: It waits rather than switches off, and this is the whole reason the
+#: retry exists. An endurance run can go on for months; a recorder that
+#: turned itself off the one night the disk was tight would be off for
+#: every week after it, and the fault it was there to catch would arrive
+#: to an empty folder. So a full disk, a read-only mount or a reserve that
+#: cannot be met is a pause: the chip goes red with the reason, one line
+#: goes to the state log, and the moment there is room again it writes on
+#: and says so. Nothing here ever clears the switch the operator set.
+AUTOSAVE_RETRY_S = 30.0
 TRACE_VIEW = 400     # rows per snapshot to the browser — enough scrollback to
                      # follow a multi-step sequence (e.g. addressing) end to end
 PLOT_SEL_MAX = 4     # concurrently plotted signals — keeps the chart legible
@@ -980,6 +989,8 @@ class Bench:
         self._autosave_name: str | None = None
         self._autosave_bytes = 0
         self._autosave_checked = 0  # bytes written at the last free-space look
+        self._autosave_warn = ""    # why it is not writing right now ("" = it is)
+        self._autosave_retry_at = 0.0  # monotonic: no attempt before this
         self._refresh_trace_saved()
         self.raw_rows: list[dict] = db.get("raw_sdo", [{"i": "0x2040", "s": "01", "l": "4", "v": "0x00260001"}])
         self._cyc_seq = 0  # id source for raw rows (cyclic scheduler key)
@@ -4428,6 +4439,9 @@ class Bench:
         self.trace_autosave = not self.trace_autosave
         self.db.set("trace_autosave", self.trace_autosave)
         if self.trace_autosave:
+            # a deliberate switch-on tries at once, whatever the last
+            # attempt ran into — the operator may well have just made room
+            self._autosave_warn, self._autosave_retry_at = "", 0.0
             self.log("TRACE autosave on — every recorded frame is written to a capture as it arrives")
         else:
             self._autosave_close("off")
@@ -4444,6 +4458,8 @@ class Bench:
         """
         if not rows:
             return
+        if self._autosave_fh is None and time.monotonic() < self._autosave_retry_at:
+            return  # waiting out a failed attempt, see AUTOSAVE_RETRY_S
         try:
             if self._autosave_fh is not None and self._autosave_bytes >= AUTOSAVE_SEGMENT_BYTES:
                 self._autosave_close("segment full")
@@ -4457,34 +4473,55 @@ class Bench:
             self._autosave_bytes += len(text.encode("utf-8"))
             self._autosave_watch_space()
         except OSError as exc:
-            # a full or read-only disk is not a reason to stop testing:
-            # switch autosave off, say so once, go on recording into memory
             fh = self._autosave_fh
-            self.trace_autosave = False
             self._autosave_forget()
-            self.db.set("trace_autosave", False)
             if fh is not None:
                 try:
                     fh.close()
                 except OSError:
                     pass
-            self.log(f"TRACE autosave off — {exc}", "emcy0")
+            self._autosave_wait("cannot write", str(exc))
+
+    def _autosave_wait(self, kind: str, detail: str) -> None:
+        """Autosave cannot write at the moment — hold off and try again.
+
+        Never "switch it off". A run can last months, and a recorder that
+        gave up for good the one night the disk was tight would still be
+        off weeks later, when the fault it exists for finally happens.
+        `kind` is what the chip shows and is deliberately stable, so a
+        condition that lasts a fortnight costs one log line and not one
+        every retry: the state log is evidence too, and a warning that
+        floods it destroys what it was warning about.
+        """
+        self._autosave_retry_at = time.monotonic() + AUTOSAVE_RETRY_S
+        if self._autosave_warn == kind:
+            return
+        self._autosave_warn = kind
+        self.log(f"TRACE autosave paused — {detail}. It stays on and keeps trying; "
+                 f"the trace itself is unaffected", "emcy0")
+
+    def _autosave_writing(self) -> None:
+        """A segment is open again. Says so if anyone was told otherwise."""
+        self._autosave_retry_at = 0.0
+        if self._autosave_warn:
+            self.log(f"TRACE autosave writing again — {self._autosave_warn} cleared")
+            self._autosave_warn = ""
 
     def _autosave_open(self) -> None:
         """Start a segment — after making room for it, and only if there is
-        room. Leaves `_autosave_fh` at None when there is not, which the
-        caller reads as "autosave is over"."""
+        room. Leaves `_autosave_fh` at None when there is not; the caller
+        reads that as "not now", not as "not any more"."""
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self._autosave_prune()
         free = self._free_bytes()
         if free is not None and free < AUTOSAVE_FREE_BYTES:
-            # nothing left to give and still under the reserve: stop, and
-            # say which number it is, because the operator just lost the
-            # feature and "autosave off" alone does not explain why
-            self.trace_autosave = False
-            self.db.set("trace_autosave", False)
-            self.log(f"TRACE autosave off — {_gb(free)} free, below the "
-                     f"{_gb(AUTOSAVE_FREE_BYTES)} the bench keeps clear", "emcy0")
+            # everything droppable is gone and the reserve still is not
+            # met, so something other than autosave is filling this disk.
+            # Wait for it to let go — and name the number, because "no
+            # space" alone sends the reader to the wrong volume.
+            self._autosave_wait("low disk space",
+                                f"{_gb(free)} free, below the {_gb(AUTOSAVE_FREE_BYTES)} "
+                                f"the bench keeps clear")
             return
         stem = datetime.now().strftime("auto_%Y%m%d_%H%M%S")
         path = self.trace_dir / f"{stem}.jsonl"
@@ -4504,6 +4541,7 @@ class Bench:
         self._autosave_checked = self._autosave_bytes
         self._refresh_trace_saved()
         self.log(f"TRACE autosave → {path.name}")
+        self._autosave_writing()
 
     def _autosave_close(self, why: str = "stopped") -> None:
         fh, name, size = self._autosave_fh, self._autosave_name, self._autosave_bytes
@@ -4550,11 +4588,12 @@ class Bench:
         the free space is under AUTOSAVE_FREE_BYTES, keep dropping the
         oldest — the disk decides when two weeks is too long to promise.
 
-        The newest segment is never a candidate, even when the reserve
-        cannot be met: at that point the run is about to stop autosaving
-        anyway, and the last thing to throw away is the most recent record.
-        Only files autosave wrote itself are considered — a capture saved
-        by hand is a decision, not a by-product — and each removal is
+        The newest segment is never a candidate. If the reserve is still
+        not met once everything else is gone, autosave's own files are not
+        what is filling the disk, and deleting the last of the record buys
+        the volume nothing while costing exactly the hour most likely to
+        matter. Only files autosave wrote itself are considered — a capture
+        saved by hand is a decision, not a by-product — and each removal is
         logged with the reason, so a hole in the record is never silent.
         """
         try:  # stat once, oldest first — the directory can change underneath
@@ -4747,7 +4786,7 @@ class Bench:
                 "total": len(shown), "match": match,
                 "saved": self._saved_listing(), "loaded": self.trace_loaded,
                 "auto": {"on": self.trace_autosave, "file": self._autosave_name,
-                         "bytes": self._autosave_bytes},
+                         "bytes": self._autosave_bytes, "warn": self._autosave_warn},
                 "stats": self._trace_stats(),
                 "plot": {"sel": self.plot_sel,
                         "series": {k: list(v) for k, v in self.plot_series.items()}}}
