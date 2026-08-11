@@ -81,7 +81,7 @@ const btn = {
 };
 
 // One shape for every on/off control on the page: green while the thing is
-// on, plain while it is not.
+// on, a faint red wash while it is not.
 //
 // The label says what the state *is*, never what a click would do. Half of
 // these used to say the verb — "Disconnect", "Activate machine control" —
@@ -89,11 +89,22 @@ const btn = {
 // meant "not running" and red on the one that meant "running". Colour is a
 // better place for state than a word is, so the word says the state too
 // and `title` carries what the click does.
+//
+// Off is tinted rather than left plain because these are the controls a
+// first-time user has to find, and the one they need is always the one that
+// is off: a page where the interface is closed used to show that as the
+// quietest thing on it. The wash is deliberately weak and its border and
+// text stay neutral — `--red` at full strength means a fault (autosave
+// failing to write), and an idle control is not a fault.
+//
+// `on == null` is a third state, not a synonym for off: the PSU output
+// before anyone has read the supply. Unknown gets the plain treatment,
+// since neither colour would be true.
 const toggle = (on, label, act, title, extra = '') => html`
   <span class="hv-b" onClick=${act} title=${title}
     style="font-weight:600;font-size:12px;padding:5px 14px;border-radius:6px;cursor:pointer;white-space:nowrap;
-      border:1px solid ${on ? 'var(--grn)' : 'var(--inp)'};
-      background:${on ? 'var(--grn)' : 'transparent'};
+      border:1px solid ${on ? 'var(--grn)' : on == null ? 'var(--inp)' : 'var(--off-bd)'};
+      background:${on ? 'var(--grn)' : on == null ? 'transparent' : 'var(--off)'};
       color:${on ? '#fff' : 'var(--mid)'};${extra}">${label}</span>`;
 
 // Bench power supply (canopen_bench/instruments): shown once one has been
@@ -207,7 +218,7 @@ function psuBox(psu) {
       <span style="display:flex;align-items:center;gap:8px;flex:none">
         <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
           title=${`Output is ${on === null || on === undefined ? 'unknown' : on ? 'on' : 'off'} — click to turn it ${on ? 'off' : 'on'}`}
-          style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid ${on ? 'var(--grn)' : 'var(--inp)'};background:${on ? 'var(--grn)' : 'transparent'};color:${on ? '#fff' : 'var(--dim)'}">⏻</span>
+          style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid ${on ? 'var(--grn)' : on == null ? 'var(--inp)' : 'var(--off-bd)'};background:${on ? 'var(--grn)' : on == null ? 'transparent' : 'var(--off)'};color:${on ? '#fff' : 'var(--dim)'}">⏻</span>
         <span class="hv-white" onClick=${() => send('psu_refresh')} title="Read the supply — nothing here polls"
           style="color:var(--faint);cursor:pointer">⟳</span>
       </span>
@@ -1142,7 +1153,7 @@ function TestsPage({ s, ui, setUi }) {
           </div>`;
         })}
       </div>
-      <div style="flex:none;padding:8px 18px;border-top:1px solid var(--bd);background:var(--pan2, var(--panel2));display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--dim)">
+      <div style="flex:none;padding:8px 18px;border-top:1px solid var(--bd);background:var(--panel2);display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--dim)">
         <span><b style="color:var(--tx)">${shown.length}</b> shown</span><span><b style="color:var(--tx)">${selIds.length}</b> selected</span>
         <span onClick=${() => { const name = prompt('Save suite as:', t.activeSuite || ''); if (name) send('suite_save', { name }); }}
           style="margin-left:auto;color:var(--acc);font-weight:600;cursor:pointer">save suite</span>
@@ -1211,7 +1222,7 @@ function OperatorPrompt({ p }) {
       <div style="display:flex;gap:8px;align-items:center">
         <span style="font:11px ${MONO};color:var(--dim);flex:none">${p.index}:${p.sub}</span>
         <input value=${val} onInput=${(e) => setVal(e.target.value)}
-          style="flex:1;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--inp);border-radius:6px;font:12px ${MONO};padding:4px 8px" />
+          style="flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--inp);border-radius:6px;font:12px ${MONO};padding:4px 8px" />
       </div>
       <div style="font-size:10.5px;color:var(--faint);margin:3px 0 8px 0">0x… is hex, anything else decimal</div>`}
     <div style="display:flex;gap:8px">
@@ -1296,7 +1307,7 @@ function OverviewBox({ ov, dir }) {
       <span style="display:flex;gap:6px;align-items:baseline;font-weight:400">
         <span style="font-size:10.5px;color:var(--faint)">last</span>
         <select value=${String(days)} onChange=${(e) => setDays(Number(e.target.value))}
-          style="background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:5px;font:11px ${MONO};padding:1px 3px">
+          style="background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:5px;font:11px ${MONO};padding:1px 3px">
           ${[1, 2, 3, 5, 7, 10, 14, 30].map((d) => html`<option value=${String(d)}>${d} d</option>`)}
         </select>
         <span class="hv" onClick=${() => send('report_overview', { days })}
@@ -1708,13 +1719,16 @@ function TracePage({ s }) {
     <span onClick=${() => send('trace_toggle')} style="${btn.acc}font-size:11.5px;padding:5px 14px;border-radius:6px;cursor:pointer">${s.trace.paused ? '▶ Resume' : '❚❚ Pause'}</span>
     <span class="hv" onClick=${() => send('trace_clear')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">Clear</span>
     <span class="hv" onClick=${() => send('trace_save')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤓ Save</span>
-    <!-- Green while it is on, like every other on/off control here. Red
-         beats green while auto.warn is set: autosave is still on and still
-         trying, but nothing is reaching the disk, and that has to be
-         visible on an unattended run rather than only in the log. -->
+    <!-- Green while it is on, a faint red wash while it is off, like every
+         other on/off control here. Full red beats both while auto.warn is
+         set: autosave is still on and still trying, but nothing is reaching
+         the disk, and that has to be visible on an unattended run rather
+         than only in the log. That is why off is a wash with a neutral
+         border and neutral text and the fault is saturated throughout —
+         two states that both lean red have to be told apart at a glance. -->
     <span onClick=${() => send('trace_autosave')}
       title=${`Autosave: write every recorded frame to a capture file as it arrives, unfiltered. The trace in memory is a ring buffer, so on a long run the beginning is gone by the time anything is worth looking at. A new file starts on connect. Autosaved captures are kept for 14 days — less if the disk gets tight: the bench keeps 2 GB clear and drops the oldest early. It never switches itself off; if it cannot write it waits, shows why here, and carries on the moment it can. Every removal is in the state log.${auto.file ? `\n\nwriting to ${auto.file}` : ''}`}
-      style="border:1px solid ${auto.warn ? 'var(--red)' : auto.on ? 'var(--grn)' : 'var(--inp)'};background:${auto.warn ? 'var(--red-soft)' : auto.on ? 'var(--grn)' : 'transparent'};color:${auto.warn ? 'var(--red)' : auto.on ? '#fff' : 'var(--mid)'};font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer;white-space:nowrap">${auto.on ? '⏺' : '⭘'} autosave${auto.warn ? ` · ${auto.warn}` : auto.on && auto.file ? ` · ${fmtSize(auto.bytes || 0)}` : ''}</span>
+      style="border:1px solid ${auto.warn ? 'var(--red)' : auto.on ? 'var(--grn)' : 'var(--off-bd)'};background:${auto.warn ? 'var(--red-soft)' : auto.on ? 'var(--grn)' : 'var(--off)'};color:${auto.warn ? 'var(--red)' : auto.on ? '#fff' : 'var(--mid)'};font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer;white-space:nowrap">${auto.on ? '⏺' : '⭘'} autosave${auto.warn ? ` · ${auto.warn}` : auto.on && auto.file ? ` · ${fmtSize(auto.bytes || 0)}` : ''}</span>
     ${saved.length > 0 && html`
       <select onChange=${(e) => { if (e.target.value) send('trace_load', { file: e.target.value }); e.target.value = ''; }}
         style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 6px;font:11px ${MONO};outline:none;max-width:240px">
@@ -1830,7 +1844,6 @@ function App() {
           })()}
           <span class="hv" onClick=${() => setUi({ ...ui, theme: dark ? 'light' : 'dark' })} title="Toggle theme"
             style="width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:6px;cursor:pointer;color:var(--mid);font-size:13px">${dark ? '☀' : '☾'}</span>
-          <span style="width:8px;height:8px;border-radius:50%;background:${s.connected ? 'var(--grn)' : 'var(--faint)'}"></span>
           ${toggle(s.connected, s.connected ? 'Connected' : 'Disconnected', () => send('connect_toggle'),
             s.connected ? `${adapterInfo.iface} is open — click to close it and release the adapter`
                         : `${adapterInfo.iface} is closed — click to open it`)}
