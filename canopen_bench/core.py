@@ -3644,7 +3644,8 @@ class Bench:
             self._manual_event = None
             self._changed()
 
-    def _emcy_window(self, max_age: float | None = None) -> list[Emcy]:
+    def _emcy_window(self, max_age: float | None = None,
+                     through_reset: bool = False) -> list[Emcy]:
         """The EMCYs that describe the device right now, newest last.
 
         An EMCY is not a state the way a PDO is — it is a report, and a
@@ -3663,15 +3664,29 @@ class Bench:
         "nothing has gone wrong" has to mean, or an error early in a case
         would fall out of sight and the check would pass on a device that
         had already failed.
+
+        `through_reset` decides whether the reset frame itself is in the
+        window or only ends it, and the two callers genuinely differ. "Is
+        anything wrong" must not see it — a device that just cleared its
+        error would read as still reporting one. "Did the device tell me
+        X" must, because a case acknowledges an error and then waits for
+        exactly that frame: `expect_emcy mec 0x0` is a step asking to be
+        shown the reset, and a window that always cut in front of it
+        answered "nothing arrived at all" about the one frame it was
+        waiting for. Either way the window stops there — what came before
+        a reset does not stand — the flag only says whether the boundary
+        frame is inside or outside.
         """
         out: list[Emcy] = []
         now = time.monotonic()
         for entry in reversed(self.emcy_seen):
-            if not entry.code:
-                break                      # error reset: nothing before it stands
             if self._sequence_started_at and entry.at < self._sequence_started_at:
                 break                      # belongs to whatever ran before this
             if max_age is not None and now - entry.at > max_age:
+                break
+            if not entry.code:             # error reset: nothing before it stands
+                if through_reset:
+                    out.append(entry)
                 break
             out.append(entry)
         out.reverse()
@@ -4101,7 +4116,8 @@ class Bench:
             deadline = loop.time() + timeout
 
             def seen() -> bool:
-                return any(match(e) for e in self._emcy_window(FRAME_LOOKBACK_S))
+                return any(match(e) for e in
+                           self._emcy_window(FRAME_LOOKBACK_S, through_reset=True))
 
             # an EMCY that arrived shortly before this step is a hit too:
             # the device sends it when it feels like it, and a check that
@@ -4116,7 +4132,8 @@ class Bench:
                 if not self.connected:
                     return "error", "connection lost"
                 await asyncio.sleep(0.05)
-            seen_now = ", ".join(_emcy_str(e) for e in self._emcy_window()[-3:])
+            seen_now = ", ".join(_emcy_str(e) for e in
+                                 self._emcy_window(through_reset=True)[-3:])
             return "fail", (f"{_emcy_wanted(val)} — none seen within {timeout:g}s"
                             + (f"; saw {seen_now}" if seen_now
                                else "; nothing arrived at all"))
