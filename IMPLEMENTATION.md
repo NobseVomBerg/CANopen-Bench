@@ -1,26 +1,18 @@
 # CANopen Bench — implementation
 
-Architecture and design decisions. What the tool does and how to run it
-is in `README.md`.
+Architecture and the decisions behind it. What the tool does and how to
+run it is in `README.md`; test setup and conventions are in
+`CONTRIBUTING.md`.
 
-## Quick start
-
-```bash
-pip install -e .          # or: pip install starlette uvicorn websockets
-python -m canopen_bench   # → http://127.0.0.1:8000
-```
-
-Options: `--host`, `--port`. Workspaces live as subfolders of `./data`
-(or `$CANOPEN_BENCH_DATA`), selectable on the Setup page; `--db <path>`
-is an expert override binding the app to one explicit sqlite file with
-workspace switching disabled.
-
-Tests: `pip install -e .[dev] && pytest`
+Where a decision is about one function, its reasoning lives in that
+function's docstring, next to the thing it governs and unable to drift
+from it. This file carries what no single module can: the seams, and why
+they are where they are.
 
 ## What it does
 
-Full clickable implementation of the chosen **1a** design — all five pages,
-light + dark theme (toggle in the header, persisted per browser):
+Five pages, light + dark theme (toggle in the header, persisted per
+browser):
 
 - **Setup** — workspace bar (create/switch workspaces, each a subfolder
   of the data root), bus interface (IXXAT / PCAN / Vector / Demo mode;
@@ -103,107 +95,44 @@ light + dark theme (toggle in the header, persisted per browser):
 - **SWDL** — firmware library, SDO-serial or PDO-parallel download to the
   devices selected in the Devices box, per-device progress.
 - **Trace** — the record of what the bus carried, and a view onto it.
-  Recording runs whenever the interface is connected: test steps read it
-  (`wait_for` with a `cob` matches against it via
-  `Bench._match_traced`), so pausing the panel or opening a saved capture
-  only changes what is *shown* — `Bench._trace_view` picks the source
-  while `Bench.trace` keeps filling underneath. The panel itself is a
-  live CAN frame monitor with decode column, RX and own TX
-  frames, bus timestamps, class filters (NMT/SDO/PDO/EMCY/HB),
-  pause/clear, plus a device filter (all / selected devices, broadcasts
-  always visible) and an ms/µs timestamp toggle. Timestamps are
-  comparable across directions, which is not free: our own TX frames are
-  stamped by us in epoch time, while RX frames carry the adapter's own
-  relative clock and are mapped onto wall time by an offset
-  (`CanopenBus.poll_frames`). The offset is the smallest gap seen between
-  a frame's hardware stamp and our reading it — everything above that
-  minimum is queueing — taken over `canopen_bus._TS_WINDOW_S` rather than
-  over the whole session: the two crystals drift apart in one direction,
-  so a lifetime minimum can only follow the drift downwards and RX frames
-  slide steadily earlier, until a response is stamped before the request
-  that caused it. Filtering happens
-  server-side over the full retained ring buffer (200k frames,
-  `core.TRACE_CAP`), so a hidden class or device never pushes visible
-  frames out of the browser window.
-  The table shows the **newest frame at the top** and only the rows on
-  screen: an hour of bus is 200k rows, which no browser lays out, so the
-  scrollbar is a spacer of the full height (`ROW_H` per row) and the drawn
-  rows are placed at the offset the scroll position asks for. Reading
-  downwards is going back in time, and the live end stays where the eye
-  already is instead of running off the bottom — with the scroll position
-  compensated by each arriving frame, so history held under the cursor
-  does not walk. Where rows come from is split: the newest
-  `core.TRACE_VIEW` (400) ride along in the state snapshot, so the live
-  end costs no request and updates at the tick rate, while anything older
-  is fetched for the window being looked at (`GET /api/trace/rows?end=&n=`
-  → `Bench._trace_page`, capped at `app.TRACE_PAGE_MAX`). Deliberately
-  uncached: the record is still growing and, at the ring's cap, still
-  being trimmed at the far end, so a kept page's meaning changes
-  underneath it — one small request per scroll beats being wrong about
-  which frames these are. The page endpoint reads the same source as the
-  panel (`_trace_view`), so an open capture answers there too, which is
-  where hours of scrollback actually come from.
-  Captures can be saved to and
-  reloaded from `<workspace>/traces/*.json` (loading pauses the trace).
-  Autosave (`core._autosave_write`, off by default, the setting persists)
-  answers what the ring buffer cannot: an hour in, the beginning is gone,
-  and an hour is shorter than the runs where something happens once. With
-  it on, every drained row is appended to `traces/auto_*.jsonl` and
-  flushed — one row per line, because a file being written to cannot be a
-  single JSON object, and a capture cut short by a crash still has to
-  read. What goes in is the *record*, unfiltered: a trace filter is a
-  property of the panel. A segment starts on the first frame after a
-  connect and rolls over at `core.AUTOSAVE_SEGMENT_BYTES`. Retention is
-  `core.AUTOSAVE_KEEP_DAYS` (14 — the length of an endurance run, since
-  the fault worth autosaving for is the one that shows up once, days in),
-  bounded by `core.AUTOSAVE_FREE_BYTES` (2 GB): under that reserve the
-  oldest segments go early, and a segment mid-write is rolled short so
-  the reserve cannot be undercut by a whole one
-  (`core.AUTOSAVE_SPACE_EVERY_BYTES` between checks). The newest segment
-  is never a candidate; nor are hand-saved captures; every removal is
-  logged with its reason. Free space the filesystem will not report is
-  treated as unknown, not as full.
-  Autosave never switches *itself* off — only the operator does. An
-  endurance run can go on for months, and a recorder that gave up the one
-  night the disk was tight would still be off weeks later, when the fault
-  it exists for finally happens. So a full disk, a read-only mount or a
-  reserve that cannot be met is a **pause** (`Bench._autosave_wait`): the
-  chip goes red with a short, stable reason (`trace.auto.warn`), one line
-  goes to the state log — one, not one per retry, because the state log is
-  evidence too — and every `core.AUTOSAVE_RETRY_S` it tries again,
-  resuming and saying so the moment it can. The trace in memory is
-  unaffected throughout. Segments are ordinary captures: they appear in
-  the same list and load the same way.
-  The filtered trace (full matching set, not just the browser scrollback)
-  can also be exported as CSV or a SocketCAN `candump -l` log
-  (`GET /api/trace/export.csv` / `/api/trace/export/candump`, plain
-  downloads outside the action/WebSocket flow since they don't mutate
-  state), and a `candump -l` log from another tool can be imported
-  (`act_trace_import`) — parsed frames run through the same SDO/PDO/EMCY
-  annotation pipeline as live traffic, just with `live=False` so historical
-  frames don't feed the signal plot or bump the state log/EMCY badge, then
-  get saved as an ordinary capture and loaded, indistinguishable from a
-  bench-native one from that point on. Timestamps on both sides are
-  relative-seconds, not real epoch — trace rows only ever keep time-of-day.
-  SDO payload bytes are highlighted, PDO rows carry a green background
-  graded by PDO number, EMCY rows a red one. PDO payloads are decoded
-  into named signals (`core._annotate_pdo`) via the default mapping
-  (0x1600-/0x1A00-series) in the EDS assigned to the node — bit-exact
-  LSB-first unpacking, INTEGER types sign-extended; this assumes the
-  predefined connection set and the EDS *default* mapping (reading the
-  live mapping off the device would be a mapping editor's job, and no
-  such editor exists yet). Demo devices publish TPDO1 per their EDS mapping
-  (`EdsDemoBus._tpdo1_frame`), values consistent with SDO reads.
-  EMCY frames are decoded to
-  plain text (`core._annotate_emcy`): error code against the CiA-301
-  table in `data.EMCY_CODES` — vendor codes merged in via the
-  `emcy_codes` plugin hook — plus the error-register bits; every EMCY
-  is also mirrored into the state log, which drives the EMCY badge.
-  A **Stats** toggle swaps the frame table for a statistics view
-  (`core._trace_stats`): cumulative frame counts and frames/s per
-  COB-ID (top 40, rest aggregated), share bars, per-class totals, a
-  60 s bus-load sparkline and the error-frame counter. Counters run
-  since connect or trace clear; the rate window spans the last ~5 s.
+  That split is the whole design. Recording runs whenever the interface
+  is connected and test steps read it (`wait_for` with a `cob` matches
+  through `Bench._match_traced`), so pausing the panel or opening a saved
+  capture changes only what is *shown*: `Bench._trace_view` picks the
+  source while `Bench.trace` keeps filling underneath. A step can
+  therefore never lose a frame to something the operator did on screen.
+  Filtering is server-side over the whole ring buffer (200k frames,
+  `core.TRACE_CAP`), so a hidden class or device cannot push visible
+  frames out of the browser's window.
+  The table draws newest-first and only the rows on screen, placing them
+  by index against a full-height spacer — 200k rows is not something a
+  browser lays out. The newest `core.TRACE_VIEW` ride along in the state
+  snapshot, so the live end costs no request; older windows are fetched
+  on demand (`GET /api/trace/rows` → `Bench._trace_page`, capped at
+  `app.TRACE_PAGE_MAX`) and deliberately not cached, since the record is
+  still growing and, at the cap, still being trimmed. That endpoint reads
+  the same source as the panel, so an open capture answers there too —
+  which is where hours of scrollback come from.
+  Timestamps are comparable across directions, which is not free: TX
+  frames are stamped by us in epoch time, RX frames carry the adapter's
+  relative clock and are mapped across by an offset that has to track two
+  crystals drifting apart (`CanopenBus.poll_frames`, `_TS_WINDOW_S`).
+  Captures live in `<workspace>/traces/`; `core._autosave_write` keeps
+  writing one as frames arrive, because the ring buffer is an hour deep
+  and the runs worth recording are longer (retention and the disk reserve:
+  the `AUTOSAVE_*` constants, which carry the reasoning). The filtered
+  trace exports as CSV or a SocketCAN `candump -l` log, and such a log
+  imports back (`act_trace_import`) through the same annotation pipeline
+  as live traffic — with `live=False`, so historical frames do not feed
+  the signal plot or the EMCY badge.
+  What the annotators add: PDO payloads unpacked into named signals via
+  the EDS *default* mapping (`core._annotate_pdo` — the predefined
+  connection set is assumed; reading the live mapping off a device would
+  be a mapping editor's job and there is none), EMCY frames resolved
+  against `data.EMCY_CODES` plus the `emcy_codes` hook and mirrored into
+  the state log, which drives the badge. A **Stats** view
+  (`core._trace_stats`) swaps the table for per-COB counts and rates,
+  per-class totals, a bus-load sparkline and the error-frame counter.
 
 An **About** page (bottom-left sidebar entry) shows project summary,
 documentation pointers, author and license.
@@ -243,7 +172,7 @@ canopen_bench/
 └── static/           frontend (Preact + HTM, no build step)
     ├── index.html
     ├── styles.css    theme variables (light/dark) + hover states
-    ├── app.js        pixel-faithful port of the design prototype
+    ├── app.js        every page and component, one file, no build step
     └── vendor/preact-htm.module.js
 ```
 
