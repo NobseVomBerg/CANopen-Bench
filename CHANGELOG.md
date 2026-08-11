@@ -35,7 +35,9 @@ development; the version counts from here.
   every recorded frame appended to a capture file as it arrives and kept
   for two weeks, so an endurance run longer than the ring is deep still
   has a beginning; the retention gives way early if the disk falls below
-  a 2 GB reserve
+  a 2 GB reserve, and if it cannot write at all autosave waits with a red
+  chip and resumes by itself rather than switching off on a run that may
+  have months left to go
 - EMCY decoding: CiA-301 error-code texts and error-register bits in the
   trace and state log (badge counts real emergencies); vendor-specific
   codes contributable via the `emcy_codes` plugin hook
