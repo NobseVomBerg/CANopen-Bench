@@ -1187,6 +1187,46 @@ def test_the_error_register_alone_does_not_make_a_match(tc_bench):
     assert tc_bench.results == {"0018": "FAIL"}
 
 
+RESET_TC = """\
+id: "001A"
+name: "the reset is a report the case waits for"
+steps:
+  - expect_emcy: {mec: "0x0", timeout: 0.2}
+"""
+
+
+def test_a_case_can_wait_for_the_error_reset_itself(tc_bench):
+    """Error code 0x0000 — "everything has been accepted or cleared" — is
+    the frame a case waits for after it acknowledges an error, and half of
+    a device family's cases end on it.
+
+    It is also what ends the EMCY window, and the window used to cut in
+    *front* of it: the boundary frame was never inside. So the one step
+    written to see it was the one step that could not, and it reported
+    "nothing arrived at all" about a frame sitting two rows up in the
+    trace. Whether the reset is inside the window or only ends it is now
+    the caller's question, because the two callers want opposite answers.
+    """
+    _add_tc(tc_bench, "TC001A_reset.yaml", RESET_TC)
+    run_selected(tc_bench, {"001A"},
+                 during=_once(_emcy_frame, "00 00 00 00 00 00 00 00"))
+    assert tc_bench.results == {"001A": "PASS"}, \
+        " ".join(ln["msg"] for ln in tc_bench.logs)
+
+
+def test_the_reset_still_does_not_count_as_something_being_wrong(tc_bench):
+    """The other half of the same rule. `expect_no_emcy` asks whether the
+    device is reporting a fault, and a device that has just cleared one is
+    not — reading the reset as an EMCY would fail every case that ends by
+    acknowledging an error, which is the opposite mistake."""
+    _add_tc(tc_bench, "TC0051_no_emcy_violated.yaml", NO_EMCY_VIOLATED_TC)
+    _emcy_frame(tc_bench, "00 10 01 72 00 00 00 00")   # a real error…
+    _emcy_frame(tc_bench, "00 00 00 00 00 00 00 00")   # …then acknowledged
+    run_selected(tc_bench, {"0051"})
+    assert tc_bench.results == {"0051": "PASS"}, \
+        " ".join(ln["msg"] for ln in tc_bench.logs)
+
+
 WRITE_SHAPES_TC = """\
 id: "0020"
 name: "what a write puts in the report"
