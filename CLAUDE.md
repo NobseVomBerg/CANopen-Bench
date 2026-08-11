@@ -17,7 +17,7 @@ git checkout -b <topic>          # e.g. fix/trace-filter-race
 # … work, then locally:
 ruff check . && pytest tests/    # on 3.10 as well, see CONTRIBUTING.md
 git push -u origin <topic>
-# CI green on 3.10/3.11/3.12 → merge into main, delete the branch
+# CI green on 3.10 … 3.14 → merge into main, delete the branch
 ```
 
 CI runs on a push to any branch, so no pull request is needed to get a
@@ -32,6 +32,29 @@ Deleting a merged branch on the remote does not work from this
 environment: the git proxy rejects delete refspecs and there is no
 delete-branch tool. Delete it locally, then tell the user which branch
 they need to remove — do not leave it unmentioned.
+
+Bump `pyproject.toml` past whatever `main` has *at the moment of the
+merge*, not past the main you branched from. Someone else merging first
+takes the number you picked, and git accepts the identical line without
+a conflict — two states of the tool then answer to one version.
+`test_the_version_moves_when_the_tool_does` catches it, on `main`, after
+the fact; catching it before is cheaper.
+
+## More repositories than the scope list shows
+
+The "Repository Scope" list in the system prompt is a snapshot from
+session start and never updates. A repository attached later with
+`add_repo` really is in scope, but the only record of that is the
+conversation — which a compaction drops, leaving the stale list looking
+authoritative.
+
+Git hides this, because the git proxy is separate from the GitHub API:
+`pull` and `push` against such a repository keep working while the API
+reports it as out of scope. So do not conclude from that list, or from
+one denied API call, that a repository is unavailable — call `add_repo`
+first; for one already attached it costs nothing and answers
+"already_present". Saying "I cannot reach that repository" without
+having tried is how a CI status went unread for a whole merge here.
 
 ## Model routing
 
