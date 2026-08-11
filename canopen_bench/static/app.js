@@ -750,13 +750,27 @@ function ObjectsPage({ s, ui, setUi }) {
   const shownValue = (key, fallback) => (fmt[key] ? fmt[key].txt : fallback);
   const valueTitle = (key, fallback) => (fmt[key] ? fmt[key].alt : fallback);
 
+  // What a person types is read one way and one way only: 0x makes it
+  // hex, anything else is decimal (values.py, parse_value). The chip
+  // below changes what the *table* shows and nothing about that — it
+  // used to decide both, so with the table in hex a typed 12345678 came
+  // back as 0x12345678: the same digits, a different number.
+  const numberHint = ' · a number (0x… for hex, 0b… for binary, otherwise decimal) or a symbol name';
+  const baseChip = html`
+    <span class="hv-chip" onClick=${() => send('num_base')}
+      title="show values as hex or decimal — the other reading stays in the tooltip. Typing is unaffected: 0x… is hex, bare digits are decimal"
+      style="font:600 9px ${MONO};border:1px solid var(--inp);color:var(--acc);padding:1px 5px;border-radius:4px;cursor:pointer;letter-spacing:.04em">${(s.objects.base || 'hex').toUpperCase()}</span>`;
+
   const accByKey = {};
   for (const rows of Object.values(s.objects.catalog)) {
     for (const r of rows) accByKey[r[0] + ':' + r[1]] = r[4];
   }
   const favPanel = html`
     <div style="border:1px solid var(--bd);border-radius:8px;overflow:hidden">
-      <div style="padding:8px 12px;font-weight:600;font-size:12px;border-bottom:1px solid var(--bd2);background:var(--panel2)">${fav.rows.length} object${fav.rows.length === 1 ? '' : 's'}</div>
+      <div style="padding:8px 12px;font-weight:600;font-size:12px;border-bottom:1px solid var(--bd2);background:var(--panel2);display:flex;align-items:center;gap:8px">
+        <span style="flex:1">${fav.rows.length} object${fav.rows.length === 1 ? '' : 's'}</span>
+        ${baseChip}
+      </div>
       ${fav.rows.length ? fav.rows.map(({ idx, sub, label }) => {
         const key = idx + ':' + sub;
         const cur = vals[key];
@@ -770,7 +784,8 @@ function ObjectsPage({ s, ui, setUi }) {
           <span style="font:10.5px ${MONO};color:var(--acc)">${idx}:${sub}</span>
           <span style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label || '—'}</span>
           ${writable ? html`
-            <${SyncInput} value=${shownValue(key, cur ?? '')} title=${valueTitle(key, 'staged value — Write sends it')}
+            <${SyncInput} value=${shownValue(key, cur ?? '')}
+              title=${valueTitle(key, 'staged value — Write sends it') + numberHint}
               onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
               style="border:1px solid var(--inp);background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:86px;outline:none;text-align:right" />
             <span class="hv" onClick=${() => send('obj_write', { idx, sub })} title="write the staged value to the device"
@@ -808,9 +823,7 @@ function ObjectsPage({ s, ui, setUi }) {
       <div style="display:grid;grid-template-columns:${cols};padding:7px 0 7px 14px;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel)">
         <span>Index</span><span>Sub</span><span>Name</span><span>Type</span><span>Acc</span>
         <span style="display:flex;align-items:center;gap:6px">Value
-          <span class="hv-chip" onClick=${() => send('num_base')}
-            title="show values as hex or decimal — the other reading stays in the tooltip"
-            style="font:600 9px ${MONO};border:1px solid var(--inp);color:var(--acc);padding:1px 5px;border-radius:4px;cursor:pointer;letter-spacing:.04em">${(s.objects.base || 'hex').toUpperCase()}</span>
+          ${baseChip}
         </span><span></span>
       </div>
       <div style="flex:1;min-height:0;overflow:auto">
@@ -832,7 +845,7 @@ function ObjectsPage({ s, ui, setUi }) {
             <span style="font:10.5px ${MONO};color:${acc === 'ro' ? 'var(--faint)' : acc === 'wo' ? 'var(--amb)' : 'var(--grn)'}">${acc}</span>
             ${acc !== 'ro' ? html`
               <span style="display:flex;align-items:center;gap:6px;min-width:0;padding-right:10px">
-                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + ' · a number (hex needs 0x) or a symbol name' + rangeHint}
+                <${SyncInput} value=${shown} title=${valueTitle(key, shown) + numberHint + rangeHint}
                   onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
                   style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;flex:none" />
                 ${sym && html`<span title=${valueTitle(key, shown)} style="font-size:10.5px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sym}</span>`}
