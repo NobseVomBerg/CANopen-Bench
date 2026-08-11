@@ -1,5 +1,5 @@
-# Das Beispiel aus dem Design-Mockup ("step 3/9 power off aux supply,
-# expect UV flag") als vollständige Sequenz. Die 0x21xx-Objekte sind
+# Beispiel für einen Testfall mit Netzteil-Steuerung ("power off aux
+# supply, expect UV flag") als vollständige Sequenz. Die 0x21xx-Objekte sind
 # PLATZHALTER — die realen Indizes kommen aus dem EDS des DUT und werden
 # beim ersten Hardware-Test eingetragen. Format: docs/ablaeufe/testfall-format.md
 id: "4602"
