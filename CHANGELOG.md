@@ -31,7 +31,9 @@ development; the version counts from here.
 - Object browser from EDS catalogs with identity matching (0x1018),
   favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id)
 - Trace monitor: 200k-frame ring buffer, server-side class/node filters,
-  µs timestamps, PDO/EMCY row coloring, capture save/load
+  µs timestamps, PDO/EMCY row coloring, capture save/load, and autosave —
+  every recorded frame appended to a capture file as it arrives, so a run
+  longer than the ring is deep still has a beginning
 - EMCY decoding: CiA-301 error-code texts and error-register bits in the
   trace and state log (badge counts real emergencies); vendor-specific
   codes contributable via the `emcy_codes` plugin hook
