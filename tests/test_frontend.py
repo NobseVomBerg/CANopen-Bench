@@ -106,3 +106,19 @@ def test_the_trace_toolbar_offers_autosave():
     # …and a run left alone for months has to see at a glance that nothing
     # is reaching the disk — the chip goes red, it does not go quiet
     assert "auto.warn" in app and "never switches itself off" in app
+
+
+def test_the_trace_table_places_rows_by_the_same_height_it_draws_them():
+    """The table draws only the rows on screen and positions them by index
+    rather than stacking them, because an hour of bus is 200k rows and no
+    browser lays that out. That makes one number load-bearing: the height a
+    row is given and the height it is placed by have to be the same
+    constant. Two numbers there and the scroll position drifts away from
+    the frames under it — silently, and worse the further you scroll.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "const ROW_H =" in app
+    assert "height:${ROW_H}px" in app           # what a row is
+    assert "top:${start * ROW_H}px" in app      # where it is put
+    assert "height:${total * ROW_H}px" in app   # how long the scrollbar is
+    assert "/api/trace/rows" in app             # and where rows past the snapshot come from

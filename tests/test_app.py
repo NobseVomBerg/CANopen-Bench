@@ -286,3 +286,48 @@ def test_only_a_report_that_exists_is_offered_as_a_link(tmp_path, monkeypatch):
         assert entry["file"] == entry["name"]
         # and what it points at is really there
         assert client.get(f"/api/report/{entry['file']}").status_code == 200
+
+
+# -- the window the panel is scrolled to ------------------------------------
+
+def test_trace_rows_endpoint_answers_a_window_newest_first(tmp_path, monkeypatch):
+    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
+    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
+
+    app = create_app(db_path=str(tmp_path / "x.db"))
+    with TestClient(app) as client:
+        _seed_trace(app)
+        newest = client.get("/api/trace/rows?end=0&n=1").json()
+        older = client.get("/api/trace/rows?end=1&n=1").json()
+        past_the_end = client.get("/api/trace/rows?end=99&n=10").json()
+
+    assert [r["cob"] for r in newest["rows"]] == ["0x000"]  # the last row recorded
+    assert [r["cob"] for r in older["rows"]] == ["0x581"]
+    assert newest["total"] == older["total"] == 2
+    assert past_the_end["rows"] == []  # scrolled past the oldest frame: nothing, not an error
+
+
+def test_trace_rows_endpoint_falls_back_on_junk_and_caps_the_page(tmp_path, monkeypatch):
+    """The query string comes from a scroll handler, and a request for the
+    whole 200k-row buffer is what the exports are for."""
+    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
+    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
+
+    app = create_app(db_path=str(tmp_path / "x.db"))
+    bench = None
+    with TestClient(app) as client:
+        bench = app.state.bench
+        bench.trace = [dict(_seed_trace_row(i)) for i in range(3000)]
+        junk = client.get("/api/trace/rows?end=nonsense&n=").json()
+        huge = client.get("/api/trace/rows?end=0&n=999999").json()
+        negative = client.get("/api/trace/rows?end=-5&n=-5").json()
+
+    assert len(junk["rows"]) == 200 and junk["end"] == 0   # the documented defaults
+    assert len(huge["rows"]) == 2000                       # TRACE_PAGE_MAX
+    assert negative["end"] == 0 and len(negative["rows"]) == 1
+
+
+def _seed_trace_row(i: int) -> dict:
+    return {"time": f"12:00:{i % 60:02d}.000000", "dir": "RX", "cob": "0x581", "len": "1",
+            "data": "01", "dec": "SDO tx node 01", "flag": "", "cls": "SDO",
+            "node": 1, "obj": "", "val": str(i)}
