@@ -108,8 +108,7 @@ asyncio-Task pro Lauf** ersetzt (nicht durch mehr Tick-Logik):
   (`act_run_stop` setzt es; Verdikt des angebrochenen Falls: ERROR mit
   Log `stopped by user`).
 - Fortschritt wandert in den Snapshot: `{tid, step, of, text}` — die UI
-  zeigt daraus die Zeile `TEST 4602 step 3/9  <text>` (wie im
-  Design-Mockup) und den Balken.
+  zeigt daraus die Zeile `TEST 4602 step 3/9  <text>` und den Balken.
 - `manual`-Schritte setzen den Zustand `waiting_operator` mit dem
   Anweisungstext; die UI zeigt einen Bestätigen/Abbrechen-Dialog, der
   über neue Aktionen `act_manual_confirm` / `act_manual_abort` auflöst.

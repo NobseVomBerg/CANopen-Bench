@@ -11,8 +11,8 @@ they are where they are.
 
 ## What it does
 
-Full clickable implementation of the chosen **1a** design — all five pages,
-light + dark theme (toggle in the header, persisted per browser):
+Five pages, light + dark theme (toggle in the header, persisted per
+browser):
 
 - **Setup** — workspace bar (create/switch workspaces, each a subfolder
   of the data root), bus interface (IXXAT / PCAN / Vector / Demo mode;
@@ -172,7 +172,7 @@ canopen_bench/
 └── static/           frontend (Preact + HTM, no build step)
     ├── index.html
     ├── styles.css    theme variables (light/dark) + hover states
-    ├── app.js        pixel-faithful port of the design prototype
+    ├── app.js        every page and component, one file, no build step
     └── vendor/preact-htm.module.js
 ```
 

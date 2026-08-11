@@ -1,5 +1,5 @@
-// CANopen Bench frontend — pixel-faithful port of the Claude Design prototype.
-// Server (FastAPI) owns all bench state; this file renders it and sends actions.
+// CANopen Bench frontend — every page and component, one file, no build step.
+// Server (Starlette) owns all bench state; this file renders it and sends actions.
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from '/static/vendor/preact-htm.module.js';
 
 const MONO = "'IBM Plex Mono',monospace";
