@@ -83,6 +83,22 @@ Bumping the second or first position resets the ones after it. The
 `core.VERSION` and the version in the UI all read from it, and a test
 enforces that (`test_version_has_one_source_of_truth`).
 
+Two branches at once break this without either of them doing anything
+wrong. Both fork off 1.0.9, both bump to 1.0.10, and both are right when
+they are pushed — each is above the main it forked from, and CI on each
+is green. Whichever merges second finds the same line on both sides, git
+takes it without a conflict, and two different states of the tool ship
+as 1.0.10. Nothing says so afterwards.
+
+So the branch is not where this is checked.
+`test_the_version_moves_when_the_tool_does` anchors on the **merge**: a
+merge commit that touches `canopen_bench/**` (or what `pyproject.toml`
+installs) must carry a version above the one its first parent had — the
+main it is merging into, whatever that has become in the meantime. If
+you merge and CI on `main` goes red with that test, bump and amend the
+merge. Merges that touch only tests, docs or CI need no bump and the
+test does not ask for one.
+
 `CHANGELOG.md` is not a log of every bump. It gets a dated section per
 second-position change, summarising what happened since the last one.
 
