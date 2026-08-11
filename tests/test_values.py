@@ -131,44 +131,46 @@ def test_the_tooltip_carries_every_reading(syms):
 
 # -- reading typed input -----------------------------------------------------
 
-def test_explicit_prefixes_win_over_the_base(syms):
-    assert parse_value("0x10", "dec", [], syms) == 16
-    assert parse_value("0b101", "dec", [], syms) == 5
+def test_a_prefix_is_what_makes_a_number_hex(syms):
+    assert parse_value("0x10", [], syms) == 16
+    assert parse_value("0b101", [], syms) == 5
 
 
-def test_bare_digits_follow_the_chosen_base(syms):
-    """"10" is genuinely ambiguous. The tool picks by the base on screen and
-    echoes what it resolved to, rather than pretending there is no choice."""
-    assert parse_value("10", "dec", [], syms) == 10
-    assert parse_value("10", "hex", [], syms) == 16
+def test_bare_digits_are_decimal_whatever_the_table_shows(syms):
+    """One rule for a number a person types, the same one the write path
+    has always had: write 0x or it is decimal. Following the display base
+    instead made a typed 12345678 into 0x12345678 while the table was in
+    hex — the same digits, a different number, and nothing saying so."""
+    assert parse_value("10", [], syms) == 10
+    assert parse_value("12345678", [], syms) == 12345678
 
 
 def test_a_full_symbol_name_resolves(syms):
-    assert parse_value("eMode_Run", "dec", [], syms) == 4
+    assert parse_value("eMode_Run", [], syms) == 4
 
 
 def test_a_short_name_resolves_within_this_objects_tables(syms):
-    assert parse_value("Run", "dec", [Field("eMode")], syms) == 4
+    assert parse_value("Run", [Field("eMode")], syms) == 4
 
 
 def test_a_short_name_outside_this_objects_tables_is_unknown(syms):
     with pytest.raises(ValueError, match="unknown symbol"):
-        parse_value("Run", "dec", [Field("eLamp")], syms)
+        parse_value("Run", [Field("eLamp")], syms)
 
 
 def test_flags_can_be_typed_as_a_sum(syms):
-    assert parse_value("eFlags_First+eFlags_Fourth", "dec", [], syms) == 5
-    assert parse_value("First+Fourth", "dec", [Field("eFlags", flags=True)], syms) == 5
+    assert parse_value("eFlags_First+eFlags_Fourth", [], syms) == 5
+    assert parse_value("First+Fourth", [Field("eFlags", flags=True)], syms) == 5
 
 
 def test_nonsense_is_refused_with_the_text_in_the_message(syms):
     with pytest.raises(ValueError, match="wat"):
-        parse_value("wat", "dec", [], syms)
+        parse_value("wat", [], syms)
 
 
 def test_a_malformed_hex_literal_is_refused(syms):
     with pytest.raises(ValueError):
-        parse_value("0xZZ", "hex", [], syms)
+        parse_value("0xZZ", [], syms)
 
 
 # -- the bench side ----------------------------------------------------------
