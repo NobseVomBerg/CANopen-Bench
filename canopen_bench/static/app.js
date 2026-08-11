@@ -674,7 +674,6 @@ function SetupPage({ s }) {
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-weight:600;font-size:13px">Machine control</span>
-        <span style="font:600 10px ${MONO};background:${mc.enabled ? 'var(--grn-soft)' : 'var(--chip)'};color:${mc.enabled ? 'var(--grn)' : 'var(--faint)'};padding:2px 8px;border-radius:9px">${mc.enabled ? 'ACTIVE' : 'INACTIVE'}</span>
         <span style="font-size:10.5px;color:var(--faint)">tool acts as CANopen master · addressing procedure = exchangeable flow file</span>
         ${toggle(mc.enabled, 'Machine Control', () => send('mc_toggle'),
           `Machine Control is ${mc.enabled ? 'active — the bench acts as CANopen master. Click to hand that back' : 'inactive. Click to let the bench act as CANopen master'}`,
@@ -1832,10 +1831,9 @@ function App() {
           <span class="hv" onClick=${() => setUi({ ...ui, theme: dark ? 'light' : 'dark' })} title="Toggle theme"
             style="width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:6px;cursor:pointer;color:var(--mid);font-size:13px">${dark ? '☀' : '☾'}</span>
           <span style="width:8px;height:8px;border-radius:50%;background:${s.connected ? 'var(--grn)' : 'var(--faint)'}"></span>
-          <span style="font-size:12px;color:var(--mid)">${s.connected ? adapterInfo.conn : 'not connected'}</span>
           ${toggle(s.connected, s.connected ? 'Connected' : 'Disconnected', () => send('connect_toggle'),
-            s.connected ? 'The interface is open — click to close it and release the adapter'
-                        : 'The interface is closed — click to open it')}
+            s.connected ? `${adapterInfo.iface} is open — click to close it and release the adapter`
+                        : `${adapterInfo.iface} is closed — click to open it`)}
         </div>
       </div>
 
