@@ -71,7 +71,9 @@ and every access shows up in the Trace like real bus traffic.
 - **SWDL** — firmware download; protocols are manufacturer-specific and
   ship as vendor extension packages (see the note on the page).
 - **Trace** — live monitor with class + device filters over a 200k-frame
-  ring buffer, ms/µs timestamps, capture save/load.
+  ring buffer, ms/µs timestamps, capture save/load, and autosave — every
+  recorded frame written to a capture file as it arrives, for the runs
+  that are longer than the ring is deep.
 
 ## Hardware
 

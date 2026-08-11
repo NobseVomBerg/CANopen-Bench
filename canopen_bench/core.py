@@ -21,7 +21,7 @@ from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TextIO
 
 from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ODVariable
@@ -84,6 +84,21 @@ SCAN_DELAY_S = 1.1
 #: the window never reaches past the start of the case doing the waiting.
 FRAME_LOOKBACK_S = 0.4
 TRACE_CAP = 200_000  # ring buffer bound: ~120 MB of row dicts, ≈1 h at 55 frames/s
+#: Autosave (`_autosave_write`) writes the record to disk as it arrives,
+#: because TRACE_CAP is a ring: after an hour the beginning is gone, and an
+#: hour is shorter than the runs where something odd happens once.
+#:
+#: A segment rolls over at this size so no single file grows past what an
+#: editor — or this tool's own capture loader — will open, and each one is a
+#: complete capture on its own.
+AUTOSAVE_SEGMENT_BYTES = 64 * 1024 * 1024
+#: What the segments together may occupy. A connected bench writes roughly
+#: 40 MB an hour, and autosave is meant to be switched on and forgotten, so
+#: unbounded it would fill the disk it exists to keep the record on. The
+#: oldest segments give way first and every removal is logged — a gap in the
+#: record must not be silent. Captures saved by hand are never touched: those
+#: are a decision, not a by-product.
+AUTOSAVE_KEEP_BYTES = 1024 * 1024 * 1024
 TRACE_VIEW = 400     # rows per snapshot to the browser — enough scrollback to
                      # follow a multi-step sequence (e.g. addressing) end to end
 PLOT_SEL_MAX = 4     # concurrently plotted signals — keeps the chart legible
@@ -931,6 +946,15 @@ class Bench:
         self.trace_dir = db.path.parent / "traces"  # saved capture files
         self.trace_loaded: str | None = None  # capture file currently shown instead of live data
         self._trace_saved: list[dict] = []  # cached dir listing: refreshed on save/delete, not per tick
+        # autosave: every recorded frame appended to a capture file as it
+        # arrives. The setting persists (a bench that wants its record kept
+        # wants it kept tomorrow too); the open segment does not — it starts
+        # on the first frame after a start, so a tool left offline writes
+        # nothing.
+        self.trace_autosave: bool = bool(db.get("trace_autosave", False))
+        self._autosave_fh: TextIO | None = None
+        self._autosave_name: str | None = None
+        self._autosave_bytes = 0
         self._refresh_trace_saved()
         self.raw_rows: list[dict] = db.get("raw_sdo", [{"i": "0x2040", "s": "01", "l": "4", "v": "0x00260001"}])
         self._cyc_seq = 0  # id source for raw rows (cyclic scheduler key)
@@ -1065,6 +1089,7 @@ class Bench:
             self.connected = False
             self.bus.disconnect()
             self.log("BUS  disconnected — server shutdown")
+        self._autosave_close("closed")
         if self.psu is not None:
             try:
                 self.psu.close()
@@ -1103,6 +1128,7 @@ class Bench:
         self._stop_cyclic()
         self.connected = False
         self.devices = []
+        self._autosave_close("bus lost")
         self.log(f"BUS  connection lost — {reason} — auto-disconnected", "emcy0")
         self._changed()
 
@@ -1262,6 +1288,10 @@ class Bench:
             self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
         self.trace += rows
         self._tick_rows += rows
+        if self.trace_autosave:
+            # after annotation, so a row on disk carries the same decode as
+            # the one on screen, and before the ring is trimmed
+            self._autosave_write(rows)
         cut = len(self.trace) - TRACE_CAP
         if cut > 0:
             for old in self.trace[:cut]:
@@ -1526,6 +1556,9 @@ class Bench:
             self.bus.disconnect()
             self.devices = []
             self.bus_load = 0.0
+            # one segment per connected session: nothing arrives while
+            # offline, so an open file would only blur where the gap is
+            self._autosave_close("bus disconnected")
             self.log("BUS  disconnected")
             return
         self._capture_loop()
@@ -4326,12 +4359,139 @@ class Bench:
     def act_trace_devfilter(self, p: dict) -> None:
         self.trace_dev_filter = not self.trace_dev_filter
 
-    def _refresh_trace_saved(self) -> None:
+    #: What a capture file may be called. ``.json`` is one object written in
+    #: one go; ``.jsonl`` is one row per line, which is what autosave needs —
+    #: a file being appended to cannot be a single JSON object, since that
+    #: object is only complete once its closing bracket is there, and the
+    #: whole point is that a capture cut short by a crash still reads.
+    CAPTURE_SUFFIXES = (".json", ".jsonl")
+
+    def _capture_files(self) -> list[Path]:
+        """Capture files, newest first — by modification time, not by name.
+        The names carry a timestamp but also a prefix (``trace_``,
+        ``import_``, ``auto_``), and sorting those as strings groups by
+        prefix and only then by time."""
         if not self.trace_dir.is_dir():
-            self._trace_saved = []
+            return []
+        files = [f for f in self.trace_dir.iterdir()
+                 if f.suffix in self.CAPTURE_SUFFIXES and f.is_file()]
+        return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
+
+    def _refresh_trace_saved(self) -> None:
+        self._trace_saved = [{"file": f.name, "size": f.stat().st_size}
+                             for f in self._capture_files()]
+
+    def _saved_listing(self) -> list[dict]:
+        """The cached listing, with the open autosave segment's size taken
+        from what has been written rather than from the last `stat()` — it
+        is the one file that grows between refreshes, and a capture listed
+        at the 0 bytes it had when it was created reads as an empty one."""
+        if not self._autosave_name:
+            return self._trace_saved
+        return [{**f, "size": self._autosave_bytes} if f["file"] == self._autosave_name else f
+                for f in self._trace_saved]
+
+    # -- autosave ----------------------------------------------------------
+    def act_trace_autosave(self, p: dict) -> None:
+        self.trace_autosave = not self.trace_autosave
+        self.db.set("trace_autosave", self.trace_autosave)
+        if self.trace_autosave:
+            self.log("TRACE autosave on — every recorded frame is written to a capture as it arrives")
+        else:
+            self._autosave_close("off")
+
+    def _autosave_write(self, rows: list[dict]) -> None:
+        """Append the just-drained rows to the open autosave segment.
+
+        Unfiltered, like the record it copies: the trace filter is a
+        property of the view, and a record that only kept what someone
+        happened to be looking at would answer no question asked
+        afterwards. Flushed per batch, because the run this protects is
+        the one that ends badly — a buffer still in the process is a
+        buffer lost with it.
+        """
+        if not rows:
             return
-        files = sorted(self.trace_dir.glob("*.json"), reverse=True)  # name = timestamp → newest first
-        self._trace_saved = [{"file": f.name, "size": f.stat().st_size} for f in files]
+        try:
+            if self._autosave_fh is not None and self._autosave_bytes >= AUTOSAVE_SEGMENT_BYTES:
+                self._autosave_close("segment full")
+            if self._autosave_fh is None:
+                self._autosave_open()
+            text = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows)
+            self._autosave_fh.write(text)
+            self._autosave_fh.flush()
+            self._autosave_bytes += len(text.encode("utf-8"))
+        except OSError as exc:
+            # a full or read-only disk is not a reason to stop testing:
+            # switch autosave off, say so once, go on recording into memory
+            fh = self._autosave_fh
+            self.trace_autosave = False
+            self._autosave_forget()
+            self.db.set("trace_autosave", False)
+            if fh is not None:
+                try:
+                    fh.close()
+                except OSError:
+                    pass
+            self.log(f"TRACE autosave off — {exc}", "emcy0")
+
+    def _autosave_open(self) -> None:
+        self.trace_dir.mkdir(parents=True, exist_ok=True)
+        stem = datetime.now().strftime("auto_%Y%m%d_%H%M%S")
+        path = self.trace_dir / f"{stem}.jsonl"
+        n = 0
+        while path.exists():  # same second twice (off and on again) — don't append to the old one
+            n += 1
+            path = self.trace_dir / f"{stem}_{n}.jsonl"
+        self._autosave_fh = path.open("w", encoding="utf-8")
+        self._autosave_name = path.name
+        # a header line, so a reader can tell what it has before parsing
+        # rows; the loader skips any line that is not a frame
+        head = json.dumps({"v": 1, "kind": "autosave",
+                           "started": datetime.now().isoformat(timespec="seconds")},
+                          separators=(",", ":")) + "\n"
+        self._autosave_fh.write(head)
+        self._autosave_bytes = len(head)
+        self._autosave_prune()
+        self._refresh_trace_saved()
+        self.log(f"TRACE autosave → {path.name}")
+
+    def _autosave_close(self, why: str = "stopped") -> None:
+        fh, name, size = self._autosave_fh, self._autosave_name, self._autosave_bytes
+        self._autosave_forget()
+        if fh is None:
+            return
+        try:
+            fh.close()
+        except OSError:
+            pass
+        self._refresh_trace_saved()
+        self.log(f"TRACE autosave {why} — {name} ({size // 1024} kB)")
+
+    def _autosave_forget(self) -> None:
+        self._autosave_fh, self._autosave_name, self._autosave_bytes = None, None, 0
+
+    def _autosave_prune(self) -> None:
+        """Hold the autosave segments to AUTOSAVE_KEEP_BYTES, oldest first.
+
+        Only files autosave wrote itself are candidates, and never the one
+        currently open. Runs when a segment opens, which is also the only
+        moment the total can have grown by a whole segment.
+        """
+        segments = sorted(self.trace_dir.glob("auto_*.jsonl"), key=lambda f: f.name)
+        total = sum(f.stat().st_size for f in segments)
+        for old in segments:
+            if total <= AUTOSAVE_KEEP_BYTES:
+                return
+            if old.name == self._autosave_name:
+                continue
+            size = old.stat().st_size
+            try:
+                old.unlink()
+            except OSError:
+                continue
+            total -= size
+            self.log(f"TRACE autosave budget reached — oldest capture {old.name} removed")
 
     def act_trace_save(self, p: dict) -> None:
         rows, _ = self._trace_view()  # what is on screen is what gets saved
@@ -4344,12 +4504,31 @@ class Bench:
         self._refresh_trace_saved()
         self.log(f"TRACE {len(rows)} frames saved → {name}")
 
+    def _read_capture(self, path: Path) -> list[dict]:
+        """The rows of a capture file, in either format — the object one
+        `act_trace_save` writes, or the line-per-row one autosave appends
+        to. An autosave segment is read the same way whether it was closed
+        or is still being written to: every line that is there is complete,
+        so "the newest frames so far" needs no special case."""
+        if path.suffix == ".jsonl":
+            rows = []
+            with path.open(encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if isinstance(row, dict) and "cob" in row:  # anything else is the header
+                        rows.append(row)
+            return rows
+        rows = json.loads(path.read_text(encoding="utf-8"))["rows"]
+        if not isinstance(rows, list):
+            raise ValueError("rows is not a list")
+        return rows
+
     def act_trace_load(self, p: dict) -> None:
         name = Path(p["file"]).name  # basename only: no path traversal out of trace_dir
         try:
-            rows = json.loads((self.trace_dir / name).read_text(encoding="utf-8"))["rows"]
-            if not isinstance(rows, list):
-                raise ValueError("rows is not a list")
+            rows = self._read_capture(self.trace_dir / name)
         except (OSError, ValueError, KeyError) as exc:
             self.log(f"TRACE load failed — {name}: {exc}", "emcy0")
             return
@@ -4422,6 +4601,11 @@ class Bench:
 
     def act_trace_del_saved(self, p: dict) -> None:
         name = Path(p["file"]).name
+        if name == self._autosave_name:
+            # close before unlinking: Windows refuses to remove an open file,
+            # and a handle left pointing at a deleted path writes into
+            # nothing. Autosave stays on and starts a fresh segment.
+            self._autosave_close("capture deleted")
         try:
             (self.trace_dir / name).unlink()
         except OSError:
@@ -4471,7 +4655,9 @@ class Bench:
         return {"rows": rows, "paused": self.trace_paused, "hide": sorted(self.trace_hide),
                 "devSel": self.trace_dev_filter,
                 "total": len(shown), "match": match,
-                "saved": self._trace_saved, "loaded": self.trace_loaded,
+                "saved": self._saved_listing(), "loaded": self.trace_loaded,
+                "auto": {"on": self.trace_autosave, "file": self._autosave_name,
+                         "bytes": self._autosave_bytes},
                 "stats": self._trace_stats(),
                 "plot": {"sel": self.plot_sel,
                         "series": {k: list(v) for k, v in self.plot_series.items()}}}
