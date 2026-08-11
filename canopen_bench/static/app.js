@@ -31,6 +31,40 @@ function useServerState() {
   return st;
 }
 
+// The one select element on this page. Every dropdown goes through here,
+// and that is not tidiness — it is what makes a dropdown usable at all.
+//
+// Preact clears `option.value` while diffing an <option>'s text child and
+// writes it back straight after, on every render, whether or not anything
+// changed. This page re-renders on every state snapshot, ten times a
+// second, so an open native popup is rebuilt under the pointer, and
+// Chromium throws the highlight back to the current selection whenever
+// its options are touched: you cannot pick anything unless you click
+// inside one tick. Returning the identical vnode while the options and
+// the selection are unchanged makes Preact skip the subtree by vnode
+// identity, and the popup is left alone.
+//
+// Every dropdown in the app had this latent; they were fixed one at a
+// time, which meant the next one written started broken again. Hence one
+// component — a new dropdown gets the fix by using it, and a test keeps
+// this the only select element in the file.
+//
+// `options` is [value, label] pairs. `onPick` goes through a ref: the
+// memo would otherwise hold the first render's closure and act on stale
+// state. The key compares the pairs by content, because the server sends
+// a fresh array every tick and the array itself never matches.
+function OptionSelect({ value, options, onPick, style, title, disabled }) {
+  const pick = useRef(onPick);
+  pick.current = onPick;
+  const key = JSON.stringify(options);
+  return useMemo(() => html`
+    <select value=${value == null ? '' : String(value)} disabled=${!!disabled}
+      onChange=${(e) => pick.current(e.target.value, e)}
+      title=${title || ''} style=${style || ''}>
+      ${options.map(([v, label]) => html`<option value=${v}>${label}</option>`)}
+    </select>`, [key, value, style, title, disabled]);
+}
+
 // Input that holds the user's text while focused, syncs from the server otherwise,
 // and commits on blur / Enter (the state snapshot re-renders every tick).
 // After a commit the field keeps showing the typed text until the server echoes
@@ -538,14 +572,16 @@ function SetupPage({ s }) {
     ${s.workspaces.canSwitch && html`
     <div style="grid-column:1 / -1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 16px;display:flex;align-items:center;gap:12px">
       <span style="font-weight:600;font-size:13px">Workspace</span>
-      <select onChange=${(e) => {
-          const name = e.target.value;
+      <${OptionSelect} value=${s.workspace}
+        options=${s.workspaces.list.map((w) => [w, w])}
+        style=${`border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 8px;font:12px ${MONO};outline:none;min-width:160px`}
+        onPick=${(name, e) => {
           if (name && name !== s.workspace && confirm(`Switch to workspace "${name}"? The bus will be disconnected.`)) send('workspace_switch', { name });
+          // put the box back by hand: the memo returns the identical vnode
+          // while `value` is unchanged, so a declined switch would leave the
+          // new name showing over the workspace that is still open
           else e.target.value = s.workspace;
-        }}
-        style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 8px;font:12px ${MONO};outline:none;min-width:160px">
-        ${s.workspaces.list.map((w) => html`<option value=${w} selected=${w === s.workspace}>${w}</option>`)}
-      </select>
+        }} />
       <span class="hv" onClick=${() => { const name = prompt('New workspace name:'); if (name) send('workspace_create', { name }); }}
         style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">＋ New…</span>
       <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: data/${s.workspace}</span>
@@ -736,10 +772,10 @@ function SetupPage({ s }) {
           </div>
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:11px;color:var(--dim)">Addressing procedure</span>
-            <select onChange=${(e) => send('mc_flow', { file: e.target.value })}
-              style="flex:1;border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:3px 6px;font:11px ${MONO};outline:none">
-              ${(mc.flows || []).map((f) => html`<option value=${f} selected=${f === mc.teachFlow}>${f}</option>`)}
-            </select>
+            <${OptionSelect} value=${mc.teachFlow}
+              options=${(mc.flows || []).map((f) => [f, f])}
+              style=${`flex:1;border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:3px 6px;font:11px ${MONO};outline:none`}
+              onPick=${(file) => send('mc_flow', { file })} />
           </div>
           ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
         </div>
@@ -958,9 +994,8 @@ function ObjectsPage({ s, ui, setUi }) {
           const type = r.type || 'sdo';
           const selStyle = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 5px;font:11px ${MONO};outline:none`;
           const rawSel = (field, value, options, width) => html`
-            <select onChange=${(e) => send('raw_update', { row: ri, field, value: e.target.value })} style="${selStyle};width:${width}px">
-              ${options.map(([v, label]) => html`<option value=${v} selected=${v === value}>${label}</option>`)}
-            </select>`;
+            <${OptionSelect} value=${value} options=${options} style=${`${selStyle};width:${width}px`}
+              onPick=${(v) => send('raw_update', { row: ri, field, value: v })} />`;
           const sendBtn = html`<span class="hv-b" onClick=${() => send('raw_send', { row: ri })} style="${btn.acc}font-size:11px;padding:5px 12px;border-radius:5px;cursor:pointer">Send</span>`;
           return html`
           <div style="display:flex;align-items:center;gap:8px">
@@ -1012,38 +1047,17 @@ function ObjectsPage({ s, ui, setUi }) {
 // A catalog filter, offering only what the folder actually contains — a
 // dropdown listing grades or variants no case has is a filter that can
 // only ever empty the list.
-//
-// The subtree is memoised, and that is not a micro-optimisation — it is
-// what makes the dropdown usable at all. Preact clears `option.value`
-// while diffing an <option>'s text child and writes it back straight
-// after, on every render, whether or not anything changed. At one state
-// snapshot per tick that rewrites every option ten times a second, and
-// Chromium rebuilds an open popup when its options are touched: whatever
-// you were pointing at snaps back to the current selection unless you
-// click within the tick. Returning the identical vnode while the chip's
-// own inputs are unchanged makes Preact skip the subtree by vnode
-// identity, so the popup is left alone. `onPick` goes through a ref
-// because the memo would otherwise hold the first render's closure and
-// pick against a stale `ui`.
 function FilterChip({ label, value, options, empty, onPick }) {
-  const pick = useRef(onPick);
-  pick.current = onPick;
-  return useMemo(() => {
-    const active = !!value;
-    return html`
+  const active = !!value;
+  return html`
     <span style="display:flex;align-items:center;gap:5px;border:1px solid ${active ? 'var(--acc)' : 'var(--inp)'};background:${active ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:4px 8px;color:${active ? 'var(--acc)' : 'var(--mid)'}">
       <span style="font-size:12px">${label}:</span>
-      <select value=${value} onChange=${(e) => pick.current(e.target.value)}
+      <${OptionSelect} value=${value} onPick=${onPick}
         disabled=${!options.length}
         title=${options.length ? '' : `no case in this folder declares a ${label.toLowerCase()}`}
-        style="background:transparent;color:inherit;border:0;font:600 12px 'IBM Plex Sans';outline:none;cursor:${options.length ? 'pointer' : 'default'}">
-        <option value="">${empty}</option>
-        ${options.map((o) => html`<option value=${o}>${o}</option>`)}
-      </select>
+        style=${`background:transparent;color:inherit;border:0;font:600 12px 'IBM Plex Sans';outline:none;cursor:${options.length ? 'pointer' : 'default'}`}
+        options=${[['', empty], ...options.map((o) => [o, o])]} />
     </span>`;
-    // the options are compared by content: the server sends a fresh array
-    // every tick, so comparing the array itself would never match
-  }, [label, value, empty, options.join(' ')]);
 }
 
 function TestsPage({ s, ui, setUi }) {
@@ -1306,10 +1320,9 @@ function OverviewBox({ ov, dir }) {
       Overview by variant
       <span style="display:flex;gap:6px;align-items:baseline;font-weight:400">
         <span style="font-size:10.5px;color:var(--faint)">last</span>
-        <select value=${String(days)} onChange=${(e) => setDays(Number(e.target.value))}
-          style="background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:5px;font:11px ${MONO};padding:1px 3px">
-          ${[1, 2, 3, 5, 7, 10, 14, 30].map((d) => html`<option value=${String(d)}>${d} d</option>`)}
-        </select>
+        <${OptionSelect} value=${String(days)} onPick=${(v) => setDays(Number(v))}
+          style=${`background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:5px;font:11px ${MONO};padding:1px 3px`}
+          options=${[1, 2, 3, 5, 7, 10, 14, 30].map((d) => [String(d), `${d} d`])} />
         <span class="hv" onClick=${() => send('report_overview', { days })}
           style="font-size:10.5px;color:var(--acc);font-weight:600;cursor:pointer">create →</span>
       </span>
@@ -1730,11 +1743,11 @@ function TracePage({ s }) {
       title=${`Autosave: write every recorded frame to a capture file as it arrives, unfiltered. The trace in memory is a ring buffer, so on a long run the beginning is gone by the time anything is worth looking at. A new file starts on connect. Autosaved captures are kept for 14 days — less if the disk gets tight: the bench keeps 2 GB clear and drops the oldest early. It never switches itself off; if it cannot write it waits, shows why here, and carries on the moment it can. Every removal is in the state log.${auto.file ? `\n\nwriting to ${auto.file}` : ''}`}
       style="border:1px solid ${auto.warn ? 'var(--red)' : auto.on ? 'var(--grn)' : 'var(--off-bd)'};background:${auto.warn ? 'var(--red-soft)' : auto.on ? 'var(--grn)' : 'var(--off)'};color:${auto.warn ? 'var(--red)' : auto.on ? '#fff' : 'var(--mid)'};font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer;white-space:nowrap">${auto.on ? '⏺' : '⭘'} autosave${auto.warn ? ` · ${auto.warn}` : auto.on && auto.file ? ` · ${fmtSize(auto.bytes || 0)}` : ''}</span>
     ${saved.length > 0 && html`
-      <select onChange=${(e) => { if (e.target.value) send('trace_load', { file: e.target.value }); e.target.value = ''; }}
-        style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 6px;font:11px ${MONO};outline:none;max-width:240px">
-        <option value="">⤒ Load capture…</option>
-        ${saved.map((f) => html`<option value=${f.file}>${f.file} · ${fmtSize(f.size)}</option>`)}
-      </select>`}
+      <${OptionSelect} value=${''}
+        style=${`border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 6px;font:11px ${MONO};outline:none;max-width:240px`}
+        options=${[['', '⤒ Load capture…'],
+                   ...saved.map((f) => [f.file, `${f.file} · ${f.live ? 'recording' : fmtSize(f.size)}`])]}
+        onPick=${(file, e) => { if (file) send('trace_load', { file }); e.target.value = ''; }} />`}
     ${s.trace.loaded && html`
       <span style="font:11px ${MONO};color:var(--acc)">📼 ${s.trace.loaded}</span>
       <span class="hv" onClick=${() => send('trace_del_saved', { file: s.trace.loaded })} title="delete this capture file"

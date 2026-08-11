@@ -1,0 +1,6 @@
+# app.js carries characters git guesses are binary, and a "binary" source
+# file cannot be three-way merged — a parallel branch then collides on the
+# whole file instead of on the lines it touched.
+*.js text
+*.css text
+*.html text
