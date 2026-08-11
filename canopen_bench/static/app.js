@@ -80,6 +80,22 @@ const btn = {
   ghost: 'border:1px solid var(--inp);color:var(--mid);font-weight:600;',
 };
 
+// One shape for every on/off control on the page: green while the thing is
+// on, plain while it is not.
+//
+// The label says what the state *is*, never what a click would do. Half of
+// these used to say the verb — "Disconnect", "Activate machine control" —
+// and then had to colour the verb, which put green on the button that
+// meant "not running" and red on the one that meant "running". Colour is a
+// better place for state than a word is, so the word says the state too
+// and `title` carries what the click does.
+const toggle = (on, label, act, title, extra = '') => html`
+  <span class="hv-b" onClick=${act} title=${title}
+    style="font-weight:600;font-size:12px;padding:5px 14px;border-radius:6px;cursor:pointer;white-space:nowrap;
+      border:1px solid ${on ? 'var(--grn)' : 'var(--inp)'};
+      background:${on ? 'var(--grn)' : 'transparent'};
+      color:${on ? '#fff' : 'var(--mid)'};${extra}">${label}</span>`;
+
 // Bench power supply (canopen_bench/instruments): shown once one has been
 // found. Channel count comes from the instrument — the same model line
 // exists with one output and with two — so the row is drawn from the data,
@@ -114,9 +130,10 @@ function PsuBox({ psu }) {
       <span style="font-weight:600;font-size:12px;flex:none">Power supply</span>
       <span title=${psu.raw || ''} style="flex:none;font:600 11px ${MONO};color:var(--tx)">${psu.model || psu.name}</span>
       <span style="flex:none;font:10.5px ${MONO};color:var(--faint)">${psu.port}${psu.sn ? ` · SN ${psu.sn}` : ''}${psu.fw ? ` · ${psu.fw}` : ''}</span>
-      <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
-        style="${on ? btn.acc : btn.ghost}font-size:11.5px;padding:4px 12px;border-radius:6px;cursor:pointer;flex:none">
-        Output ${on === null ? '?' : on ? 'on' : 'off'}</span>
+      ${toggle(on, on === null || on === undefined ? '?' : on ? 'On' : 'Off',
+        () => send('psu_output', { on: !on }),
+        `The output is ${on === null || on === undefined ? 'in an unknown state' : on ? 'live' : 'off'} — click to turn it ${on ? 'off' : 'on'}`,
+        'flex:none;')}
       <span class="hv-white" title="Read the supply — nothing here polls" onClick=${() => send('psu_refresh')} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
       <label onClick=${() => send('psu_sidebar_toggle')} title="A second, smaller box in the sidebar: the set values, output and a refresh — no port, no serial number, those stay here"
         style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11.5px;color:var(--dim);flex:none;margin-left:auto">
@@ -553,8 +570,8 @@ function SetupPage({ s }) {
         <div title="Cyclic SYNC frames (COB 0x080) — devices with synchronous TPDOs only transmit while a SYNC producer runs">
           ${label('SYNC PRODUCER')}
           <div style="display:flex;gap:8px;align-items:center">
-            <span onClick=${() => send('sync_toggle')}
-              style="border:1px solid ${s.sync.run ? 'var(--acc)' : 'var(--inp)'};background:${s.sync.run ? 'var(--acc-soft)' : 'transparent'};color:${s.sync.run ? 'var(--acc)' : 'var(--mid)'};font:600 11.5px ${MONO};padding:5px 14px;border-radius:6px;cursor:pointer">${s.sync.run ? '⟳ running' : 'off'}</span>
+            ${toggle(s.sync.run, s.sync.run ? 'On' : 'Off', () => send('sync_toggle'),
+              `The bench is ${s.sync.run ? 'sending' : 'not sending'} SYNC — click to turn it ${s.sync.run ? 'off' : 'on'}`)}
             <span style="font-size:11px;color:var(--dim)">every</span>
             <${SyncInput} value=${String(s.sync.ms)} onCommit=${(v) => send('set_sync_ms', { ms: v })}
               style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:52px;outline:none;text-align:right" />
@@ -657,10 +674,10 @@ function SetupPage({ s }) {
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-weight:600;font-size:13px">Machine control</span>
-        <span style="font:600 10px ${MONO};background:${mc.enabled ? 'var(--grn-soft)' : 'var(--chip)'};color:${mc.enabled ? 'var(--grn)' : 'var(--faint)'};padding:2px 8px;border-radius:9px">${mc.enabled ? 'ACTIVE' : 'INACTIVE'}</span>
         <span style="font-size:10.5px;color:var(--faint)">tool acts as CANopen master · addressing procedure = exchangeable flow file</span>
-        <span class="hv-b" onClick=${() => send('mc_toggle')}
-          style="margin-left:auto;font-weight:600;font-size:12px;color:${mc.enabled ? 'var(--red)' : '#fff'};border:1px solid ${mc.enabled ? 'var(--red)' : 'var(--grn)'};background:${mc.enabled ? 'var(--red-soft)' : 'var(--grn)'};padding:5px 14px;border-radius:6px;cursor:pointer">${mc.enabled ? 'Deactivate' : 'Activate machine control'}</span>
+        ${toggle(mc.enabled, 'Machine Control', () => send('mc_toggle'),
+          `Machine Control is ${mc.enabled ? 'active — the bench acts as CANopen master. Click to hand that back' : 'inactive. Click to let the bench act as CANopen master'}`,
+          'margin-left:auto;')}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1.2fr 1.1fr;gap:14px">
         <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12px">
@@ -1691,12 +1708,13 @@ function TracePage({ s }) {
     <span onClick=${() => send('trace_toggle')} style="${btn.acc}font-size:11.5px;padding:5px 14px;border-radius:6px;cursor:pointer">${s.trace.paused ? '▶ Resume' : '❚❚ Pause'}</span>
     <span class="hv" onClick=${() => send('trace_clear')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">Clear</span>
     <span class="hv" onClick=${() => send('trace_save')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤓ Save</span>
-    <!-- red while auto.warn is set: autosave is still on and still
+    <!-- Green while it is on, like every other on/off control here. Red
+         beats green while auto.warn is set: autosave is still on and still
          trying, but nothing is reaching the disk, and that has to be
          visible on an unattended run rather than only in the log. -->
     <span onClick=${() => send('trace_autosave')}
       title=${`Autosave: write every recorded frame to a capture file as it arrives, unfiltered. The trace in memory is a ring buffer, so on a long run the beginning is gone by the time anything is worth looking at. A new file starts on connect. Autosaved captures are kept for 14 days — less if the disk gets tight: the bench keeps 2 GB clear and drops the oldest early. It never switches itself off; if it cannot write it waits, shows why here, and carries on the moment it can. Every removal is in the state log.${auto.file ? `\n\nwriting to ${auto.file}` : ''}`}
-      style="border:1px solid ${auto.warn ? 'var(--red)' : auto.on ? 'var(--acc-bd)' : 'var(--inp)'};background:${auto.warn ? 'var(--red-soft)' : auto.on ? 'var(--acc-soft)' : 'transparent'};color:${auto.warn ? 'var(--red)' : auto.on ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer;white-space:nowrap">${auto.on ? '⏺' : '⭘'} autosave${auto.warn ? ` · ${auto.warn}` : auto.on && auto.file ? ` · ${fmtSize(auto.bytes || 0)}` : ''}</span>
+      style="border:1px solid ${auto.warn ? 'var(--red)' : auto.on ? 'var(--grn)' : 'var(--inp)'};background:${auto.warn ? 'var(--red-soft)' : auto.on ? 'var(--grn)' : 'transparent'};color:${auto.warn ? 'var(--red)' : auto.on ? '#fff' : 'var(--mid)'};font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer;white-space:nowrap">${auto.on ? '⏺' : '⭘'} autosave${auto.warn ? ` · ${auto.warn}` : auto.on && auto.file ? ` · ${fmtSize(auto.bytes || 0)}` : ''}</span>
     ${saved.length > 0 && html`
       <select onChange=${(e) => { if (e.target.value) send('trace_load', { file: e.target.value }); e.target.value = ''; }}
         style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 6px;font:11px ${MONO};outline:none;max-width:240px">
@@ -1813,9 +1831,9 @@ function App() {
           <span class="hv" onClick=${() => setUi({ ...ui, theme: dark ? 'light' : 'dark' })} title="Toggle theme"
             style="width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:6px;cursor:pointer;color:var(--mid);font-size:13px">${dark ? '☀' : '☾'}</span>
           <span style="width:8px;height:8px;border-radius:50%;background:${s.connected ? 'var(--grn)' : 'var(--faint)'}"></span>
-          <span style="font-size:12px;color:var(--mid)">${s.connected ? adapterInfo.conn : 'not connected'}</span>
-          <span class="hv-b" onClick=${() => send('connect_toggle')}
-            style="font-weight:600;font-size:12px;color:${s.connected ? 'var(--acc)' : '#fff'};border:1px solid ${s.connected ? 'var(--acc-bd)' : 'var(--grn)'};padding:5px 14px;border-radius:6px;background:${s.connected ? 'var(--acc-soft)' : 'var(--grn)'};cursor:pointer">${s.connected ? 'Disconnect' : 'Connect'}</span>
+          ${toggle(s.connected, s.connected ? 'Connected' : 'Disconnected', () => send('connect_toggle'),
+            s.connected ? `${adapterInfo.iface} is open — click to close it and release the adapter`
+                        : `${adapterInfo.iface} is closed — click to open it`)}
         </div>
       </div>
 
