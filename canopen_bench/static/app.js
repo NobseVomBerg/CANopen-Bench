@@ -1551,11 +1551,21 @@ function TracePage({ s }) {
     ev.target.value = '';
   };
   return html`
-  <!-- wrap, and every control nowrap: this row is long enough that on a
-       narrow window flex would otherwise shrink each button until its own
-       label broke in two ("⤓" over "Save"). A second row of intact
-       controls reads; a row of two-line stumps does not. -->
-  <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd);display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 18px;white-space:nowrap">
+  <!-- Two bands, split by what the controls are for: the first acts on the
+       record and its capture files, the second says how it is being looked
+       at. In one row they were a dozen unrelated controls in a line, and
+       even on a wide screen the eye had to read all of them to find the
+       one it wanted; on a narrow one flex shrank each button until its own
+       label broke in two ("⤓" over "Save").
+       Not a right-hand column like Objects and Tests have: those carry
+       *content* you work with while the page is open (favorites, the case
+       list). This is momentary controls, and a permanent column would
+       spend 300 px of width — on the widest table in the app, whose
+       OBJECT column is the first thing to lose it — on chips that get
+       touched once a session. Two bands cost one row of frames off a
+       table that scrolls anyway. -->
+  <div style="flex:none;background:var(--panel);border-bottom:1px solid var(--bd)">
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 18px 8px;white-space:nowrap">
     <span onClick=${() => send('trace_toggle')} style="${btn.acc}font-size:11.5px;padding:5px 14px;border-radius:6px;cursor:pointer">${s.trace.paused ? '▶ Resume' : '❚❚ Pause'}</span>
     <span class="hv" onClick=${() => send('trace_clear')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">Clear</span>
     <span class="hv" onClick=${() => send('trace_save')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤓ Save</span>
@@ -1583,6 +1593,11 @@ function TracePage({ s }) {
     <input type="file" id="trace-import-input" accept=".log,.txt,.asc" style="display:none" onChange=${handleImportFile} />
     <span class="hv" onClick=${() => document.getElementById('trace-import-input').click()} title="import a SocketCAN candump -l log file"
       style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">⤒ Import…</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 18px 9px;border-top:1px solid var(--bd2);white-space:nowrap">
+    ${[['trace', 'Trace'], ['stats', 'Stats'], ['plot', 'Plot']].map(([v, label]) => { const on = view === v; return html`
+      <span onClick=${() => setViewMode(v)}
+        style="border:1px solid ${on ? 'var(--acc-bd)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px;cursor:pointer">${label}${v === 'plot' && (s.trace.plot.sel || []).length ? ` (${s.trace.plot.sel.length})` : ''}</span>`; })}
     <span style="width:1px;height:18px;background:var(--bd)"></span>
     <span style="font-size:11px;color:var(--dim);font-weight:600">SHOW</span>
     ${['NMT', 'SDO', 'PDO', 'EMCY', 'HB'].map((f) => { const off = hide.includes(f); return html`
@@ -1593,11 +1608,8 @@ function TracePage({ s }) {
     <span style="width:1px;height:18px;background:var(--bd)"></span>
     <span onClick=${toggleUs} title="Timestamp resolution: milliseconds / microseconds"
       style="border:1px solid ${usTime ? 'var(--acc-bd)' : 'var(--inp)'};background:${usTime ? 'var(--acc-soft)' : 'transparent'};color:${usTime ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px;cursor:pointer">${usTime ? 'µs' : 'ms'}</span>
-    <span style="width:1px;height:18px;background:var(--bd)"></span>
-    ${[['trace', 'Trace'], ['stats', 'Stats'], ['plot', 'Plot']].map(([v, label]) => { const on = view === v; return html`
-      <span onClick=${() => setViewMode(v)}
-        style="border:1px solid ${on ? 'var(--acc-bd)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'};font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px;cursor:pointer">${label}${v === 'plot' && (s.trace.plot.sel || []).length ? ` (${s.trace.plot.sel.length})` : ''}</span>`; })}
     <span style="margin-left:auto;font:11px ${MONO};color:var(--faint)">${s.connected ? `${s.trace.match} / ${s.trace.total} frames` : 'offline'}</span>
+  </div>
   </div>
   ${view === 'stats' && html`<${TraceStats} st=${s.trace.stats} connected=${s.connected} />`}
   ${view === 'plot' && html`<${TracePlot} plot=${s.trace.plot} connected=${s.connected} />`}
