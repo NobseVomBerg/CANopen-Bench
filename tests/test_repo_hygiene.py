@@ -16,6 +16,7 @@ committed headers, since the core ships the parser and never a header.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -122,3 +123,88 @@ def test_the_shape_check_covers_how_headers_are_written(sample):
     not a check.
     """
     assert _SYMBOL.findall(sample), f"the shape check missed {sample!r}"
+
+
+# -- the version identifies one state of the tool ---------------------------
+#
+# `main` is the release (there are no tags), so the version in
+# pyproject.toml is the only thing that says *which* main a bug report is
+# about. CONTRIBUTING requires it to move once per merge that changes the
+# tool. Two people working in parallel break that without either of them
+# doing anything wrong: both branch off 1.0.69, both bump to 1.0.70, both
+# CI runs are green — each sees a version above the main it forked from.
+# The second merge then finds the identical line on both sides, git takes
+# it without a conflict, and two different states ship as 1.0.70.
+#
+# That is why the check below anchors on the merge commit rather than on
+# the branch: the branch really was fine when it was pushed. It is the
+# merge that has to move the number past what main already had.
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(ROOT), *args],
+                          capture_output=True, text=True, check=False)
+
+
+def _version_at(rev: str) -> tuple[int, ...] | None:
+    """The declared version at a revision, as comparable numbers."""
+    out = _git("show", f"{rev}:pyproject.toml")
+    if out.returncode:
+        return None
+    found = re.search(r'(?m)^version\s*=\s*"([^"]+)"', out.stdout)
+    if not found:
+        return None
+    try:
+        return tuple(int(part) for part in found.group(1).split("."))
+    except ValueError:
+        return None
+
+
+def _tool_changed(base: str) -> str:
+    """What changed between `base` and HEAD that the version has to answer
+    for: the package itself, or the parts of pyproject.toml that decide
+    what gets installed. Tests, docs, CI and CLAUDE.md leave the running
+    tool byte-for-byte identical and need no bump (CONTRIBUTING)."""
+    names = _git("diff", "--name-only", base, "HEAD").stdout.split()
+    changed = [n for n in names if n.startswith("canopen_bench/")]
+    if "pyproject.toml" in names:
+        # every changed line except the version itself — a dependency, an
+        # entry point or package data moves what a `pip install` produces
+        body = _git("diff", "-U0", base, "HEAD", "--", "pyproject.toml").stdout
+        edits = [ln for ln in body.splitlines()
+                 if ln[:1] in "+-" and not ln.startswith(("+++", "---"))
+                 and not re.match(r'^[-+]version\s*=', ln)]
+        if edits:
+            changed.append("pyproject.toml")
+    return ", ".join(sorted(changed)[:6])
+
+
+def test_the_version_moves_when_the_tool_does():
+    if _git("rev-parse", "--git-dir").returncode:
+        pytest.skip("not a git checkout")
+    parents = _git("rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
+    if len(parents) >= 3:
+        base, what = parents[1], "the main this was merged into"
+    else:
+        merge_base = _git("merge-base", "HEAD", "origin/main")
+        if merge_base.returncode:
+            # a guard that quietly skips where it matters is not a guard
+            if os.environ.get("CI"):
+                pytest.fail("origin/main is missing — CI needs an unshallow checkout")
+            pytest.skip("no origin/main to compare against")
+        base, what = merge_base.stdout.strip(), "the main this branched from"
+
+    here, there = _version_at("HEAD"), _version_at(base)
+    if here is None or there is None:
+        # a shallow checkout has the parent's hash but not its content
+        if os.environ.get("CI"):
+            pytest.fail(f"cannot read the version at {base[:8]} — CI needs "
+                        f"a checkout with history (fetch-depth: 0)")
+        pytest.skip(f"no readable version at HEAD or {base[:8]}")
+    changed = _tool_changed(base)
+    if not changed:
+        return  # tests, docs or CI only — the running tool is unchanged
+    assert here > there, (
+        f"the tool changed ({changed}) but the version did not move past "
+        f"{'.'.join(map(str, there))}, which is {what} ({base[:8]}). "
+        f"Two states of the tool would answer to the same number — bump "
+        f"pyproject.toml, see CONTRIBUTING.md under Versioning.")
