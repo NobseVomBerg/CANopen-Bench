@@ -1746,16 +1746,27 @@ def test_trace_autosave_segment_loads_back_as_a_capture(connected_bench):
     assert bench._trace_view()[1][("PDO", 1)] == 3
 
 
-def test_trace_autosave_listing_shows_the_open_segment_growing(connected_bench):
+def test_trace_autosave_listing_marks_the_open_segment_instead_of_sizing_it(connected_bench):
+    """The listing fills the capture dropdown, and an entry whose text
+    moves every tick rebuilds that dropdown under the pointer. The open
+    segment is flagged; its live size rides on the chip beside it, where
+    nothing depends on it holding still."""
     bench = connected_bench
     bench.dispatch("trace_autosave", {})
     bench.bus.queue_raw(0x181, b"\x01")
     bench._drain_frames()
 
-    entry = next(f for f in bench.snapshot()["trace"]["saved"] if f["file"] == bench._autosave_name)
-    assert entry["size"] == bench._autosave_bytes  # not the 0 bytes it was created with
+    listed = bench.snapshot()["trace"]["saved"]
+    entry = next(f for f in listed if f["file"] == bench._autosave_name)
+    assert entry["live"] is True
     assert bench.snapshot()["trace"]["auto"] == {
         "on": True, "file": bench._autosave_name, "bytes": bench._autosave_bytes, "warn": ""}
+
+    before = bench.snapshot()["trace"]["saved"]
+    bench.bus.queue_raw(0x182, b"\x02")
+    bench._drain_frames()
+    assert bench.snapshot()["trace"]["saved"] == before  # unchanged, though the file grew
+    assert bench._autosave_bytes > entry.get("size", 0)
 
 
 def test_trace_autosave_rolls_over_at_the_segment_size(connected_bench, monkeypatch):
