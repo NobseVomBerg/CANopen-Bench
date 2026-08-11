@@ -118,8 +118,11 @@ function PsuBox({ psu }) {
         style="${on ? btn.acc : btn.ghost}font-size:11.5px;padding:4px 12px;border-radius:6px;cursor:pointer;flex:none">
         Output ${on === null ? '?' : on ? 'on' : 'off'}</span>
       <span class="hv-white" title="Read the supply — nothing here polls" onClick=${() => send('psu_refresh')} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
+      <label onClick=${() => send('psu_sidebar_toggle')} title="A second, smaller box in the sidebar: the set values, output and a refresh — no port, no serial number, those stay here"
+        style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11.5px;color:var(--dim);flex:none;margin-left:auto">
+        ${Cb(psu.sidebar, 'flex:none;')}Quick access</label>
       <span class="hv" onClick=${() => send('psu_release')} title="Hand the serial port back to the system"
-        style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none;margin-left:auto">Release</span>
+        style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none">Release</span>
     </div>
     ${psu.error && html`<div style="font-size:11px;color:var(--red)">${psu.error}</div>`}
     <div style="display:flex;gap:18px;flex-wrap:wrap">
@@ -145,6 +148,46 @@ function PsuBox({ psu }) {
         </div>`)}
       <span style="font-size:10.5px;color:var(--faint)">measured at the terminals</span>
     </div>`}
+  </div>`;
+}
+
+// The supply in the sidebar, when Setup says so: what a run needs to see
+// without leaving the page it is watching. Set values, not measured ones —
+// the refresh is there for somebody who turned a knob on the instrument and
+// wants the bench to agree, and a knob moves a set value. Everything else
+// about the supply (port, serial, firmware, Release) stays in Setup.
+function psuBox(psu) {
+  const chans = psu.channels || [];
+  const on = psu.output;
+  const val = (v, unit) => html`
+    <div style="display:flex;align-items:baseline;gap:3px">
+      <span style="font:600 13px ${MONO};color:var(--tx)">${v ?? '—'}</span>
+      <span style="font-size:10px;color:var(--dim)">${unit}</span>
+    </div>`;
+  // two channels stand side by side, each with its volts over its amps; a
+  // single channel has the room to put them next to each other instead
+  const channel = (c, i) => html`
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+      ${chans.length > 1 && html`<span style="font:600 9.5px ${MONO};color:var(--faint)">CH ${i + 1}</span>`}
+      <div style="display:flex;${chans.length > 1 ? 'flex-direction:column;gap:3px' : 'align-items:baseline;gap:14px'}">
+        ${val(c.volt, 'V')}${val(c.curr, 'A')}
+      </div>
+    </div>`;
+  return html`
+  <div style="margin:8px 10px 0;background:var(--sb-box);border:1px solid var(--sb-bd);border-radius:8px;overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--sb-bd)">
+      <span style="font-weight:600;color:var(--tx);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${psu.model || psu.name}</span>
+      <span style="display:flex;align-items:center;gap:8px;flex:none">
+        <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
+          title=${`Output is ${on === null || on === undefined ? 'unknown' : on ? 'on' : 'off'} — click to turn it ${on ? 'off' : 'on'}`}
+          style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid ${on ? 'var(--grn)' : 'var(--inp)'};background:${on ? 'var(--grn)' : 'transparent'};color:${on ? '#fff' : 'var(--dim)'}">⏻</span>
+        <span class="hv-white" onClick=${() => send('psu_refresh')} title="Read the supply — nothing here polls"
+          style="color:var(--faint);cursor:pointer">⟳</span>
+      </span>
+    </div>
+    ${psu.error
+      ? html`<div style="padding:8px 10px;font-size:11px;color:var(--red)">${psu.error}</div>`
+      : html`<div style="display:flex;gap:12px;padding:8px 10px">${chans.map(channel)}</div>`}
   </div>`;
 }
 
@@ -283,6 +326,8 @@ function Sidebar({ s, ui, setUi }) {
         </div>`;
       })}
     </div>
+
+    ${s.psu && s.psu.sidebar && psuBox(s.psu)}
 
     <div style="margin:8px 10px;background:var(--sb-box);border:1px solid var(--sb-bd);border-radius:8px;overflow:visible;position:relative">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--sb-bd)">
