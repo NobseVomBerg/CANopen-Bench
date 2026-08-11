@@ -117,8 +117,22 @@ light + dark theme (toggle in the header, persisted per browser):
   frames out of the browser window (`core.TRACE_VIEW`, 400 rows —
   enough scrollback to follow a multi-step sequence like addressing
   end to end). Captures can be saved to and
-  reloaded from `<workspace>/traces/*.json` (loading pauses the trace);
-  the filtered trace (full matching set, not just the browser scrollback)
+  reloaded from `<workspace>/traces/*.json` (loading pauses the trace).
+  Autosave (`core._autosave_write`, off by default, the setting persists)
+  answers what the ring buffer cannot: an hour in, the beginning is gone,
+  and an hour is shorter than the runs where something happens once. With
+  it on, every drained row is appended to `traces/auto_*.jsonl` and
+  flushed — one row per line, because a file being written to cannot be a
+  single JSON object, and a capture cut short by a crash still has to
+  read. What goes in is the *record*, unfiltered: a trace filter is a
+  property of the panel. A segment starts on the first frame after a
+  connect, rolls over at `core.AUTOSAVE_SEGMENT_BYTES`, and the segments
+  together are held to `core.AUTOSAVE_KEEP_BYTES` — oldest first, each
+  removal logged, hand-saved captures never touched. A write error
+  (disk full, read-only) switches autosave off with a log line instead of
+  disturbing the run. Segments are ordinary captures: they appear in the
+  same list and load the same way.
+  The filtered trace (full matching set, not just the browser scrollback)
   can also be exported as CSV or a SocketCAN `candump -l` log
   (`GET /api/trace/export.csv` / `/api/trace/export/candump`, plain
   downloads outside the action/WebSocket flow since they don't mutate

@@ -54,12 +54,18 @@ UI → `Bench.act_connect_toggle` → `CanopenBus.connect`
 5. **[Ist]** Log `BUS  connected — <Adapter> @ <Bitrate> kbit/s`; die
    Tick-Loop (`core.py`) beginnt, `poll_frames()` in den Trace zu
    schieben.
+6. **[Ist]** Ist der Autosave des Trace eingeschaltet (Chip auf der
+   Trace-Seite, Einstellung persistent), beginnt mit dem **ersten Frame**
+   nach dem Verbinden ein neues Segment `traces/auto_*.jsonl` — eine
+   Datei pro Verbindung. Offline entsteht keine: es kommt ja nichts an,
+   und eine leere Datei würde nur verwischen, wo die Lücke liegt.
 
 ## Ablauf: Trennen
 
 1. **[Ist]** `act_connect_toggle` setzt `connected = False`, ruft
    `bus.disconnect()` (→ `network.disconnect()`, Notifier-Thread stoppt,
-   Gerät wird freigegeben), leert die Geräteliste, Log `BUS  disconnected`.
+   Gerät wird freigegeben), leert die Geräteliste, schließt ein offenes
+   Autosave-Segment (`_autosave_close`), Log `BUS  disconnected`.
 2. **[Ist]** Beim Server-Shutdown identisch über `Bench.shutdown`
    (Log `BUS  disconnected — server shutdown`).
 3. **[Ist]** `CanopenBus.disconnect` ist gegen ein totes Interface
