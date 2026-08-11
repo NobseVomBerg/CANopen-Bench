@@ -59,6 +59,13 @@ UI → `Bench.act_connect_toggle` → `CanopenBus.connect`
    nach dem Verbinden ein neues Segment `traces/auto_*.jsonl` — eine
    Datei pro Verbindung. Offline entsteht keine: es kommt ja nichts an,
    und eine leere Datei würde nur verwischen, wo die Lücke liegt.
+   Beim Öffnen wird aufgeräumt: Segmente älter als 14 Tage
+   (`AUTOSAVE_KEEP_DAYS`) fallen weg, und solange weniger als 2 GB frei
+   sind (`AUTOSAVE_FREE_BYTES`) auch jüngere, das älteste zuerst. Reicht
+   das nicht, schaltet sich der Autosave ab, statt die Platte
+   vollzuschreiben — das jüngste Segment und von Hand gespeicherte
+   Captures bleiben in jedem Fall stehen, jede Löschung steht mit Grund
+   im State-Log.
 
 ## Ablauf: Trennen
 

@@ -100,3 +100,6 @@ def test_the_trace_toolbar_offers_autosave():
     assert "s.trace.auto" in app
     assert "auto.on" in app and "auto.file" in app  # chip state and the open segment
     assert "ring buffer" in app                     # the tooltip says why it exists
+    # and what it costs: a feature that quietly eats a disk for two weeks
+    # has to say so where it is switched on, not only in the docs
+    assert "14 days" in app and "2 GB clear" in app
