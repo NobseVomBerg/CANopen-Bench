@@ -1,4 +1,4 @@
-/* CANopen Bench — theme variables + hover states ported from the design prototype. */
+/* CANopen Bench — theme variables (light/dark) + hover states. */
 
 /* IBM Plex, served from this package rather than fetched from Google Fonts.
    Two reasons: a bench PC on a machine network usually has no route to the
@@ -55,7 +55,7 @@ a:hover { color: #1b5eae; }
 @keyframes coSpin { to { transform: rotate(360deg); } }
 @keyframes coPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-/* hover states (the design used style-hover attributes) */
+/* hover states, as classes — an inline style attribute cannot carry :hover */
 .hv:hover        { background: var(--hov) !important; }
 .hv-b:hover      { filter: brightness(1.06); }
 .hv-bd:hover     { border-color: var(--acc) !important; }
