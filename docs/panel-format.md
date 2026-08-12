@@ -63,6 +63,17 @@ general-purpose one rather than competing with it.
 | `fields` | required | The values in the box |
 | `cols` | optional | 1…4 columns inside the box (default 1) |
 | `collapsed` | optional | How the box opens the first time. What the operator folds afterwards outranks it, per workspace |
+| `when` | optional | `{obj: <address>, bit: N}` or `{obj: <address>, value: N}` — the box exists only where that holds |
+
+`when` and `collapsed` answer different questions. Folding says "not
+interested right now" and belongs to the operator; `when` says "this
+machine does not have that part" and belongs to the device — a backwinder
+the device does not carry has no box, rather than an empty one to open.
+
+Unknown counts as yes: a condition may take a box away once the device has
+answered, never keep one hidden before anything was asked — the object
+that would settle it usually sits behind the box it is hiding. A page-wide
+read asks for the condition objects too, so one Read settles them.
 
 ## Field
 
@@ -129,10 +140,28 @@ Writing works like the object table's: typing stages the value, `Write`
 sends it. A field that sent on every keystroke would be the wrong default
 for tensions and motor currents.
 
+## Where the values come from
+
+A box is filled by asking, and by listening. The trace already decodes
+every SDO answer and unpacks every mapped PDO signal, so a field whose
+object appears there follows along without a frame of its own — a test
+case reading a register next door, a device publishing its TPDO. That is
+the only kind of "live" here; the other kind is polling, and there is
+none.
+
+The newer of the two wins, which orders them correctly by itself: a value
+just typed is newer than a PDO from before it, so typing is never
+overwritten; a PDO from a second ago is newer than a read from ten
+minutes back, so the box follows the device. Every value carries where it
+came from and how old it is — fresh numbers are printed at full strength
+and fade as they age, and the tooltip says it in words. A number a PDO
+carried past three minutes ago must not look like a reading taken just
+now.
+
 ## What a panel does not do
 
-There is deliberately no way to write display logic into a file:
-conditions, enums, flag checkboxes and device test functions are not part
-of the format yet, and arbitrary markup never will be. A picture — a
-front-panel mirror, LEDs, buttons — is a different hook that already
-exists (`device_panels()`); this one is for values.
+There is deliberately no way to write display logic into a file, and
+arbitrary markup never will be. A device's own test functions are not in
+the format yet. A picture — a front-panel mirror, LEDs, buttons — is a
+different hook that already exists (`device_panels()`); this one is for
+values.
