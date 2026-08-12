@@ -44,7 +44,8 @@ from pathlib import Path
 import yaml
 
 #: what a field may say — anything else is a typo, and typos are loud here
-_FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw"}
+_FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit"}
+_WIDGETS = {"number", "enum", "flag"}
 _GROUP_KEYS = {"title", "fields", "cols", "collapsed"}
 _PANEL_KEYS = {"name", "match", "groups"}
 _MATCH_KEYS = {"eds", "name"}
@@ -95,6 +96,14 @@ class PanelField:
     scale: float = 1.0
     digits: int = 0
     rw: bool = False
+    #: how it is shown and written. ``number`` is the default; ``enum``
+    #: takes its choices from the symbol table a plugin declared for this
+    #: object (``BenchPlugin.object_fields``), so the names come from the
+    #: firmware's own headers rather than from a list kept in step by
+    #: hand; ``flag`` is one bit of a word as a checkbox, and says which
+    #: bit itself — a status word does not need a table to have bit 3.
+    widget: str = "number"
+    bit: int | None = None
 
     @property
     def key(self) -> str:
@@ -181,6 +190,23 @@ def _fields(raw, where: str) -> list[PanelField]:
             raise PanelError(f"{at}: scale must be a number") from None
         if scale == 0:
             raise PanelError(f"{at}: scale must not be zero")
+        widget = str(item.get("widget", "number"))
+        if widget not in _WIDGETS:
+            raise PanelError(f"{at}: unknown widget {widget!r} "
+                             f"(one of {', '.join(sorted(_WIDGETS))})")
+        bit = item.get("bit")
+        if widget == "flag":
+            if bit is None:
+                raise PanelError(f"{at}: a flag needs the bit it stands for")
+            if not isinstance(bit, int) or not 0 <= bit <= 31:
+                raise PanelError(f"{at}: bit must be 0…31")
+        elif bit is not None:
+            raise PanelError(f"{at}: bit belongs to a flag, not to a {widget}")
+        # a scale on a name or a bit would have to mean something, and there
+        # is nothing it could mean
+        if widget != "number" and (scale != 1.0 or "digits" in item or item.get("unit")):
+            raise PanelError(f"{at}: scale, digits and unit belong to a number, "
+                             f"not to a {widget}")
         out.append(PanelField(
             label=str(item.get("label") or f"{idx}:{sub}"),
             idx=idx, sub=sub,
@@ -188,6 +214,8 @@ def _fields(raw, where: str) -> list[PanelField]:
             scale=scale,
             digits=int(item.get("digits", _digits_for(scale))),
             rw=bool(item.get("rw", False)),
+            widget=widget,
+            bit=bit if widget == "flag" else None,
         ))
     return out
 

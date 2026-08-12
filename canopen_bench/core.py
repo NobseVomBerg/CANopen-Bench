@@ -3189,24 +3189,74 @@ class Bench:
 
     # -- object panels (a device's values as named boxes) ---------------------
     def _panel(self):
-        """The panel for the selected device, or None. First match wins —
-        plugin panels are ahead of the core's own (see ``_obj_panels``)."""
+        """The panel for the selected device, or None.
+
+        A panel that names the devices it is for beats one that takes
+        every device: the core ships a general-purpose panel of the
+        objects CiA 301 makes mandatory, so the view is never an empty
+        promise, and a vendor panel has to be able to replace it rather
+        than queue behind it. Among equals the first wins, and plugin
+        panels are asked before the core's own (see ``_obj_panels``).
+        """
         sel = self.sel_devices
         if not sel:
             return None
-        return next((p for p in self._obj_panels if p.matches(sel[0])), None)
+        fits = [p for p in self._obj_panels if p.matches(sel[0])]
+        return next((p for p in fits if p.match), None) or (fits[0] if fits else None)
 
     def _panel_open(self, panel, group) -> bool:
         """Whether a box is unfolded. The spec says how it opens the first
         time; what the operator folded away afterwards outranks it."""
         return self.panel_open.get(f"{panel.name}/{group.title}", not group.collapsed)
 
-    def _panel_field(self, idx: str, sub: str):
+    def _panel_field(self, idx: str, sub: str, bit=None, flag: bool = False):
+        """The field a click came from.
+
+        Address alone does not name one: a status word is exactly the case
+        where several fields sit on the same object — a mode lane and the
+        flags beside it — so what kind of control it was, and which bit,
+        decide between them.
+        """
         panel = self._panel()
         if panel is None:
             return None
         key = f"{idx}:{sub}"
-        return next((f for g in panel.groups for f in g.fields if f.key == key), None)
+        want = [f for g in panel.groups for f in g.fields if f.key == key]
+        if flag:
+            return next((f for f in want if f.widget == "flag"
+                         and (bit is None or f.bit == int(bit))), None)
+        return next((f for f in want if f.widget != "flag"), None)
+
+    def _panel_enum(self, key: str):
+        """The symbol table behind an enum field: the first non-flag field
+        a plugin declared for this object (``object_fields``), or None.
+
+        The names come from the device's own headers that way, so a panel
+        says ``widget: enum`` and gets whatever the firmware calls those
+        values — a list written into the panel file instead would be a
+        second copy to keep in step with the first.
+        """
+        return next((f for f in self._object_fields.get(key, []) if not f.flags), None)
+
+    def _panel_field_view(self, f, raw: str | None) -> dict:
+        out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
+               "rw": f.rw, "widget": f.widget, "val": f.show(raw)}
+        value = _typed_number(raw or "") or 0
+        if f.widget == "flag":
+            out["on"] = bool(value >> f.bit & 1)
+            out["bit"] = f.bit
+        elif f.widget == "enum":
+            field = self._panel_enum(f.key)
+            table = self.symbols.tables.get(field.table, {}) if field else {}
+            shift = field.resolved_shift(self.symbols) if field else 0
+            out["options"] = [[str(sym.value), sym.name] for sym in table.values()]
+            out["val"] = str(field.extract(value, self.symbols)) if field else out["val"]
+            # a value no symbol names is still a fact about the device, so
+            # it is shown rather than snapped to the nearest name
+            if out["val"] not in {o[0] for o in out["options"]}:
+                out["options"] = [*out["options"], [out["val"], f"?0x{int(out['val']):X}"]]
+            out["shift"] = shift
+        return out
 
     def _panel_view(self) -> dict | None:
         """The panel as the browser draws it: values already formatted,
@@ -3223,8 +3273,7 @@ class Bench:
                 "title": g.title,
                 "cols": g.cols,
                 "open": self._panel_open(panel, g),
-                "fields": [{"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
-                            "rw": f.rw, "val": f.show(vals.get(f.key))} for f in g.fields],
+                "fields": [self._panel_field_view(f, vals.get(f.key)) for f in g.fields],
             } for g in panel.groups],
         }
 
@@ -3252,7 +3301,11 @@ class Bench:
         which knows hex, binary and symbol names — none of which a scaled
         physical quantity has any use for.
         """
-        fld = self._panel_field(p.get("idx", ""), p.get("sub", ""))
+        fld = self._panel_field(p.get("idx", ""), p.get("sub", ""), p.get("bit"),
+                                flag="on" in p)
+        if fld is not None and fld.widget in ("enum", "flag"):
+            self._panel_stage_part(fld, p)
+            return
         if fld is None or fld.scale == 1.0:
             self.act_obj_set(p)
             return
@@ -3268,6 +3321,40 @@ class Bench:
             return
         width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
         self.obj_vals[key] = f"0x{raw:0{width}X}"
+
+    def _panel_stage_part(self, fld, p: dict) -> None:
+        """Stage a change that touches only part of an object's value: one
+        bit for a flag, one masked lane for an enum.
+
+        Read-modify-write against the value last read, because the rest of
+        that word belongs to somebody else. A checkbox that wrote a lone
+        1 would clear every other flag in the register, which is the kind
+        of help nobody asks for twice — so a part that was never read
+        refuses rather than guesses.
+        """
+        key = fld.key
+        known = self.obj_vals.get(key, "")
+        current = _typed_number(known)
+        if current is None:
+            self.log(f"OBJ  {key} — read it before writing part of it "
+                     f"({'bit' if fld.widget == 'flag' else 'field'} "
+                     f"{fld.label}): the other bits of that value are unknown", "emcy0")
+            return
+        if fld.widget == "flag":
+            bit = 1 << fld.bit
+            value = current | bit if p.get("on") else current & ~bit
+        else:
+            field = self._panel_enum(key)
+            if field is None:
+                return
+            shift = field.resolved_shift(self.symbols)
+            try:
+                chosen = int(str(p.get("val", "")), 0)
+            except ValueError:
+                return
+            value = (current & ~field.mask) | (chosen << shift & field.mask)
+        width = len(known.removeprefix("0x")) or 2
+        self.obj_vals[key] = f"0x{value:0{width}X}"
 
     def act_panel_read(self, p: dict) -> None:
         """Read one box (``group``) or every box that is open.

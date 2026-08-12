@@ -144,13 +144,33 @@ def test_the_panel_reaches_the_page_for_the_device_it_matches(tmp_path):
     assert [g["open"] for g in panel["groups"]] == [True, False]  # collapsed: true
     assert panel["groups"][0]["fields"][0] == {
         "idx": "0x2040", "sub": "01", "label": "Working", "unit": "cN",
-        "rw": True, "val": "",
+        "rw": True, "widget": "number", "val": "",
     }
 
 
-def test_a_device_the_panel_does_not_match_falls_back_to_the_table(tmp_path):
+def test_a_device_no_plugin_describes_still_gets_the_standard_objects(tmp_path):
+    """The core ships one panel for every device — the objects CiA 301
+    makes mandatory. Without it the view is invisible until somebody
+    writes a file, and "no panel for this device" looks exactly like "the
+    update did not install"."""
     bench = _bench_with_panel(tmp_path, SAMPLE.replace("dut_alpha*", "nothing*"))
     bench.dispatch("obj_view", {"view": "panel"})
+    objects = bench.snapshot()["objects"]
+    assert objects["hasPanel"] is True
+    assert objects["panel"]["name"] == "Standard objects"
+
+
+def test_a_panel_that_names_its_devices_beats_the_general_one(tmp_path):
+    """Both match, and the specific one has to win — otherwise a vendor
+    panel would queue behind the core's own instead of replacing it."""
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    assert bench.snapshot()["objects"]["panel"]["name"] == "Sample Feeder"
+
+
+def test_no_device_selected_leaves_the_panel_out(tmp_path):
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("dev_toggle", {"node": 1})      # deselected again
     objects = bench.snapshot()["objects"]
     assert objects["hasPanel"] is False and objects["panel"] is None
 
@@ -206,3 +226,120 @@ def test_a_box_read_asks_only_for_what_is_showing(tmp_path):
 
     asyncio.run(go({"group": "Identity"}))    # asked for by name: read anyway
     assert asked == [("0x1018", "00")]
+
+
+# -- what the device calls its own values -----------------------------------
+
+WIDGETS = """
+name: Widget Sample
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Modes
+    fields:
+      - {label: Mode,   obj: "0x2040:01", widget: enum, rw: true}
+      - {label: Locked, obj: "0x2040:01", widget: flag, bit: 4, rw: true}
+"""
+
+
+class _FieldPlugin(BenchPlugin):
+    """A plugin that says how one object reads, the way a vendor's does:
+    a lane of the word is an enum out of the firmware's own header."""
+
+    name = "fieldy"
+
+    def __init__(self, file):
+        self._file = file
+
+    def object_panels(self):
+        return [self._file]
+
+    def object_fields(self, symbols):
+        from canopen_bench.values import Field
+        return {"0x2040:01": [Field(table="eMode", mask=0x0F)]}
+
+
+def _bench_with_widgets(tmp_path) -> Bench:
+    file = tmp_path / "widgets.panel.yaml"
+    file.write_text(WIDGETS, encoding="utf-8")
+    bench = Bench(Db(tmp_path / "test.db"), plugins=[_FieldPlugin(file)])
+    # one directory per origin, which is how the workspace keeps two
+    # vendors' identically named tables apart
+    (bench.symbols_dir / "fieldy").mkdir(parents=True, exist_ok=True)
+    (bench.symbols_dir / "fieldy" / "modes.h").write_text(
+        "typedef enum eMode { eMode_Off = 0, eMode_Run = 2 } eMode;\n", encoding="utf-8")
+    bench.dispatch("symbols_reload", {})
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_view", {"view": "panel"})
+    return bench
+
+
+def _fields(bench) -> list[dict]:
+    return bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
+
+
+def test_an_enum_offers_the_names_the_firmware_uses(tmp_path):
+    """The choices come from the device's own headers via object_fields —
+    a list written into the panel file would be a second copy of the same
+    table, kept in step by hand."""
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x12"          # lane 0x0F = 2 = eMode_Run
+    mode = _fields(bench)[0]
+    assert mode["widget"] == "enum"
+    assert ["0", "eMode_Off"] in mode["options"] and ["2", "eMode_Run"] in mode["options"]
+    assert mode["val"] == "2"
+
+
+def test_a_value_no_symbol_names_is_shown_rather_than_snapped_to_one(tmp_path):
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x07"          # lane = 7, named by nothing
+    mode = _fields(bench)[0]
+    assert mode["val"] == "7"
+    assert ["7", "?0x7"] in mode["options"]
+
+
+def test_picking_a_name_keeps_the_bits_it_does_not_own(tmp_path):
+    """The lane is four bits of a byte. Staging the choice alone would
+    clear the rest of the word — including the flag right next to it."""
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x12"          # bit 4 set, mode 2
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "0"})
+    assert bench.obj_vals["0x2040:01"] == "0x10"  # mode cleared, bit 4 untouched
+
+
+def test_a_flag_is_one_bit_and_leaves_the_others_alone(tmp_path):
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x02"
+    assert _fields(bench)[1]["on"] is False
+
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 4, "on": True})
+    assert bench.obj_vals["0x2040:01"] == "0x12"  # bit 4 set, mode 2 still there
+    assert _fields(bench)[1]["on"] is True
+
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 4, "on": False})
+    assert bench.obj_vals["0x2040:01"] == "0x02"
+
+
+def test_part_of_a_value_nobody_has_read_is_refused_not_guessed(tmp_path):
+    """Writing one bit means writing the whole word. With the other bits
+    unknown, the honest answer is to say so — a checkbox that assumed
+    zeros would clear every flag beside it."""
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals.pop("0x2040:01", None)
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 4, "on": True})
+    assert "0x2040:01" not in bench.obj_vals
+    assert "read it before writing part of it" in bench.logs[-1]["msg"]
+
+
+@pytest.mark.parametrize("text, complaint", [
+    ("groups: [{title: A, fields: [{obj: '0x2000', widget: dial}]}]", "unknown widget"),
+    ("groups: [{title: A, fields: [{obj: '0x2000', widget: flag}]}]", "needs the bit"),
+    ("groups: [{title: A, fields: [{obj: '0x2000', widget: flag, bit: 44}]}]", "0…31"),
+    ("groups: [{title: A, fields: [{obj: '0x2000', bit: 3}]}]", "belongs to a flag"),
+    ("groups: [{title: A, fields: [{obj: '0x2000', widget: enum, unit: mA}]}]", "belong to a number"),
+])
+def test_a_widget_that_cannot_mean_what_it_says_is_an_error(text, complaint):
+    with pytest.raises(PanelError) as caught:
+        parse_panel(text, "broken.panel.yaml")
+    assert complaint in str(caught.value)
