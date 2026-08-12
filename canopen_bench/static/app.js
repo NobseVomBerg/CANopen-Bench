@@ -1601,13 +1601,24 @@ function TraceStats({ st, connected }) {
 const ROW_H = 21;
 const OVERSCAN = 8;   // rows drawn beyond the viewport, so a flick doesn't show gaps
 
-// The trace table: newest at the top, and only what is on screen in the DOM.
+// The trace table: newest at the top by default, and only what is on
+// screen in the DOM.
 //
 // Newest first because this is a live record. Reading downwards used to
 // mean the interesting end was off the bottom and ran further away with
 // every frame; the operator's job was to keep scrolling. Upside down, the
 // newest frame is where the eye already is, and scrolling down is going
 // back in time — which is what "rewind" means anyway.
+//
+// Oldest first is still a click away in the TIME header, because reading
+// a sequence is the other half of the job: a handshake, a boot-up, a test
+// case's own frames read forwards, the way they happened. Neither order
+// is the right one for both, so the column says which one is on.
+//
+// Only the direction of the *view* turns over. The record underneath is
+// one order — oldest first, the way it was recorded — and every index
+// here is converted into that order before anything is fetched or sliced.
+// Two orders in the data would be two records to keep straight.
 //
 // Only the visible rows exist: an hour of bus is 200k of them and no
 // browser lays that out. The scrollbar is a spacer of the full height and
@@ -1624,13 +1635,20 @@ const OVERSCAN = 8;   // rows drawn beyond the viewport, so a flick doesn't show
 function TraceTable({ s, cols, fmtTime }) {
   const box = useRef(null);
   const head = useRef(null);
-  const [first, setFirst] = useState(0);   // index of the top drawn row, 0 = newest
+  const [first, setFirst] = useState(0);   // index of the top drawn row, in view order
   const [view, setView] = useState(600);   // viewport height in px
   const [page, setPage] = useState({ end: -1, rows: [] });
+  const [asc, setAsc] = useState(localStorage.getItem('cb-trace-asc') === '1');
   const total = s.trace.match;
   // the snapshot sends rows oldest-first, the order everything server-side
   // works in; the panel is the only place that wants them the other way
   const live = useMemo(() => (s.trace.rows || []).slice().reverse(), [s.trace.rows]);
+  // parked at the live end? Oldest first puts that end at the bottom, and
+  // an operator sitting there is watching the bus rather than reading a
+  // page of it — the view has to keep up on its own. Read off the scroll
+  // position as it happens, because by the time rows have arrived the
+  // element is already taller and the question cannot be asked any more.
+  const atEnd = useRef(true);
 
   const measure = () => {
     const el = box.current;
@@ -1638,6 +1656,19 @@ function TraceTable({ s, cols, fmtTime }) {
     setView(el.clientHeight);
     const headH = head.current ? head.current.offsetHeight : 0;
     setFirst(Math.max(0, Math.floor((el.scrollTop - headH) / ROW_H)));
+    atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < ROW_H;
+  };
+
+  // Flipping the order lands on the live end either way — top when the
+  // newest row is the first one, bottom when it is the last. Anything else
+  // drops the operator into whatever frames happen to sit at that scroll
+  // offset, which after a flip is the opposite end of the record.
+  const flip = () => {
+    const next = !asc;
+    setAsc(next);
+    localStorage.setItem('cb-trace-asc', next ? '1' : '0');
+    const el = box.current;
+    if (el) el.scrollTop = next ? el.scrollHeight : 0;
   };
   useEffect(() => {
     const el = box.current;
@@ -1647,29 +1678,41 @@ function TraceTable({ s, cols, fmtTime }) {
     return () => ro.disconnect();
   }, []);
 
-  // Frames arriving push the whole list down by one row each. Left alone
-  // that walks whatever is being read off the bottom of the screen, so the
+  // Frames arriving push the whole list down by one row each — newest
+  // first, where they land above everything already drawn. Left alone that
+  // walks whatever is being read off the bottom of the screen, so the
   // scroll position follows by the same amount and the frames under the
   // eye stay put. Only away from the live end: at the top there is nothing
   // to hold still, and the new rows are the point.
+  //
+  // Oldest first they land at the bottom instead and move nothing, so
+  // there is nothing to correct — except for an operator parked at that
+  // end, who has to be carried along or the live view stops being live.
   const prevTotal = useRef(total);
   useLayoutEffect(() => {
     const el = box.current;
     const grew = total - prevTotal.current;
     prevTotal.current = total;
-    if (el && grew > 0 && el.scrollTop > 0) el.scrollTop += grew * ROW_H;
-  }, [total]);
+    if (!el || grew <= 0) return;
+    if (asc) { if (atEnd.current) el.scrollTop = el.scrollHeight; }
+    else if (el.scrollTop > 0) el.scrollTop += grew * ROW_H;
+  }, [total, asc]);
 
   const count = Math.min(total, Math.ceil(view / ROW_H) + OVERSCAN);
   // the source can shrink under a scroll position — a capture closed, the
   // trace cleared — and the browser only corrects scrollTop on its own next
   // frame, so the index is clamped here rather than trusted
   const start = Math.min(first, Math.max(0, total - count));
-  const covered = start + count <= live.length;   // still inside the snapshot's window
+  // the same window counted the way the record is stored: rows back from
+  // the newest one. Reading down the screen is going forwards in time or
+  // backwards depending on the option, but "how far from the live end"
+  // means one thing, and it is the only thing asked of the server.
+  const age = asc ? Math.max(0, total - start - count) : start;
+  const covered = age + count <= live.length;   // still inside the snapshot's window
 
   useEffect(() => {
     if (covered) return;
-    const end = Math.max(0, start - OVERSCAN);
+    const end = Math.max(0, age - OVERSCAN);
     const n = Math.min(2000, count + 2 * OVERSCAN);
     let alive = true;
     fetch(`/api/trace/rows?end=${end}&n=${n}`)
@@ -1677,19 +1720,24 @@ function TraceTable({ s, cols, fmtTime }) {
       .then((d) => { if (alive) setPage(d); })
       .catch(() => {});   // a dropped request just leaves the last window up
     return () => { alive = false; };
-  }, [covered, start, count, total, s.trace.loaded]);
+  }, [covered, age, count, total, s.trace.loaded]);
 
   // A page that does not reach the current position draws nothing until the
   // next one lands. Twenty milliseconds of blank is a gap the eye reads as
   // loading; rows from the wrong offset are timestamps that quietly lie.
-  const off = start - page.end;
-  const rows = covered ? live.slice(start, start + count)
+  const off = age - page.end;
+  const window_ = covered ? live.slice(age, age + count)
     : off >= 0 ? page.rows.slice(off, off + count) : [];
+  const rows = asc ? window_.slice().reverse() : window_;
 
   return html`
   <div ref=${box} onScroll=${measure} style="flex:1;min-height:0;overflow:auto;background:var(--panel2)">
     <div ref=${head} style="display:grid;grid-template-columns:${cols};padding:6px 0 6px 18px;border-bottom:1px solid var(--bd);font:600 10px ${MONO};color:var(--faint);letter-spacing:.08em;position:sticky;top:0;z-index:1;background:var(--panel)">
-      <span>TIME</span><span>DIR</span><span>COB-ID</span><span>LEN</span><span>DATA</span><span>DECODED</span><span>OBJECT</span><span>DEC</span>
+      <span class="hv-acc" onClick=${flip} style="cursor:pointer;width:fit-content"
+        title=${asc ? 'Oldest first — the frames in the order they happened. Click for newest first.'
+                    : 'Newest first — the live end at the top. Click for oldest first.'}
+        >TIME <span style="color:var(--acc)">${asc ? '↑' : '↓'}</span></span
+      ><span>DIR</span><span>COB-ID</span><span>LEN</span><span>DATA</span><span>DECODED</span><span>OBJECT</span><span>DEC</span>
     </div>
     <div style="height:${total * ROW_H}px;position:relative">
       <div style="position:absolute;left:0;right:0;top:${start * ROW_H}px">
