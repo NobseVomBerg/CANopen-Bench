@@ -118,6 +118,28 @@ def test_the_trace_toolbar_offers_autosave():
     assert "auto.warn" in app and "never switches itself off" in app
 
 
+def test_the_trace_asks_the_server_by_age_whichever_way_it_reads():
+    """The table can read newest first or oldest first, but the record it
+    reads is stored one way — oldest first — and the server counts a window
+    back from the newest row. So the row index under the scrollbar is not
+    the index to ask with: reading downwards, row 0 is the newest frame in
+    one direction and the oldest in the other.
+
+    `age` is that conversion, and it has to be what reaches the fetch and
+    the slice. Hand either of them the scroll index instead and newest-first
+    still looks perfect — the two are equal there — while oldest-first shows
+    the frames from the wrong end of the record with entirely plausible
+    timestamps on them. Nothing about that looks like a bug.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "cb-trace-asc" in app, "the direction is not remembered between visits"
+    assert "const age = asc ?" in app, "no conversion from scroll index to age"
+    assert "trace/rows?end=${end}" in app and "Math.max(0, age - OVERSCAN)" in app, \
+        "the fetch does not go through age"
+    assert "live.slice(age, age + count)" in app, "the snapshot slice does not"
+    assert "live.slice(start" not in app, "a slice still uses the scroll index"
+
+
 def test_the_run_box_keeps_its_height_whatever_the_step_line_says():
     """The step line under the progress bar updates several times a second
     and its text is a test case's own prose, so it wrapped to two lines on
