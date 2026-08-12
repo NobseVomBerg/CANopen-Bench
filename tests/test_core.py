@@ -4485,18 +4485,20 @@ def test_a_channel_belongs_to_its_adapter(tmp_path):
     assert bench.channel_for("vector") == ""
 
 
-def test_the_channel_is_typed_the_way_the_backend_counts(tmp_path):
-    """IXXAT and Vector count channels with integers, PCAN names them.
-    A string where a driver wants an int fails inside the driver with a
-    message about neither, so the value is typed after the default."""
-    from canopen_bench.bus.canopen_bus import _channel_arg
+def test_the_channel_is_addressed_the_way_the_backend_understands(tmp_path):
+    """Two honest forms: a device identity that survives re-enumeration,
+    and a plain channel typed after the backend's default — IXXAT and
+    Vector count with integers, PCAN names them, and a string where an int
+    belongs fails inside the driver with a message about neither."""
+    from canopen_bench.bus.canopen_bus import _channel_kwargs
 
-    assert _channel_arg("1", 0) == 1              # int default: a number
-    assert _channel_arg("0x2", 0) == 2
-    assert _channel_arg("PCAN_USBBUS2", "PCAN_USBBUS1") == "PCAN_USBBUS2"
-    assert _channel_arg("", 0) == 0               # empty: the default
-    assert _channel_arg(None, 0) == 0
-    assert _channel_arg("nonsense", 0) == 0       # not a number where one is needed
+    assert _channel_kwargs("569359:1", 0) == {"serial": 569359, "channel": 1}
+    assert _channel_kwargs("1", 0) == {"channel": 1}
+    assert _channel_kwargs("0x2", 0) == {"channel": 2}
+    assert _channel_kwargs("PCAN_USBBUS2", "PCAN_USBBUS1") == {"channel": "PCAN_USBBUS2"}
+    assert _channel_kwargs("", 0) == {}           # empty: the backend's default
+    assert _channel_kwargs(None, 0) == {}
+    assert _channel_kwargs("nonsense", 0) == {}   # not a number where one is needed
 
 
 def test_what_the_driver_reports_is_offered_as_it_is_labelled(tmp_path):
@@ -4518,10 +4520,14 @@ def test_what_the_driver_reports_is_offered_as_it_is_labelled(tmp_path):
     finally:
         cbmod.can.detect_available_configs = real
 
-    assert found[0]["value"] == "1"          # the global index, not hw_channel
+    # serial + port, not the global index: that index is a position in the
+    # driver's enumeration, and a VN1630A that was 0 and 1 came back as 7
+    # and 8 after a power cycle
+    assert found[0]["value"] == "569359:1"
+    assert found[0]["open"] == {"serial": 569359, "channel": 1}
     assert "VN1630A Channel 2" in found[0]["label"] and "port 2" in found[0]["label"]
     assert "SN 569359" in found[0]["label"]
-    assert found[1]["value"] == "5" and "Virtual" in found[1]["label"]
+    assert found[1]["value"] == "100:0" and "Virtual" in found[1]["label"]
 
 
 def test_a_driver_that_cannot_enumerate_costs_nothing(tmp_path):
@@ -4540,3 +4546,27 @@ def test_a_driver_that_cannot_enumerate_costs_nothing(tmp_path):
     finally:
         cbmod.can.detect_available_configs = real
     assert bus.channels("nosuchadapter") == []
+
+
+def test_a_device_identity_outlives_the_drivers_numbering(tmp_path):
+    """The reason the stored form is serial + port: the same VN1630A was
+    global index 0 and 1 one afternoon and 7 and 8 after a power cycle, so
+    a setting stored as a position points at whatever is in that position
+    next time — the same silent wrong-channel failure, one level up."""
+    opened: list[dict] = []
+
+    class RecordingBus(CanopenBus):
+        def connect(self, adapter: str, bitrate: int, channel=None) -> None:
+            from canopen_bench.bus.canopen_bus import _channel_kwargs
+            opened.append(_channel_kwargs(channel, 0))
+            self.adapter, self.bitrate = adapter, bitrate
+            self.channel, self.serial = 1, 569359
+
+    bench = Bench(Db(tmp_path / "test.db"), bus=RecordingBus())
+    bench.dispatch("set_adapter", {"adapter": "vector"})
+    bench.dispatch("set_channel", {"channel": "569359:1"})
+    bench.dispatch("connect_toggle", {})
+
+    assert opened == [{"serial": 569359, "channel": 1}]
+    # and the log says which device it landed on, in the terms on the housing
+    assert any("port 2" in ln["msg"] and "SN 569359" in ln["msg"] for ln in bench.logs)
