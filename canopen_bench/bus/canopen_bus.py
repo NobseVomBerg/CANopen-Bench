@@ -195,6 +195,8 @@ class CanopenBus(BusInterface):
         self._ts_offset: float | None = None  # relative driver clock → epoch, per connection
         self._ts_win_min: float | None = None  # smallest gap in the window running now
         self._ts_win_start = 0.0
+        self._ts_bias = 0.0  # what causality had to add on top of the estimate
+        self._sdo_sent: dict[int, float] = {}  # node-id → host time of our last SDO request
         self.adapter = ""
         self.bitrate = 500
         self._detach_lock = threading.Lock()  # one winner detaches the network
@@ -221,6 +223,8 @@ class CanopenBus(BusInterface):
         self.adapter = adapter
         self.bitrate = bitrate
         self._ts_offset = self._ts_win_min = None
+        self._ts_bias = 0.0
+        self._sdo_sent.clear()
 
     def _install_listeners(self, network: canopen.Network) -> None:
         """All listener wiring, before ``network.connect()`` starts the
@@ -471,46 +475,15 @@ class CanopenBus(BusInterface):
                 direction, msg, arrival = trace.queue.popleft()
             except IndexError:
                 break
-            # Driver timestamps are epoch-based only for some backends —
-            # IXXAT/PCAN/CPC deliver time since adapter or driver start, which
-            # fromtimestamp() would render as a bogus 1970-relative clock.
-            # Relative clocks are mapped onto wall time by an offset, so
-            # inter-frame deltas keep the hardware's µs precision instead of
-            # the Notifier's scheduling jitter.
-            #
-            # The offset is the *smallest* gap seen between a frame's hardware
-            # stamp and our reading it: that gap is the offset plus however
-            # long the frame waited for our thread, so the smallest one is the
-            # closest we get to the offset by itself. Anchoring on the first
-            # frame instead baked that frame's wait into every frame after it,
-            # and the first frame is the worst one to ask — the adapter's FIFO
-            # can already hold traffic when we connect. A tenth of a second of
-            # wait there put every RX in the trace that far behind the TX it
-            # answered, which reads as a tool sending faster than it can be
-            # answered.
-            #
-            # Smallest *within a window* (_TS_WINDOW_S), not smallest ever: the
-            # two clocks drift apart, always in the same direction, and a
-            # minimum kept for the whole session can only follow that drift
-            # downwards. Re-anchored outright on a large jump — adapter reset,
-            # or a PC clock that stepped.
-            ts = msg.timestamp
-            if not ts:
-                ts = arrival
-            elif abs(ts - arrival) > 300:
-                gap = arrival - ts
-                if self._ts_offset is None or abs(gap - self._ts_offset) > 0.5:
-                    self._ts_offset = self._ts_win_min = gap
-                    self._ts_win_start = arrival
-                elif gap < self._ts_offset:
-                    self._ts_offset = self._ts_win_min = gap   # better sample, at once
-                else:
-                    self._ts_win_min = gap if self._ts_win_min is None \
-                        else min(self._ts_win_min, gap)
-                    if arrival - self._ts_win_start >= _TS_WINDOW_S:
-                        self._ts_offset, self._ts_win_min = self._ts_win_min, None
-                        self._ts_win_start = arrival
-                ts += self._ts_offset
+            if direction == "TX":
+                # Our own frame, stamped as it went out: the host clock
+                # itself, and — for a request — the ruler every answer below
+                # is held against.
+                ts = msg.timestamp or arrival
+                if msg.arbitration_id & 0x780 == 0x600:
+                    self._sdo_sent[msg.arbitration_id & 0x7F] = ts
+            else:
+                ts = self._rx_time(msg, arrival)
             out.append(Frame(
                 direction=direction,
                 cob_id=f"0x{msg.arbitration_id:03X}",
@@ -521,6 +494,77 @@ class CanopenBus(BusInterface):
                 time=datetime.fromtimestamp(ts).strftime("%H:%M:%S.%f"),
             ))
         return out
+
+    def _rx_time(self, msg: can.Message, arrival: float) -> float:
+        """Wall-clock time for a received frame, from the hardware stamp.
+
+        Driver timestamps are epoch-based only for some backends —
+        IXXAT/PCAN/CPC deliver time since adapter or driver start, which
+        ``fromtimestamp()`` would render as a bogus 1970-relative clock.
+        Relative clocks are mapped onto wall time by an offset, so
+        inter-frame deltas keep the hardware's µs precision instead of the
+        Notifier's scheduling jitter.
+
+        The offset is the *smallest* gap seen between a frame's hardware
+        stamp and our reading it: that gap is the offset plus however long
+        the frame waited for our thread, so the smallest one is the closest
+        we get to the offset by itself. Anchoring on the first frame instead
+        baked that frame's wait into every frame after it, and the first
+        frame is the worst one to ask — the adapter's FIFO can already hold
+        traffic when we connect.
+
+        Smallest *within a window* (``_TS_WINDOW_S``), not smallest ever: the
+        two clocks drift apart, always in the same direction, and a minimum
+        kept for the whole session can only follow that drift downwards.
+        Re-anchored outright on a large jump — adapter reset, or a PC clock
+        that stepped.
+
+        All of which is still only an estimate off a statistic, and on the
+        bench it came out a fifth of a second low: every SDO response stamped
+        ~212 ms *before* the request it answered, steady for hours, unmoved
+        by drift or window. So the estimate is bracketed by two things that
+        cannot be wrong, and both bounds correct it rather than the one frame
+        they catch:
+
+        * A frame cannot have happened after we read it — ``arrival`` is a
+          hard ceiling.
+        * An answer cannot precede the question. We stamp our own SDO
+          requests off the host clock as they go out, so a response landing
+          before its request is not a fast device, it is the offset being
+          wrong, by exactly the amount we can see. That amount is carried
+          forward in ``_ts_bias`` — correcting one frame would leave the next
+          one just as wrong.
+
+        The correction needs no calibration and does not care what the
+        machine was busy with; it re-earns itself from the next request that
+        gets answered. A bus we only listen on has no such pair to offer, and
+        there the estimate stands on its own — as does the ceiling.
+        """
+        ts = msg.timestamp
+        if not ts:
+            return arrival  # no hardware stamp: when we read it is all we know
+        if abs(ts - arrival) > 300:
+            gap = arrival - ts
+            if self._ts_offset is None or abs(gap - self._ts_offset) > 0.5:
+                self._ts_offset = self._ts_win_min = gap
+                self._ts_win_start = arrival
+                self._ts_bias = 0.0  # a stepped clock owes nothing to the old one
+            elif gap < self._ts_offset:
+                self._ts_offset = self._ts_win_min = gap   # better sample, at once
+            else:
+                self._ts_win_min = gap if self._ts_win_min is None \
+                    else min(self._ts_win_min, gap)
+                if arrival - self._ts_win_start >= _TS_WINDOW_S:
+                    self._ts_offset, self._ts_win_min = self._ts_win_min, None
+                    self._ts_win_start = arrival
+            ts += self._ts_offset
+        ts = min(ts + self._ts_bias, arrival)
+        if msg.arbitration_id & 0x780 == 0x580:
+            sent = self._sdo_sent.get(msg.arbitration_id & 0x7F)
+            if sent is not None and ts < sent:
+                self._ts_bias += sent - ts
+                ts = sent
+        return ts
 
 
 def _decode_cob(cob_id: int) -> str:

@@ -116,7 +116,11 @@ browser):
   Timestamps are comparable across directions, which is not free: TX
   frames are stamped by us in epoch time, RX frames carry the adapter's
   relative clock and are mapped across by an offset that has to track two
-  crystals drifting apart (`CanopenBus.poll_frames`, `_TS_WINDOW_S`).
+  crystals drifting apart (`CanopenBus._rx_time`, `_TS_WINDOW_S`). That
+  offset is an estimate off a statistic, so it is bracketed by two things
+  that are not: a frame cannot be stamped after we read it, and an SDO
+  response cannot be stamped before the request we sent — the second one
+  measures the error and corrects the clock, not just the frame.
   Captures live in `<workspace>/traces/`; `core._autosave_write` keeps
   writing one as frames arrive, because the ring buffer is an hour deep
   and the runs worth recording are longer (retention and the disk reserve:
