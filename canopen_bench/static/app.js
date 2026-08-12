@@ -845,12 +845,29 @@ function outOfRange(display, min, max) {
 // Boxes are read on demand, never on a timer: per field (⟳), per box, or
 // every box that is open. Folding one away is what says "not interested",
 // so a page-wide read skips it.
+// How old a value is and where it came from. A number a PDO carried past
+// three minutes ago must not look like a reading taken just now, so it
+// fades: full strength while it is fresh, then down to a third. The
+// tooltip says it in words, because a shade is a hint and not a fact.
+const panelAge = (f) => (!f.src ? 1 : f.age < 3 ? 1 : f.age < 60 ? 0.62 : 0.38);
+const panelWhen = (f) => ((f.alt ? f.alt + ' · ' : '') + (!f.src ? 'not read yet'
+  : `${f.src === 'bus' ? 'seen on the bus' : 'read'} ${f.age < 1 ? 'just now'
+    : f.age < 60 ? Math.round(f.age) + ' s ago'
+    : Math.round(f.age / 60) + ' min ago'}`));
+
 function PanelBox({ g, busy }) {
+  // Reserved per box, not per field: a box where the rows with "mA" end in
+  // one place and the rows without end in another reads as two
+  // half-aligned lists. Per *box* is the part that matters — reserving
+  // both columns everywhere took 76px from every cell, and in a
+  // two-column box that is the whole name: the labels were squeezed to
+  // nothing while the numbers looked fine.
+  const anyUnit = g.fields.some((f) => f.unit);
+  const anyWrite = g.fields.some((f) => f.rw);
   const cell = (f) => {
-    // the unit column is there whether or not this field has one: a box
-    // where the rows with "mA" end in one place and the rows without end
-    // in another reads as two half-aligned lists
-    const unit = html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`;
+    const unit = anyUnit
+      ? html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`
+      : '';
     const head = html`
       <span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
         title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
@@ -859,7 +876,7 @@ function PanelBox({ g, busy }) {
     const writeBtn = f.rw ? html`
       <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
         style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
-      : html`<span style="width:44px;flex:none"></span>`;
+      : anyWrite ? html`<span style="width:44px;flex:none"></span>` : '';
     // A named value and a single bit are the same object underneath, so both
     // stage the way a number does: the change lands in the value, Write
     // sends it. Neither may drop what it does not own — the core folds them
@@ -890,16 +907,17 @@ function PanelBox({ g, busy }) {
       <div style="display:flex;align-items:center;gap:8px;min-width:0">
         ${head}
         ${f.rw ? html`
-          <${SyncInput} value=${f.val} title="staged value — Write sends it"
+          <${SyncInput} value=${f.val} title=${panelWhen(f) + ' · type to stage a new one, Write sends it'}
             onCommit=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, val: v })}
             style="border:1px solid var(--inp);background:var(--panel);color:${f.val ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:78px;outline:none;text-align:right;flex:none" />
           ${unit}
           <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
             style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
         : html`
-          <span style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:66px;text-align:right;flex:none">${f.val || '—'}</span>
+          <span title=${panelWhen(f)}
+            style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};opacity:${panelAge(f)};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:66px;text-align:right;flex:none">${f.val || '—'}</span>
           ${unit}
-          <span style="width:44px;flex:none"></span>`}
+          ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}`}
       </div>`;
   };
   return html`

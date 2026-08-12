@@ -934,6 +934,13 @@ class Bench:
         #: only the frame carries it.
         self.emcy_seen: deque[Emcy] = deque(maxlen=200)
         self.obj_vals: dict[str, str] = {}
+        #: when each obj_vals entry was learned (monotonic), so a value the
+        #: bus carried past can be told from an older one somebody read
+        self.obj_vals_at: dict[str, float] = {}
+        #: values seen on the wire, (node, "0x2007:01") -> (value, when).
+        #: Separate from obj_vals, which also holds what the operator has
+        #: typed and not yet written (see _bus_sample)
+        self.seen_vals: dict[tuple[int, str], tuple[str, float]] = {}
         # bench instruments beside the bus (canopen_bench/instruments): the
         # port that once answered is remembered, so a restart reconnects to
         # that one instead of writing *IDN? to every serial port it finds
@@ -1869,6 +1876,26 @@ class Bench:
             return
         self.plot_series.setdefault(key, deque(maxlen=PLOT_POINTS)).append((time.monotonic(), v))
 
+    def _bus_sample(self, node, idx: int, sub: int, value: int, width: int) -> None:
+        """Remember a value the bus just carried, for whoever shows it.
+
+        The same tap the signal plot uses, and for the same reason: the
+        trace already decodes every SDO answer and unpacks every mapped
+        PDO signal, so a panel showing one of those objects can have the
+        value for nothing. A test case reading a register next door, a
+        device publishing its TPDO — the box follows without a single
+        frame of its own. Which is the only kind of "live" a bench should
+        offer, since the other kind is polling.
+
+        Kept apart from ``obj_vals`` on purpose. That one holds what was
+        read *and* what the operator has typed but not yet written; a
+        value arriving from the bus must never overwrite the second.
+        """
+        if node is None:
+            return
+        self.seen_vals[(int(node), f"0x{idx:04X}:{sub:02X}")] = (
+            f"0x{value:0{max(2, width * 2)}X}", time.monotonic())
+
     # -- trace interpretation ---------------------------------------------
     _EXPEDITED_LEN = {0x4F: 1, 0x4B: 2, 0x47: 3, 0x43: 4,   # upload response
                       0x2F: 1, 0x2B: 2, 0x27: 3, 0x23: 4}   # download request
@@ -1890,6 +1917,7 @@ class Bench:
         obj = f"0x{idx:04X}:{sub:02X}"
         node = cob & 0x7F
         eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
+        var = None
         if eds and eds != "—":
             od = self._ods.load(eds)
             var = find_var(od, idx, sub) if od else None
@@ -1903,6 +1931,13 @@ class Bench:
             row["val"] = str(value)
             if live:
                 self._plot_sample(idx, sub, value)
+                # not a text object: an expedited frame carries the first
+                # four bytes of a device name, and "DemoDevice" would come
+                # back as 68 — the first letter read as a number. The
+                # rest arrives in segments this decoder does not follow,
+                # so there is nothing here worth remembering for one.
+                if var is None or var.data_type not in self._NO_PAD_TYPES:
+                    self._bus_sample(node, idx, sub, value, n)
 
     # predefined connection set: PDO function code -> mapping object
     _PDO_MAPPING_INDEX = {0x180: 0x1A00, 0x280: 0x1A01, 0x380: 0x1A02, 0x480: 0x1A03,
@@ -1952,6 +1987,8 @@ class Bench:
             decoded.append((name, idx, sub, val))
             if live:
                 self._plot_sample(idx, sub, val)
+                self._bus_sample(row["node"], idx, sub,
+                                 val & ((1 << bits) - 1), -(-bits // 8))
         if not decoded:
             return
         if len(decoded) == 1:
@@ -3102,6 +3139,7 @@ class Bench:
         key = f"{idx}:{sub}"
         if res.ok:
             self.obj_vals[key] = res.value
+            self.obj_vals_at[key] = time.monotonic()
             self._remember(key, res.value)
             self.log(f"SDO  read {idx}:{sub} → {res.value} (node {node})", "sdo")
         else:
@@ -3130,6 +3168,7 @@ class Bench:
             return
         width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
         self.obj_vals[key] = f"0x{value:0{width}X}"
+        self.obj_vals_at[key] = time.monotonic()
 
     # value strings are hex by convention (with or without 0x); string-,
     # octet- and domain-typed objects must never be reformatted
@@ -3182,6 +3221,7 @@ class Bench:
         res = self.bus.sdo_write(node, idx, sub, value)
         if res.ok:
             self.obj_vals[key] = value
+            self.obj_vals_at[key] = time.monotonic()
             self._remember(key, value)
             self.log(f"SDO  write {idx}:{sub} ← {value} (node {node})", "sdo")
         else:
@@ -3238,9 +3278,43 @@ class Bench:
         """
         return next((f for f in self._object_fields.get(key, []) if not f.flags), None)
 
-    def _panel_field_view(self, f, raw: str | None) -> dict:
+    def _panel_value(self, key: str, node: int) -> tuple[str | None, str, float]:
+        """The freshest thing known about an object: what was read or
+        staged, or what the bus carried past since — value, where it came
+        from, and how many seconds ago.
+
+        The newer wins, which puts the two in the right order by itself. A
+        value the operator typed a moment ago is newer than a PDO from
+        before it, so typing is not overwritten; a PDO from a second ago
+        is newer than a read from ten minutes back, so the box follows the
+        device without asking it anything.
+        """
+        mine, mine_at = self.obj_vals.get(key), self.obj_vals_at.get(key, 0.0)
+        theirs, theirs_at = self.seen_vals.get((node, key), (None, 0.0))
+        now = time.monotonic()
+        if theirs is not None and theirs_at >= mine_at:
+            return theirs, "bus", now - theirs_at
+        if mine is None:
+            return None, "", 0.0
+        return mine, "read", (now - mine_at if mine_at else 0.0)
+
+    def _panel_field_view(self, f, node: int) -> dict:
+        raw, src, age = self._panel_value(f.key, node)
         out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
-               "rw": f.rw, "widget": f.widget, "val": f.show(raw)}
+               "rw": f.rw, "widget": f.widget, "val": f.show(raw),
+               # where the number comes from and how old it is: a value a
+               # PDO carried past three minutes ago must not look like a
+               # reading taken just now
+               "src": src, "age": round(age, 1)}
+        # every reading of the number for the tooltip — hex, decimal, and
+        # the symbolic one where a plugin declared fields. A panel prints
+        # decimal because that is what its units are read in, which is
+        # exactly why the other readings have to stay one hover away
+        # (the same `alternatives` the object table and favourites use)
+        shown = _typed_number(raw or "")
+        if shown is not None:
+            out["alt"] = alternatives(shown, self._object_fields.get(f.key, []),
+                                      self.symbols, len((raw or "").removeprefix("0x")) or 2)
         value = _typed_number(raw or "") or 0
         if f.widget == "flag":
             out["on"] = bool(value >> f.bit & 1)
@@ -3265,7 +3339,7 @@ class Bench:
         panel = self._panel()
         if panel is None:
             return None
-        vals = self.obj_vals
+        node = self._target_node()
         return {
             "name": panel.name,
             "busy": self.panel_busy,
@@ -3273,9 +3347,17 @@ class Bench:
                 "title": g.title,
                 "cols": g.cols,
                 "open": self._panel_open(panel, g),
-                "fields": [self._panel_field_view(f, vals.get(f.key)) for f in g.fields],
-            } for g in panel.groups],
+                "fields": [self._panel_field_view(f, node) for f in g.fields],
+            } for g in self._panel_groups(panel, node)],
         }
+
+    def _panel_groups(self, panel, node: int) -> list:
+        """The boxes this device has. A ``when`` that has been settled and
+        says no takes its box away entirely — the machine does not have
+        that part, so an empty box to open would be a worse answer than no
+        box at all."""
+        return [g for g in panel.groups
+                if g.when is None or g.when.holds(self._panel_value(g.when.key, node)[0])]
 
     def act_obj_view(self, p: dict) -> None:
         """Numeric table or panel for the object area."""
@@ -3321,6 +3403,7 @@ class Bench:
             return
         width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
         self.obj_vals[key] = f"0x{raw:0{width}X}"
+        self.obj_vals_at[key] = time.monotonic()
 
     def _panel_stage_part(self, fld, p: dict) -> None:
         """Stage a change that touches only part of an object's value: one
@@ -3355,6 +3438,7 @@ class Bench:
             value = (current & ~field.mask) | (chosen << shift & field.mask)
         width = len(known.removeprefix("0x")) or 2
         self.obj_vals[key] = f"0x{value:0{width}X}"
+        self.obj_vals_at[key] = time.monotonic()
 
     def act_panel_read(self, p: dict) -> None:
         """Read one box (``group``) or every box that is open.
@@ -3371,8 +3455,15 @@ class Bench:
         if panel is None:
             return
         want = p.get("group")
+        node = self._target_node()
         addrs: list[tuple[str, str]] = []
-        for g in panel.groups:
+        # what a condition asks about is read too, even though no box shows
+        # it: otherwise a box whose device does not have that part only
+        # disappears after somebody reads the object by hand, and nothing
+        # on the page says which object that is
+        if not want:
+            addrs += [(g.when.idx, g.when.sub) for g in panel.groups if g.when is not None]
+        for g in self._panel_groups(panel, node):
             if (g.title != want) if want else (not self._panel_open(panel, g)):
                 continue
             addrs += [(f.idx, f.sub) for f in g.fields]
@@ -3401,6 +3492,7 @@ class Bench:
                 key = f"{idx}:{sub}"
                 if res.ok:
                     self.obj_vals[key] = res.value
+                    self.obj_vals_at[key] = time.monotonic()
                     self._remember(key, res.value)
                     done += 1
                 else:

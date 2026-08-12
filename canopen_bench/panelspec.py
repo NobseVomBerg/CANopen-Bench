@@ -46,7 +46,8 @@ import yaml
 #: what a field may say — anything else is a typo, and typos are loud here
 _FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit"}
 _WIDGETS = {"number", "enum", "flag"}
-_GROUP_KEYS = {"title", "fields", "cols", "collapsed"}
+_GROUP_KEYS = {"title", "fields", "cols", "collapsed", "when"}
+_WHEN_KEYS = {"obj", "bit", "value"}
 _PANEL_KEYS = {"name", "match", "groups"}
 _MATCH_KEYS = {"eds", "name"}
 
@@ -141,6 +142,45 @@ class PanelField:
 
 
 @dataclass
+class PanelCondition:
+    """When a box applies at all: a bit of an object, or a value it has.
+
+    Different from folding. Folding says "not interested right now" and is
+    the operator's; this says "this machine does not have that part" and
+    is the device's — a backwinder the device does not carry has no box,
+    rather than an empty one to open.
+
+    ``idx``/``sub`` name the object; ``bit`` tests one bit of it, ``value``
+    tests the whole value. Exactly one of the two.
+    """
+
+    idx: str
+    sub: str
+    bit: int | None = None
+    value: int | None = None
+
+    @property
+    def key(self) -> str:
+        return f"{self.idx}:{self.sub}"
+
+    def holds(self, raw: str | None) -> bool:
+        """Whether the box applies, given what is known about that object.
+
+        Unknown means yes. A condition may take a box away once the device
+        has answered; it may not keep one hidden before anything has been
+        asked, or the object that would settle it sits behind the box it
+        is hiding.
+        """
+        if raw in (None, "", "—"):
+            return True
+        try:
+            number = int(str(raw), 16)
+        except ValueError:
+            return True
+        return bool(number >> self.bit & 1) if self.bit is not None else number == self.value
+
+
+@dataclass
 class PanelGroup:
     """One box. ``collapsed`` is the state it opens in, not a fixed one —
     what the operator folds away is remembered per workspace."""
@@ -149,6 +189,7 @@ class PanelGroup:
     fields: list[PanelField] = field(default_factory=list)
     cols: int = 1
     collapsed: bool = False
+    when: PanelCondition | None = None
 
 
 @dataclass
@@ -220,6 +261,31 @@ def _fields(raw, where: str) -> list[PanelField]:
     return out
 
 
+def _when(raw, where: str) -> PanelCondition | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise PanelError(f"{where}: when must be a mapping "
+                         f"({{obj: \"0x2001:00\", bit: 3}})")
+    unknown = set(raw) - _WHEN_KEYS
+    if unknown:
+        raise PanelError(f"{where}: when: unknown key(s) {', '.join(sorted(unknown))}")
+    if "obj" not in raw:
+        raise PanelError(f"{where}: when needs an obj")
+    idx, sub = _addr(raw["obj"])
+    has_bit, has_value = "bit" in raw, "value" in raw
+    if has_bit == has_value:
+        raise PanelError(f"{where}: when takes either a bit or a value, not "
+                         f"{'both' if has_bit else 'neither'}")
+    if has_bit and (not isinstance(raw["bit"], int) or not 0 <= raw["bit"] <= 31):
+        raise PanelError(f"{where}: when: bit must be 0…31")
+    try:
+        value = None if has_bit else int(str(raw["value"]), 0)
+    except (TypeError, ValueError):
+        raise PanelError(f"{where}: when: value must be a number") from None
+    return PanelCondition(idx=idx, sub=sub, bit=raw["bit"] if has_bit else None, value=value)
+
+
 def parse_panel(text: str, source: str = "") -> Panel:
     """Parse one panel file. Raises ``PanelError`` with a message naming
     the place — a panel is written by hand, so the message is the only
@@ -260,6 +326,7 @@ def parse_panel(text: str, source: str = "") -> Panel:
             fields=_fields(item.get("fields") or [], at),
             cols=max(1, min(4, int(item.get("cols", 1)))),
             collapsed=bool(item.get("collapsed", False)),
+            when=_when(item.get("when"), at),
         ))
     titles = [g.title for g in groups]
     if len(set(titles)) != len(titles):

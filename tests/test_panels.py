@@ -8,10 +8,12 @@ says nothing) and the scaling (a box that shows 16.0 must write 160).
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
+import canopen_bench.core as core_mod
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.panelspec import PanelError, load_panels, parse_panel
@@ -144,7 +146,7 @@ def test_the_panel_reaches_the_page_for_the_device_it_matches(tmp_path):
     assert [g["open"] for g in panel["groups"]] == [True, False]  # collapsed: true
     assert panel["groups"][0]["fields"][0] == {
         "idx": "0x2040", "sub": "01", "label": "Working", "unit": "cN",
-        "rw": True, "widget": "number", "val": "",
+        "rw": True, "widget": "number", "val": "", "src": "", "age": 0.0,
     }
 
 
@@ -343,3 +345,162 @@ def test_a_widget_that_cannot_mean_what_it_says_is_an_error(text, complaint):
     with pytest.raises(PanelError) as caught:
         parse_panel(text, "broken.panel.yaml")
     assert complaint in str(caught.value)
+
+
+# -- values the bus carried past --------------------------------------------
+
+def test_a_value_the_bus_carried_past_fills_the_box(tmp_path):
+    """The trace already decodes every SDO answer and unpacks every mapped
+    PDO signal. A box showing one of those objects can have the value for
+    nothing — which is the only kind of live a bench should offer, since
+    the other kind is polling."""
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    # somebody else's SDO answer for 0x2040:01 = 0x00A0, node 1
+    bench._drain_frames()
+    bench._annotate_sdo({"cob": "0x581", "data": "4B 40 20 01 A0 00 00 00",
+                         "node": 1, "cls": "SDO", "obj": "", "val": ""})
+
+    field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
+    assert field["val"] == "16.0"        # tenths of a cN, as the panel says
+    assert field["src"] == "bus"
+    assert field["age"] < 1
+
+
+def test_a_pdo_signal_counts_as_much_as_an_sdo_answer(tmp_path):
+    """"Perfect would be if the PDO parts could be used too" — they can:
+    the trace unpacks them against the EDS default mapping, and a panel
+    field on a mapped object follows without a frame of its own."""
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    bench._bus_sample(1, 0x2040, 0x01, 0x00C8, 2)     # what the annotator calls
+
+    field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
+    assert (field["val"], field["src"]) == ("20.0", "bus")
+
+
+def test_what_the_operator_typed_is_not_overwritten_by_the_bus(tmp_path):
+    """obj_vals holds what was read *and* what is staged for writing. A
+    value arriving from the bus may not push a staged one out from under
+    the hand that typed it."""
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    bench._bus_sample(1, 0x2040, 0x01, 0x00A0, 2)     # bus says 16.0
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "25.0"})
+
+    field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
+    assert (field["val"], field["src"]) == ("25.0", "read")
+
+    bench._bus_sample(1, 0x2040, 0x01, 0x0032, 2)     # and now the bus is newer
+    assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["val"] == "5.0"
+
+
+def test_a_value_belongs_to_the_device_it_came_from(tmp_path):
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    bench._bus_sample(9, 0x2040, 0x01, 0x00A0, 2)     # another node entirely
+    assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["val"] == ""
+
+
+# -- boxes a machine does not have ------------------------------------------
+
+CONDITIONAL = """
+name: Sample Feeder
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Always
+    fields: [{obj: "0x2040:01"}]
+  - title: Backwinder
+    when: {obj: "0x2050:00", bit: 3}
+    fields: [{obj: "0x2040:02"}]
+"""
+
+
+def _titles(bench) -> list[str]:
+    return [g["title"] for g in bench.snapshot()["objects"]["panel"]["groups"]]
+
+
+def test_a_box_is_there_until_the_device_says_otherwise(tmp_path):
+    """Unknown means yes. A condition may take a box away once the device
+    has answered; it may not keep one hidden before anything was asked —
+    the object that settles it would sit behind the box it is hiding."""
+    bench = _bench_with_panel(tmp_path, CONDITIONAL)
+    bench.dispatch("obj_view", {"view": "panel"})
+    assert _titles(bench) == ["Always", "Backwinder"]
+
+    bench.obj_vals["0x2050:00"] = "0x08"          # bit 3: this one has one
+    bench.obj_vals_at["0x2050:00"] = time.monotonic()
+    assert _titles(bench) == ["Always", "Backwinder"]
+
+    bench.obj_vals["0x2050:00"] = "0x04"          # and this one does not
+    bench.obj_vals_at["0x2050:00"] = time.monotonic()
+    assert _titles(bench) == ["Always"]
+
+
+def test_a_page_read_asks_what_the_conditions_are_about(tmp_path):
+    """Otherwise the box only disappears once somebody reads that object
+    by hand, and nothing on the page says which object that is."""
+    bench = _bench_with_panel(tmp_path, CONDITIONAL)
+    bench.dispatch("obj_view", {"view": "panel"})
+    asked: list[tuple[str, str]] = []
+    real = bench.bus.sdo_read
+    bench.bus.sdo_read = lambda node, idx, sub, *a, **kw: (
+        asked.append((idx, sub)) or real(node, idx, sub, *a, **kw))
+
+    async def go():
+        bench.dispatch("panel_read", {})
+        if bench._tasks:
+            await asyncio.wait(set(bench._tasks), timeout=5)
+
+    asyncio.run(go())
+    assert ("0x2050", "00") in asked
+
+
+@pytest.mark.parametrize("text, complaint", [
+    ("groups: [{title: A, when: 3, fields: []}]", "must be a mapping"),
+    ("groups: [{title: A, when: {bit: 3}, fields: []}]", "needs an obj"),
+    ("groups: [{title: A, when: {obj: '0x2000'}, fields: []}]", "neither"),
+    ("groups: [{title: A, when: {obj: '0x2000', bit: 1, value: 2}, fields: []}]", "both"),
+    ("groups: [{title: A, when: {obj: '0x2000', bit: 99}, fields: []}]", "0…31"),
+    ("groups: [{title: A, when: {obj: '0x2000', bti: 1}, fields: []}]", "unknown"),
+])
+def test_a_condition_that_cannot_be_answered_is_an_error(text, complaint):
+    with pytest.raises(PanelError) as caught:
+        parse_panel(text, "broken.panel.yaml")
+    assert complaint in str(caught.value)
+
+
+def test_the_tooltip_carries_every_reading_of_the_number(tmp_path):
+    """The panel prints decimal because that is what its units are read
+    in — which is exactly why hex has to stay one hover away, the same way
+    the object table and the favourites panel keep it."""
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    bench.obj_vals["0x2040:01"] = "0x00A0"
+    bench.obj_vals_at["0x2040:01"] = time.monotonic()
+
+    field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
+    assert field["alt"] == "0x00A0 · 160"      # hex as the device stores it, then decimal
+
+
+def test_a_text_object_is_not_learned_from_an_expedited_frame(tmp_path):
+    """An expedited response carries four bytes. For a device name that is
+    the first letter, and "DemoDevice" came back as 68 — 0x44 read as a
+    number, overwriting the string somebody had actually read. The rest
+    arrives in segments this decoder does not follow, so there is nothing
+    here worth remembering for a text object."""
+    bench = _bench_with_panel(tmp_path)
+    # the demo device's EDS, which declares 0x2004 as a VISIBLE_STRING —
+    # without a type there is nothing to go on, and the sample is kept
+    bench.db.eds_write_file("dut_alpha_v2.eds",
+                            core_mod.SEED_EDS.read_text(encoding="utf-8"))
+    bench._ods.retarget(bench.db.eds_dir)
+    bench.obj_vals["0x2004:00"] = "DemoDevice"
+    bench.obj_vals_at["0x2004:00"] = time.monotonic() - 60
+
+    # node 1's answer for 0x2004:00, one byte, 0x44 = "D"
+    bench._annotate_sdo({"cob": "0x581", "data": "4F 04 20 00 44 00 00 00",
+                         "node": 1, "cls": "SDO", "obj": "", "val": ""})
+
+    assert (1, "0x2004:00") not in bench.seen_vals
+    assert bench._panel_value("0x2004:00", 1)[0] == "DemoDevice"
