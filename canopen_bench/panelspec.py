@@ -150,14 +150,20 @@ class PanelCondition:
     is the device's — a backwinder the device does not carry has no box,
     rather than an empty one to open.
 
-    ``idx``/``sub`` name the object; ``bit`` tests one bit of it, ``value``
-    tests the whole value. Exactly one of the two.
+    ``idx``/``sub`` name the object; ``bit`` tests one bit of it,
+    ``values`` are the values that count as yes. Exactly one of the two.
+
+    Several values, because a device family is numbered rather than
+    flagged: the part is on the 920 and the 922 and on nothing else, and
+    the variant object says 920 or 922 — there is no bit anywhere that
+    says "has a backwinder". Writing that as two boxes with one value each
+    would duplicate every field in them to express an "or".
     """
 
     idx: str
     sub: str
     bit: int | None = None
-    value: int | None = None
+    values: tuple[int, ...] = ()
 
     @property
     def key(self) -> str:
@@ -177,7 +183,7 @@ class PanelCondition:
             number = int(str(raw), 16)
         except ValueError:
             return True
-        return bool(number >> self.bit & 1) if self.bit is not None else number == self.value
+        return bool(number >> self.bit & 1) if self.bit is not None else number in self.values
 
 
 @dataclass
@@ -279,11 +285,20 @@ def _when(raw, where: str) -> PanelCondition | None:
                          f"{'both' if has_bit else 'neither'}")
     if has_bit and (not isinstance(raw["bit"], int) or not 0 <= raw["bit"] <= 31):
         raise PanelError(f"{where}: when: bit must be 0…31")
-    try:
-        value = None if has_bit else int(str(raw["value"]), 0)
-    except (TypeError, ValueError):
-        raise PanelError(f"{where}: when: value must be a number") from None
-    return PanelCondition(idx=idx, sub=sub, bit=raw["bit"] if has_bit else None, value=value)
+    values: tuple[int, ...] = ()
+    if not has_bit:
+        # one value or a list of them — "the 920 and the 922 have it" is a
+        # list in the file rather than the same box written out twice
+        given = raw["value"]
+        given = given if isinstance(given, list) else [given]
+        if not given:
+            raise PanelError(f"{where}: when: value must name at least one value")
+        try:
+            values = tuple(int(str(v), 0) for v in given)
+        except (TypeError, ValueError):
+            raise PanelError(f"{where}: when: value must be a number, "
+                             f"or a list of numbers") from None
+    return PanelCondition(idx=idx, sub=sub, bit=raw["bit"] if has_bit else None, values=values)
 
 
 def parse_panel(text: str, source: str = "") -> Panel:
