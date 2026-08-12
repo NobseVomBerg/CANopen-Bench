@@ -628,7 +628,7 @@ function SetupPage({ s }) {
             <div class="hv" onClick=${() => send('set_channel', { channel: c.value })}
               title="use this channel"
               style="margin-top:4px;padding:3px 7px;border-radius:5px;cursor:pointer;font:10.5px ${MONO};color:${s.channel === c.value ? 'var(--acc)' : 'var(--faint)'}">
-              ${c.value} · ${c.label}
+              ${c.label}
             </div>`)}
         </div>`}
         <div title="Cyclic SYNC frames (COB 0x080) — devices with synchronous TPDOs only transmit while a SYNC producer runs">
