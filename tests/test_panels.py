@@ -467,3 +467,16 @@ def test_a_condition_that_cannot_be_answered_is_an_error(text, complaint):
     with pytest.raises(PanelError) as caught:
         parse_panel(text, "broken.panel.yaml")
     assert complaint in str(caught.value)
+
+
+def test_the_tooltip_carries_every_reading_of_the_number(tmp_path):
+    """The panel prints decimal because that is what its units are read
+    in — which is exactly why hex has to stay one hover away, the same way
+    the object table and the favourites panel keep it."""
+    bench = _bench_with_panel(tmp_path)
+    bench.dispatch("obj_view", {"view": "panel"})
+    bench.obj_vals["0x2040:01"] = "0x00A0"
+    bench.obj_vals_at["0x2040:01"] = time.monotonic()
+
+    field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
+    assert field["alt"] == "0x00A0 · 160"      # hex as the device stores it, then decimal
