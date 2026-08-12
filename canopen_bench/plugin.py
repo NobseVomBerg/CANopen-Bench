@@ -326,6 +326,26 @@ class BenchPlugin:
         front-panel mirrors, virtual buttons, status LEDs."""
         return []
 
+    def object_panels(self) -> list[Path]:
+        """Packaged panel files (``*.panel.yaml``, or the directories
+        holding them): the Objects page's panel view, where a device's
+        values appear as named boxes instead of a numeric table — with the
+        unit and the scaling an EDS does not carry
+        (``canopen_bench/panelspec.py``).
+
+        Read out of the package, never copied into the workspace. A panel
+        describes the device the plugin was built for, so it belongs to
+        the plugin's version the way its flows belong to the firmware they
+        address — and a file seeded into every workspace is a file someone
+        has to carry from bench to bench once it changes.
+
+        The panel that matches the selected device wins; plugin panels are
+        asked before the core's own, so a vendor panel replaces the
+        general-purpose one for its own devices rather than competing
+        with it.
+        """
+        return []
+
     def emcy_codes(self) -> dict[int, str]:
         """Vendor-/profile-specific EMCY error-code texts, merged over the
         CiA-301 table (``data.EMCY_CODES``); on conflict the plugin text
