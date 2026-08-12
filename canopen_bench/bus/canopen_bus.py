@@ -35,6 +35,23 @@ _ADAPTER_BACKENDS: dict[str, tuple[str, str | int | None, dict]] = {
 }
 
 
+def _channel_arg(chosen: str | int | None, default: str | int | None):
+    """The channel to open: what the operator picked, else the backend's
+    default. Typed after the default, because the backends disagree —
+    IXXAT and Vector count channels with integers, PCAN names them
+    ("PCAN_USBBUS1"), and a string where an int belongs fails inside the
+    driver with a message about neither."""
+    if chosen is None or str(chosen).strip() == "":
+        return default
+    text = str(chosen).strip()
+    if isinstance(default, int):
+        try:
+            return int(text, 0)
+        except ValueError:
+            return default  # not a number where one is required: keep the default
+    return text
+
+
 def _backend_entry(value: tuple) -> tuple[str, str | int | None, dict]:
     """Normalise one backend mapping entry.
 
@@ -199,19 +216,61 @@ class CanopenBus(BusInterface):
         self._sdo_sent: dict[int, float] = {}  # node-id → host time of our last SDO request
         self.adapter = ""
         self.bitrate = 500
+        self.channel: str | int | None = None  # what the last connect actually opened
         self._detach_lock = threading.Lock()  # one winner detaches the network
         # built-in mapping plus adapter keys contributed by bench plugins
         self._backends = {key: _backend_entry(value) for key, value
                           in (_ADAPTER_BACKENDS | (extra_backends or {})).items()}
 
     # -- lifecycle --------------------------------------------------------
-    def connect(self, adapter: str, bitrate: int) -> None:
+    def channels(self, adapter: str) -> list[dict]:
+        """What this adapter's driver says is there: ``[{value, label}]``,
+        empty when the backend cannot enumerate (or nothing is attached).
+
+        Worth asking, because the number in the channel field means
+        something different per backend and the wrong one does not fail —
+        it opens something quiet. On Vector it is the *global* channel
+        index across everything the XL driver knows, virtual channels
+        included, so index 0 on a machine with CANalyzer installed is
+        routinely a virtual channel: the port opens, the bus stays silent,
+        and re-plugging the cable changes nothing because the bench is
+        listening where no cable goes. The label carries the device and
+        the channel as it is printed on the housing, which is the only
+        form anybody can check against.
+        """
+        interface = self._backends.get(adapter, ("", None, {}))[0]
+        if not interface:
+            return []
+        try:
+            found = can.detect_available_configs(interface)
+        except Exception:  # a driver that is not installed, or does not enumerate
+            return []
+        out: list[dict] = []
+        for cfg in found:
+            # Vector: with app_name unset python-can wants the global index,
+            # which is *not* the "channel" key — that one is the number on
+            # the housing. Everywhere else the channel is the channel.
+            value = cfg.get("channel_index", cfg.get("channel"))
+            if value is None:
+                continue
+            name = str(getattr(cfg.get("vector_channel_config"), "name", "") or "").strip()
+            hw, serial = cfg.get("hw_channel"), cfg.get("serial")
+            parts = [name or f"channel {cfg.get('channel')}",
+                     # the number printed on the housing, which is the one
+                     # the cable is plugged into and counts from one
+                     f"port {hw + 1}" if isinstance(hw, int) else "",
+                     f"SN {serial}" if serial else ""]
+            out.append({"value": str(value), "label": " · ".join(p for p in parts if p)})
+        return out
+
+    def connect(self, adapter: str, bitrate: int, channel: str | int | None = None) -> None:
         if adapter not in self._backends:
             raise ValueError(f"unknown adapter: {adapter}")
         if self.network is not None:
             self.disconnect()
 
-        interface, channel, extra = self._backends[adapter]
+        interface, default_channel, extra = self._backends[adapter]
+        channel = _channel_arg(channel, default_channel)
         network = canopen.Network()
         self._install_listeners(network)
         kwargs: dict = {"interface": interface, "bitrate": bitrate * 1000, **extra}
@@ -222,6 +281,7 @@ class CanopenBus(BusInterface):
         self.network = network
         self.adapter = adapter
         self.bitrate = bitrate
+        self.channel = channel
         self._ts_offset = self._ts_win_min = None
         self._ts_bias = 0.0
         self._sdo_sent.clear()

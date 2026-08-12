@@ -614,6 +614,23 @@ function SetupPage({ s }) {
             })}
           </div>
         </div>
+        ${s.adapter !== 'demo' && html`
+        <div title="Which channel of this adapter to open — empty uses the backend's default. Takes effect on the next connect.">
+          ${label('CHANNEL')}
+          <div style="display:flex;gap:6px;align-items:center">
+            <${SyncInput} value=${s.channel || ''} placeholder="default"
+              onCommit=${(v) => send('set_channel', { channel: v })}
+              style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:64px;outline:none;text-align:center" />
+            <span class="hv" onClick=${() => send('detect_channels')} title="ask the driver what is attached"
+              style="${btn.ghost}font-size:11px;padding:5px 11px;border-radius:6px;cursor:pointer;white-space:nowrap">Detect</span>
+          </div>
+          ${(s.channelList.adapter === s.adapter ? s.channelList.rows : []).map((c) => html`
+            <div class="hv" onClick=${() => send('set_channel', { channel: c.value })}
+              title="use this channel"
+              style="margin-top:4px;padding:3px 7px;border-radius:5px;cursor:pointer;font:10.5px ${MONO};color:${s.channel === c.value ? 'var(--acc)' : 'var(--faint)'}">
+              ${c.value} · ${c.label}
+            </div>`)}
+        </div>`}
         <div title="Cyclic SYNC frames (COB 0x080) — devices with synchronous TPDOs only transmit while a SYNC producer runs">
           ${label('SYNC PRODUCER')}
           <div style="display:flex;gap:8px;align-items:center">
