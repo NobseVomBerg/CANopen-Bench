@@ -838,7 +838,6 @@ function ObjectsPage({ s, ui, setUi }) {
   const selDevs = s.devices.filter((d) => d.sel);
   const targetNode = selDevs[0] ? selDevs[0].node : 1;
   const mirrorNode = selDevs[0] ? String(selDevs[0].node).padStart(2, '0') : '—';
-  const edsCur = selDevs[0] ? selDevs[0].eds : 'no device selected';
   const vals = s.objects.vals;
   const raw = s.raw;
   // fixed columns must leave room for star+Read+Write (last col); NAME is
@@ -935,7 +934,6 @@ function ObjectsPage({ s, ui, setUi }) {
           <div style="font:10px ${MONO};color:var(--faint);margin-top:1px">${g.range}</div>
         </div>`;
       })}
-      <div style="margin-top:auto;font-size:10.5px;color:var(--faint);line-height:1.5;padding:0 4px">EDS: <span style="font-family:${MONO}">${edsCur}</span></div>
     </div>
 
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel2)">
