@@ -508,3 +508,54 @@ def test_each_driver_opens_its_port_at_its_own_baud():
     found = connect("COM10", opener=opener)
     assert found is not None
     assert OwonSpe.baud in seen and OwonSpe.baud == 115200
+
+
+class DeadPort(FakePort):
+    """A handle to a bridge that went away: opened fine, refuses to write.
+
+    What Windows does when the USB serial adapter re-enumerates under an
+    open handle — WriteFile answers ERROR_ACCESS_DENIED, which pyserial
+    surfaces as PermissionError(13, 'Zugriff verweigert', None, 5).
+    """
+
+    def write(self, data: bytes) -> None:
+        raise PermissionError(13, "Zugriff verweigert", None, 5)
+
+
+def test_a_bridge_that_came_back_is_reopened_rather_than_given_up_on():
+    """The port is held for the session, so a dead handle stayed dead: the
+    supply switched off and on left every write refused until somebody
+    found the disconnect button. One fresh handle fixes it."""
+    dead, alive = DeadPort(), FakePort()
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(dead, alive)))
+
+    psu.set_voltage(1, 10)
+
+    assert dead.closed, "the dead handle was kept"
+    assert alive.written == ["SEL 1;V 10.00"], "the command was not repeated on the new handle"
+
+
+def test_a_port_that_is_really_gone_says_so_once(monkeypatch):
+    """If a new handle does not help, the instrument is gone. Say it —
+    hammering a port that is not there helps nobody, and the box shows the
+    reason next to the supply."""
+    tries = []
+
+    def opener(device, baud, timeout):
+        tries.append(device)
+        return DeadPort()
+
+    psu = Toellner8952(SerialLink("COM6", opener=opener))
+    with pytest.raises(InstrumentError) as caught:
+        psu.set_voltage(1, 10)
+    assert "COM6" in str(caught.value)
+    assert len(tries) == 2, "exactly one retry, not a loop"
+
+
+def test_a_read_recovers_the_same_way():
+    class DeadOnRead(FakePort):
+        def readline(self) -> bytes:
+            raise PermissionError(13, "Zugriff verweigert", None, 5)
+
+    psu = Toellner8952(SerialLink("COM6", opener=opener_for(DeadOnRead(), FakePort())))
+    assert psu.state().model == "TOE8952-60"

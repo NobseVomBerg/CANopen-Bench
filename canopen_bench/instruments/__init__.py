@@ -97,13 +97,44 @@ class SerialLink:
                 self._io = None
 
     def write(self, cmd: str) -> None:
+        self._once_more(lambda: self._write(cmd))
+
+    def ask(self, cmd: str) -> str:
+        def exchange() -> str:
+            self._write(cmd)
+            return self._io.readline().decode("ascii", "replace").strip()
+
+        return self._once_more(exchange)
+
+    def _write(self, cmd: str) -> None:
         self.open()
         self._io.write(cmd.encode("ascii") + b"\r\n")
 
-    def ask(self, cmd: str) -> str:
-        self.write(cmd)
-        line = self._io.readline()
-        return line.decode("ascii", "replace").strip()
+    def _once_more(self, action):
+        """Run ``action``; on an OS-level failure drop the handle, open a
+        fresh one and run it again.
+
+        A USB serial bridge that disappears and comes back — the supply
+        switched off and on, the cable re-seated, the hub power-cycled —
+        leaves the handle open and dead. Windows then answers every write
+        with "Zugriff verweigert" (``ERROR_ACCESS_DENIED``), which reads
+        like another program holding the port and is nothing of the sort:
+        a port somebody else holds fails to *open*, not to write. Held for
+        the session as this link is, that state lasted until the operator
+        found the disconnect button or restarted the tool.
+
+        One retry, not a loop: if opening a new handle does not fix it,
+        the instrument really is gone, and saying so beats hammering a
+        port that is not there.
+        """
+        try:
+            return action()
+        except OSError:
+            self.close()
+        try:
+            return action()
+        except OSError as exc:
+            raise InstrumentError(f"{self.port}: {exc}") from exc
 
 
 def _pyserial_opener(port: str, baud: int, timeout: float):
