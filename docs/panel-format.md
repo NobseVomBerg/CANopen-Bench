@@ -70,6 +70,12 @@ interested right now" and belongs to the operator; `when` says "this
 machine does not have that part" and belongs to the device — a backwinder
 the device does not carry has no box, rather than an empty one to open.
 
+`value` also takes a list — `{obj: "0x2102:10", value: [920, 922]}` —
+because a device family is numbered rather than flagged: the part is on
+the 920 and the 922 and on nothing else, and the variant object says 920
+or 922. There is no bit anywhere that says "has a backwinder", and the
+alternative is the same box written out twice, once per number.
+
 Unknown counts as yes: a condition may take a box away once the device has
 answered, never keep one hidden before anything was asked — the object
 that would settle it usually sits behind the box it is hiding. A page-wide
