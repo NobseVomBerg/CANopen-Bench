@@ -1198,9 +1198,26 @@ function TestsPage({ s, ui, setUi }) {
           <span>${total ? runAt + ' / ' + total : '—'}</span>
         </div>
         <div style="height:6px;border-radius:3px;background:var(--bd);overflow:hidden"><span style="display:block;width:${Math.round(100 * runFrac)}%;height:100%;background:${anyFail ? 'var(--red)' : 'var(--acc)'};transition:width .4s"></span></div>
+        <!-- Every line in here has a height that does not depend on what it
+             says, because this box sits above the report list and anything
+             it does to its own height, it does to the whole column.
+             The step line changes several times a second and its text is a
+             case's own prose — one step wraps to two lines, the next does
+             not, and the box grew and shrank in time with the run. So it is
+             two lines tall whatever it says: room for the long ones,
+             reserved for the short ones. The case lines above it are single
+             lines with an ellipsis for the same reason. Both keep the whole
+             text in the title attribute, which is where it is readable
+             anyway — this is a 10.5px column, not somewhere to read a
+             sentence. -->
         <div style="margin-top:8px;font:10.5px ${MONO};color:var(--dim);line-height:1.7;min-height:56px">
-          ${(runLog.length ? runLog : [{ line: 'no run yet — select tests and press Start', fg: 'var(--faint)' }]).map((r) => html`<div style="color:${r.fg}">${r.line}</div>`)}
-          ${t.runProg && html`<div style="color:var(--acc)">TEST ${t.runProg.tid} step ${t.runProg.step}/${t.runProg.of}  ${t.runProg.text}</div>`}
+          ${(runLog.length ? runLog : [{ line: 'no run yet — select tests and press Start', fg: 'var(--faint)' }]).map((r) => html`
+            <div title=${r.line} style="color:${r.fg};${cell}">${r.line}</div>`)}
+          ${t.runProg && (() => {
+            const line = `TEST ${t.runProg.tid} step ${t.runProg.step}/${t.runProg.of}  ${t.runProg.text}`;
+            return html`<div title=${line}
+              style="color:var(--acc);height:3.4em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden">${line}</div>`;
+          })()}
         </div>
       </div>
       <div style="font-weight:600;font-size:13px;margin-top:2px">Recent reports</div>
