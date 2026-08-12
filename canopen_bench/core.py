@@ -909,6 +909,12 @@ class Bench:
             adapter = "demo"  # persisted adapter's plugin is no longer installed
         self.adapter = adapter
         self.bitrate = db.get("bitrate", "500")
+        # which channel of which adapter to open, adapter key -> channel;
+        # empty means the backend's default. What the driver reports as
+        # attached is fetched on demand (act_detect_channels), never on a
+        # snapshot — enumeration talks to the driver.
+        self.channels: dict[str, str] = db.get("channels", {})
+        self.channel_list: dict = {"adapter": "", "rows": []}
         self.own_node_id: int = int(db.get("own_node_id", 127))
         sr = db.get("scan_range", [1, 127])
         self.scan_range: tuple[int, int] = (int(sr[0]), int(sr[1]))
@@ -1284,8 +1290,10 @@ class Bench:
     def _sel_names(self) -> str:
         return ", ".join(f"node {d['node']:02d}" for d in self.sel_devices) or "no selection"
 
-    def _adapter_info(self) -> dict:
-        return next(a for a in self.adapter_cards if a["key"] == self.adapter)
+    def _adapter_info(self, adapter: str = "") -> dict:
+        want = adapter or self.adapter
+        return next((a for a in self.adapter_cards if a["key"] == want),
+                    {"key": want, "full": want, "label": want})
 
     @property
     def eds_enabled(self) -> set[str]:
@@ -1644,7 +1652,7 @@ class Bench:
             return
         self._capture_loop()
         try:
-            self.bus.connect(self.adapter, int(self.bitrate))
+            self.bus.connect(self.adapter, int(self.bitrate), self.channel_for(self.adapter))
         except Exception as exc:  # driver missing, adapter unplugged, channel busy
             self.log(f"BUS  connect failed — {exc}", "emcy0")
             return
@@ -1657,7 +1665,12 @@ class Bench:
         self._stats_t0 = 0.0
         self.connected = True
         self._reset_hb_monitor()
-        self.log(f"BUS  connected — {self._adapter_info()['full']} @ {self.bitrate} kbit/s")
+        # the channel is in the line because opening the wrong one does not
+        # fail: it delivers silence, and a bus that is simply quiet looks
+        # exactly the same. Named here, it is one glance instead of an
+        # afternoon.
+        self.log(f"BUS  connected — {self._adapter_info()['full']} @ {self.bitrate} kbit/s"
+                 f"{f' · channel {ch}' if (ch := getattr(self.bus, 'channel', None)) is not None else ''}")
         # machine-control startup validation: the tool starts offline, so
         # "validate on start" (A-05) fires on connect
         if self.mc["enabled"] and self.mc.get("scanStart"):
@@ -2175,12 +2188,48 @@ class Bench:
             # applied immediately — reconnect the running interface
             self._capture_loop()
             try:
-                self.bus.connect(self.adapter, int(self.bitrate))
+                self.bus.connect(self.adapter, int(self.bitrate), self.channel_for(self.adapter))
                 self.log(f"BUS  bitrate applied — reconnected @ {self.bitrate} kbit/s")
             except Exception as exc:
                 self.connected = False
                 self.devices = []
                 self.log(f"BUS  reconnect failed — {exc}", "emcy0")
+
+    def channel_for(self, adapter: str) -> str:
+        """The channel picked for this adapter, or "" for its default.
+
+        Per adapter rather than one setting: a bench with an IXXAT in the
+        drawer and a Vector on the desk would otherwise carry one card's
+        channel number over to the other, where it means something else
+        entirely."""
+        return str(self.channels.get(adapter, ""))
+
+    def act_set_channel(self, p: dict) -> None:
+        """Which channel of the adapter to open. Empty = the backend's
+        default. Takes effect on the next connect, like the adapter card
+        itself — reconnecting a running bus behind the operator's back is
+        what the bitrate does, and that one is a number, not a port."""
+        value = str(p.get("channel", "")).strip()
+        adapter = str(p.get("adapter") or self.adapter)
+        if value:
+            self.channels[adapter] = value
+        else:
+            self.channels.pop(adapter, None)
+        self.db.set("channels", self.channels)
+
+    def act_detect_channels(self, p: dict) -> None:
+        """Ask the driver what is attached, for the channel dropdown.
+
+        On demand, never on a snapshot: enumeration talks to the driver,
+        and a page that polls it would do so for every browser that has
+        the Setup page open.
+        """
+        adapter = str(p.get("adapter") or self.adapter)
+        self.channel_list = {"adapter": adapter, "rows": self.bus.channels(adapter)}
+        found = len(self.channel_list["rows"])
+        self.log(f"BUS  {found} channel{'' if found == 1 else 's'} reported by the "
+                 f"{self._adapter_info(adapter)['full']} driver"
+                 + ("" if found else " — driver missing, or nothing attached"), "sdo")
 
     def act_set_own_node_id(self, p: dict) -> None:
         try:
@@ -5396,6 +5445,8 @@ class Bench:
             "scanBusy": self.scan_busy,
             "adapter": self.adapter,
             "bitrate": self.bitrate,
+            "channel": self.channel_for(self.adapter),
+            "channelList": self.channel_list,
             "ownNodeId": self.own_node_id,
             "scanRange": list(self.scan_range),
             "browse": self.browse,

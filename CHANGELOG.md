@@ -27,7 +27,10 @@ development; the version counts from here.
 - Hardware backends via python-can: IXXAT VCI4 (the adapter this was
   built on), PCAN (wired up, never run against a device here) and
   CPC-USB — plus a hardware-free demo mode that simulates devices from
-  real EDS files
+  real EDS files. Which channel of a multi-port adapter to open is
+  picked on the Setup page, from what the driver reports as attached,
+  and the connect line names it — opening the wrong one does not fail,
+  it delivers silence
 - Object browser from EDS catalogs with identity matching (0x1018),
   favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id)
 - Trace monitor: 200k-frame ring buffer, newest frame at the top and the

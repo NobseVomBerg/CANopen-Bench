@@ -130,7 +130,7 @@ def test_bus_lost_callback_registered_on_both_buses(bench):
 
 def test_connect_failure_leaves_tool_disconnected(tmp_path):
     class FailingBus(CanopenBus):
-        def connect(self, adapter: str, bitrate: int) -> None:
+        def connect(self, adapter: str, bitrate: int, channel=None) -> None:
             raise RuntimeError("VCI device not found")
 
     bench = Bench(Db(tmp_path / "test.db"), bus=FailingBus())
@@ -614,7 +614,7 @@ def test_set_bitrate_reconnect_failure_disconnects_and_logs(tmp_path):
             super().__init__()
             self._connect_calls = 0
 
-        def connect(self, adapter: str, bitrate: int) -> None:
+        def connect(self, adapter: str, bitrate: int, channel=None) -> None:
             self._connect_calls += 1
             if self._connect_calls > 1:
                 raise RuntimeError("VCI device not found")
@@ -4441,3 +4441,102 @@ def test_the_sidebar_box_has_what_it_needs_and_not_what_it_does_not(tmp_path):
     assert len(psu["channels"]) == 2
     for ch in psu["channels"]:
         assert ch["volt"] is not None and ch["curr"] is not None
+
+
+# -- which channel of the adapter -------------------------------------------
+
+def test_the_chosen_channel_is_what_gets_opened(tmp_path):
+    """Opening the wrong channel does not fail — it delivers silence, and a
+    quiet bus looks exactly like a wrong one. So the choice has to reach
+    the driver, and the log line has to say which one it was."""
+    opened: list[tuple] = []
+
+    class RecordingBus(CanopenBus):
+        def connect(self, adapter: str, bitrate: int, channel=None) -> None:
+            opened.append((adapter, bitrate, channel))
+            self.adapter, self.bitrate, self.channel = adapter, bitrate, channel
+
+    bench = Bench(Db(tmp_path / "test.db"), bus=RecordingBus())
+    bench.dispatch("set_adapter", {"adapter": "vector"})
+    bench.dispatch("set_channel", {"channel": "1"})
+    bench.dispatch("connect_toggle", {})
+
+    assert opened == [("vector", 500, "1")]
+    assert any("channel 1" in ln["msg"] for ln in bench.logs), \
+        "the connect line does not say which channel it opened"
+
+
+def test_a_channel_belongs_to_its_adapter(tmp_path):
+    """One number per card, not one for the bench: 1 means the second
+    Vector channel and something else entirely on an IXXAT."""
+    bench = Bench(Db(tmp_path / "test.db"))
+    bench.dispatch("set_adapter", {"adapter": "vector"})
+    bench.dispatch("set_channel", {"channel": "1"})
+    bench.dispatch("set_adapter", {"adapter": "ixxat"})
+    assert bench.snapshot()["channel"] == ""
+    bench.dispatch("set_adapter", {"adapter": "vector"})
+    assert bench.snapshot()["channel"] == "1"
+
+    again = Bench(Db(bench.db.path))          # survives a restart
+    again.dispatch("set_adapter", {"adapter": "vector"})
+    assert again.channel_for("vector") == "1"
+
+    bench.dispatch("set_channel", {"channel": ""})   # back to the default
+    assert bench.channel_for("vector") == ""
+
+
+def test_the_channel_is_typed_the_way_the_backend_counts(tmp_path):
+    """IXXAT and Vector count channels with integers, PCAN names them.
+    A string where a driver wants an int fails inside the driver with a
+    message about neither, so the value is typed after the default."""
+    from canopen_bench.bus.canopen_bus import _channel_arg
+
+    assert _channel_arg("1", 0) == 1              # int default: a number
+    assert _channel_arg("0x2", 0) == 2
+    assert _channel_arg("PCAN_USBBUS2", "PCAN_USBBUS1") == "PCAN_USBBUS2"
+    assert _channel_arg("", 0) == 0               # empty: the default
+    assert _channel_arg(None, 0) == 0
+    assert _channel_arg("nonsense", 0) == 0       # not a number where one is needed
+
+
+def test_what_the_driver_reports_is_offered_as_it_is_labelled(tmp_path):
+    """The number is a global index across everything the driver knows —
+    virtual channels included — while the cable goes into a port counted
+    from one. Both belong in the label, or nobody can check the choice
+    against the housing."""
+    bus = CanopenBus()
+    bus._backends["vector"] = ("vector", 0, {})
+    rows = [{"interface": "vector", "channel": 1, "serial": 569359, "channel_index": 1,
+             "hw_channel": 1, "vector_channel_config": type("C", (), {"name": "VN1630A Channel 2"})()},
+            {"interface": "vector", "channel": 0, "serial": 100, "channel_index": 5,
+             "hw_channel": 0, "vector_channel_config": type("C", (), {"name": "Virtual Channel 1"})()}]
+    import canopen_bench.bus.canopen_bus as cbmod
+    real = cbmod.can.detect_available_configs
+    cbmod.can.detect_available_configs = lambda iface: rows
+    try:
+        found = bus.channels("vector")
+    finally:
+        cbmod.can.detect_available_configs = real
+
+    assert found[0]["value"] == "1"          # the global index, not hw_channel
+    assert "VN1630A Channel 2" in found[0]["label"] and "port 2" in found[0]["label"]
+    assert "SN 569359" in found[0]["label"]
+    assert found[1]["value"] == "5" and "Virtual" in found[1]["label"]
+
+
+def test_a_driver_that_cannot_enumerate_costs_nothing(tmp_path):
+    """No XL driver installed, nothing attached, a backend that does not
+    answer the question: the field still works, typed by hand."""
+    import canopen_bench.bus.canopen_bus as cbmod
+    bus = CanopenBus()
+    real = cbmod.can.detect_available_configs
+
+    def boom(iface):
+        raise OSError("driver not installed")
+
+    cbmod.can.detect_available_configs = boom
+    try:
+        assert bus.channels("vector") == []
+    finally:
+        cbmod.can.detect_available_configs = real
+    assert bus.channels("nosuchadapter") == []
