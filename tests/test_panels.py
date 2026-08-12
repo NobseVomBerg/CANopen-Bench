@@ -13,6 +13,7 @@ import time
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
+import canopen_bench.core as core_mod
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.panelspec import PanelError, load_panels, parse_panel
@@ -480,3 +481,26 @@ def test_the_tooltip_carries_every_reading_of_the_number(tmp_path):
 
     field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
     assert field["alt"] == "0x00A0 · 160"      # hex as the device stores it, then decimal
+
+
+def test_a_text_object_is_not_learned_from_an_expedited_frame(tmp_path):
+    """An expedited response carries four bytes. For a device name that is
+    the first letter, and "DemoDevice" came back as 68 — 0x44 read as a
+    number, overwriting the string somebody had actually read. The rest
+    arrives in segments this decoder does not follow, so there is nothing
+    here worth remembering for a text object."""
+    bench = _bench_with_panel(tmp_path)
+    # the demo device's EDS, which declares 0x2004 as a VISIBLE_STRING —
+    # without a type there is nothing to go on, and the sample is kept
+    bench.db.eds_write_file("dut_alpha_v2.eds",
+                            core_mod.SEED_EDS.read_text(encoding="utf-8"))
+    bench._ods.retarget(bench.db.eds_dir)
+    bench.obj_vals["0x2004:00"] = "DemoDevice"
+    bench.obj_vals_at["0x2004:00"] = time.monotonic() - 60
+
+    # node 1's answer for 0x2004:00, one byte, 0x44 = "D"
+    bench._annotate_sdo({"cob": "0x581", "data": "4F 04 20 00 44 00 00 00",
+                         "node": 1, "cls": "SDO", "obj": "", "val": ""})
+
+    assert (1, "0x2004:00") not in bench.seen_vals
+    assert bench._panel_value("0x2004:00", 1)[0] == "DemoDevice"
