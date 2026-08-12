@@ -35,6 +35,7 @@ from .bus.demo import EdsDemoBus
 from .bus.interface import NO_SERIAL, BusInterface, SdoResult
 from .db import Db
 from .eds_od import OdCache, find_var, pdo_mapping
+from .panelspec import PanelError, load_panels
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 from .symbols import SymbolTables, load_symbols
 from .values import BASES, Field, alternatives, base_of, describe, format_number, parse_value
@@ -47,6 +48,12 @@ VERSION = __version__  # single source: canopen_bench/__init__.py
 # `pip install canopen-bench` produced a demo mode that scanned and found
 # nothing at all. Keep it here, and keep seed/*.eds in package-data.
 SEED_EDS = Path(__file__).resolve().parent / "seed" / "DemoDevice.eds"
+
+#: The panels the core itself ships (canopen_bench/panelspec.py). Only for
+#: devices the core can honestly describe — the demo device it also ships
+#: the EDS for. Everything else arrives through a plugin, which is where
+#: the knowledge of a real device lives.
+PANEL_DIR = Path(__file__).resolve().parent / "panels"
 
 #: Communication objects only, for a device whose own EDS is not to hand —
 #: the machine's own controllers, a foreign node that happens to sit on the
@@ -847,6 +854,13 @@ class Bench:
         self._device_panels = [(f"{p.name}.{panel.key}", panel)
                                for p in self.plugins for panel in p.device_panels()]
         self._panels_broken: set[str] = set()
+        # Object-page panels (panelspec.py): plugin files first, the core's
+        # own last, so a vendor panel takes its devices from the general
+        # one rather than competing with it. Read from the packages, never
+        # copied into the workspace.
+        self._obj_panels = load_panels(
+            [path for p in self.plugins for path in p.object_panels()] + [PANEL_DIR],
+            log=lambda msg: self.log(msg, "emcy0"))
         # how to read an object's value symbolically, keyed "0x2007:09"
         self._object_fields: dict[str, list[Field]] = {}
         for p in self.plugins:
@@ -1047,6 +1061,13 @@ class Bench:
         # hex or dec for every object value shown; the other reading stays
         # one hover away, so switching can never hide anything
         self.num_base: str = db.get("num_base", "hex")
+        # object area: the numeric table, or the panel a plugin describes
+        # for this device. Both a habit rather than a per-session choice,
+        # so both are remembered — including which boxes are folded away,
+        # keyed "<panel>/<group title>"
+        self.obj_view: str = db.get("obj_view", "table")
+        self.panel_open: dict[str, bool] = db.get("panel_open", {})
+        self.panel_busy = False  # a box- or page-wide read is walking the objects
         self.symbols_dir = db.path.parent / "symbols"
         self.symbols: SymbolTables = self._load_symbols()
         # test-config paths default into the workspace folder; the default is
@@ -3112,6 +3133,143 @@ class Bench:
             self.log(f"SDO  write {idx}:{sub} ← {value} (node {node})", "sdo")
         else:
             self.log(f"SDO  write {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
+
+    # -- object panels (a device's values as named boxes) ---------------------
+    def _panel(self):
+        """The panel for the selected device, or None. First match wins —
+        plugin panels are ahead of the core's own (see ``_obj_panels``)."""
+        sel = self.sel_devices
+        if not sel:
+            return None
+        return next((p for p in self._obj_panels if p.matches(sel[0])), None)
+
+    def _panel_open(self, panel, group) -> bool:
+        """Whether a box is unfolded. The spec says how it opens the first
+        time; what the operator folded away afterwards outranks it."""
+        return self.panel_open.get(f"{panel.name}/{group.title}", not group.collapsed)
+
+    def _panel_field(self, idx: str, sub: str):
+        panel = self._panel()
+        if panel is None:
+            return None
+        key = f"{idx}:{sub}"
+        return next((f for g in panel.groups for f in g.fields if f.key == key), None)
+
+    def _panel_view(self) -> dict | None:
+        """The panel as the browser draws it: values already formatted,
+        because scale and unit belong to the field that declares them and
+        formatting them twice is how the two drift apart."""
+        panel = self._panel()
+        if panel is None:
+            return None
+        vals = self.obj_vals
+        return {
+            "name": panel.name,
+            "busy": self.panel_busy,
+            "groups": [{
+                "title": g.title,
+                "cols": g.cols,
+                "open": self._panel_open(panel, g),
+                "fields": [{"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
+                            "rw": f.rw, "val": f.show(vals.get(f.key))} for f in g.fields],
+            } for g in panel.groups],
+        }
+
+    def act_obj_view(self, p: dict) -> None:
+        """Numeric table or panel for the object area."""
+        self.obj_view = "panel" if str(p.get("view")) == "panel" else "table"
+        self.db.set("obj_view", self.obj_view)
+
+    def act_panel_fold(self, p: dict) -> None:
+        panel = self._panel()
+        group = next((g for g in panel.groups if g.title == p.get("group")), None) \
+            if panel else None
+        if panel is None or group is None:
+            return
+        self.panel_open[f"{panel.name}/{group.title}"] = not self._panel_open(panel, group)
+        self.db.set("panel_open", self.panel_open)
+
+    def act_panel_set(self, p: dict) -> None:
+        """A value typed into a box: staged like the object table's, the
+        next Write sends it — but read through the field's own scale. The
+        box says 16.0 cN and the device stores 160; a panel that staged
+        the digits as typed would write a sixteenth of what it shows.
+
+        A field without a scale goes through the table's own parsing,
+        which knows hex, binary and symbol names — none of which a scaled
+        physical quantity has any use for.
+        """
+        fld = self._panel_field(p.get("idx", ""), p.get("sub", ""))
+        if fld is None or fld.scale == 1.0:
+            self.act_obj_set(p)
+            return
+        key = f"{p['idx']}:{p['sub']}"
+        text = str(p.get("val", ""))
+        if not text.strip():
+            self.obj_vals[key] = ""
+            return
+        try:
+            raw = fld.to_raw(text)
+        except PanelError as exc:
+            self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
+            return
+        width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
+        self.obj_vals[key] = f"0x{raw:0{width}X}"
+
+    def act_panel_read(self, p: dict) -> None:
+        """Read one box (``group``) or every box that is open.
+
+        Folded boxes are not read: folding one away is the only thing that
+        says "not interested right now", and a page-wide read that walks
+        them anyway would make it meaningless. Nothing here is periodic —
+        a panel that polls turns showing a value into bus load nobody
+        asked for.
+        """
+        if not self.connected or self.panel_busy:
+            return
+        panel = self._panel()
+        if panel is None:
+            return
+        want = p.get("group")
+        addrs: list[tuple[str, str]] = []
+        for g in panel.groups:
+            if (g.title != want) if want else (not self._panel_open(panel, g)):
+                continue
+            addrs += [(f.idx, f.sub) for f in g.fields]
+        seen: set[tuple[str, str]] = set()  # one read per object, in panel order
+        addrs = [a for a in addrs if not (a in seen or seen.add(a))]
+        if addrs:
+            self._spawn(self._panel_read_async(addrs))
+
+    async def _panel_read_async(self, addrs: list[tuple[str, str]]) -> None:
+        """Walk a list of objects, one SDO at a time, off the event loop.
+
+        Values land as they arrive rather than in one lump at the end: a
+        box of forty objects takes a noticeable moment, and watching it
+        fill is the difference between a slow tool and a hung one. Only
+        the failures are logged individually — a line per successful read
+        would bury the run log under something nobody reads back.
+        """
+        self.panel_busy = True
+        node = self._target_node()
+        done = 0
+        try:
+            for idx, sub in addrs:
+                if not self.connected:
+                    break
+                res = await asyncio.to_thread(self.bus.sdo_read, node, idx, sub)
+                key = f"{idx}:{sub}"
+                if res.ok:
+                    self.obj_vals[key] = res.value
+                    self._remember(key, res.value)
+                    done += 1
+                else:
+                    self.log(f"SDO  read {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
+                self._changed()
+        finally:
+            self.panel_busy = False
+            self.log(f"OBJ  read {done} of {len(addrs)} objects (node {node})", "sdo")
+            self._changed()
 
     # -- favorites (named object sets, persisted in the workspace db) --------
     def _fav_rows(self) -> list[dict]:
@@ -5263,6 +5421,9 @@ class Bench:
                 "hint": obj_hint,
                 "base": self.num_base,
                 "fmt": self._value_view(catalog),
+                "view": self.obj_view,
+                "panel": self._panel_view() if self.obj_view == "panel" else None,
+                "hasPanel": self._panel() is not None,
             },
             "mirror": self._mirror_data(),
             "psu": self._psu_data(),

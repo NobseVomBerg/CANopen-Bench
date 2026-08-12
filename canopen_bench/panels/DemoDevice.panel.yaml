@@ -1,0 +1,35 @@
+# The one panel the core ships, for the one device it can honestly
+# describe: the demo device whose EDS it also ships. It exists so the
+# panel view can be looked at without a plugin, and so the format has a
+# worked example that is kept working by the test suite.
+#
+# A real device's panel belongs to the plugin that knows the device —
+# see BenchPlugin.object_panels() and docs/panel-format.md.
+name: Demo Device
+match: {eds: "DemoDevice.eds"}
+
+groups:
+  - title: Status
+    fields:
+      - {label: Application status, obj: "0x2000:00"}
+      - {label: Application mode,   obj: "0x2001:00", rw: true}
+      - {label: Board temperature,  obj: "0x2002:00", unit: "°C"}
+      - {label: Error register,     obj: "0x1001:00"}
+
+  - title: Motion
+    fields:
+      - {label: Velocity actual, obj: "0x606C:00", unit: rpm}
+      - {label: Target velocity, obj: "0x60FF:00", unit: rpm, rw: true}
+
+  # cols: two short columns rather than one long one — and collapsed,
+  # because identity is what you look up once and then stop looking at
+  - title: Identity
+    cols: 2
+    collapsed: true
+    fields:
+      - {label: Device name,    obj: "0x2004:00"}
+      - {label: Firmware build, obj: "0x2003:00"}
+      - {label: Vendor-ID,      obj: "0x1018:01"}
+      - {label: Product code,   obj: "0x1018:02"}
+      - {label: Revision,       obj: "0x1018:03"}
+      - {label: Serial number,  obj: "0x1018:04"}
