@@ -77,10 +77,12 @@ development; the version counts from here.
   per box or per page and never on a timer. Values a plugin declared
   symbolically appear as dropdowns and single-bit checkboxes, named by
   the firmware's own headers, and both write back into the value last
-  read rather than over it. Described by a `*.panel.yaml` a plugin ships
-  (`docs/panel-format.md`); the core ships one for the objects CiA 301
-  makes mandatory, so every device has a panel, and one for its own demo
-  device
+  read rather than over it. A box the machine does not have is not drawn
+  — `when:` names the object that decides, by a bit or by the variant
+  numbers that carry the part. Described by a `*.panel.yaml` a plugin
+  ships (`docs/panel-format.md`); the core ships one for the objects CiA
+  301 makes mandatory, so every device has a panel, and one for its own
+  demo device
 - Plugin system (`canopen_bench.plugins` entry-point group, 17 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate

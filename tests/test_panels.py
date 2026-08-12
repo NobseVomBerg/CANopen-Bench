@@ -456,6 +456,34 @@ def test_a_page_read_asks_what_the_conditions_are_about(tmp_path):
     assert ("0x2050", "00") in asked
 
 
+VARIANTS = """
+name: Sample Feeder
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Always
+    fields: [{obj: "0x2040:01"}]
+  - title: Backwinder
+    when: {obj: "0x2050:00", value: [920, 922]}
+    fields: [{obj: "0x2040:02"}]
+"""
+
+
+def test_a_part_two_variants_carry_is_one_box_not_two(tmp_path):
+    """A device family is numbered, not flagged: the backwinder is on the
+    920 and the 922 and on nothing else, and the variant object answers
+    920 or 922. Without a list that box has to be written out twice, with
+    every field in it duplicated, to express one "or"."""
+    bench = _bench_with_panel(tmp_path, VARIANTS)
+    bench.dispatch("obj_view", {"view": "panel"})
+
+    for variant, expected in ((920, ["Always", "Backwinder"]),
+                              (922, ["Always", "Backwinder"]),
+                              (800, ["Always"])):
+        bench.obj_vals["0x2050:00"] = f"0x{variant:04X}"
+        bench.obj_vals_at["0x2050:00"] = time.monotonic()
+        assert _titles(bench) == expected, variant
+
+
 @pytest.mark.parametrize("text, complaint", [
     ("groups: [{title: A, when: 3, fields: []}]", "must be a mapping"),
     ("groups: [{title: A, when: {bit: 3}, fields: []}]", "needs an obj"),
@@ -463,6 +491,8 @@ def test_a_page_read_asks_what_the_conditions_are_about(tmp_path):
     ("groups: [{title: A, when: {obj: '0x2000', bit: 1, value: 2}, fields: []}]", "both"),
     ("groups: [{title: A, when: {obj: '0x2000', bit: 99}, fields: []}]", "0…31"),
     ("groups: [{title: A, when: {obj: '0x2000', bti: 1}, fields: []}]", "unknown"),
+    ("groups: [{title: A, when: {obj: '0x2000', value: []}, fields: []}]", "at least one"),
+    ("groups: [{title: A, when: {obj: '0x2000', value: [1, x]}, fields: []}]", "list of numbers"),
 ])
 def test_a_condition_that_cannot_be_answered_is_an_error(text, complaint):
     with pytest.raises(PanelError) as caught:
