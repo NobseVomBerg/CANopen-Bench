@@ -1917,6 +1917,7 @@ class Bench:
         obj = f"0x{idx:04X}:{sub:02X}"
         node = cob & 0x7F
         eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
+        var = None
         if eds and eds != "—":
             od = self._ods.load(eds)
             var = find_var(od, idx, sub) if od else None
@@ -1930,7 +1931,13 @@ class Bench:
             row["val"] = str(value)
             if live:
                 self._plot_sample(idx, sub, value)
-                self._bus_sample(node, idx, sub, value, n)
+                # not a text object: an expedited frame carries the first
+                # four bytes of a device name, and "DemoDevice" would come
+                # back as 68 — the first letter read as a number. The
+                # rest arrives in segments this decoder does not follow,
+                # so there is nothing here worth remembering for one.
+                if var is None or var.data_type not in self._NO_PAD_TYPES:
+                    self._bus_sample(node, idx, sub, value, n)
 
     # predefined connection set: PDO function code -> mapping object
     _PDO_MAPPING_INDEX = {0x180: 0x1A00, 0x280: 0x1A01, 0x380: 0x1A02, 0x480: 0x1A03,
