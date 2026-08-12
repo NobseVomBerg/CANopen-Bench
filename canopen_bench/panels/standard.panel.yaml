@@ -1,0 +1,25 @@
+# The panel every device gets when nothing more specific is offered: the
+# objects CiA 301 makes mandatory, which is the most a neutral core can
+# honestly claim to know about an unknown device.
+#
+# It exists so the panel view is never an empty promise. Without it the
+# view is invisible until somebody writes a file, and "no panel for this
+# device" looks exactly like "the update did not install".
+#
+# A panel that names its devices wins over this one (see Bench._panel),
+# so a vendor panel replaces it rather than competing with it.
+name: Standard objects
+
+groups:
+  - title: Identity
+    cols: 2
+    fields:
+      - {label: Vendor-ID,     obj: "0x1018:01"}
+      - {label: Product code,  obj: "0x1018:02"}
+      - {label: Revision,      obj: "0x1018:03"}
+      - {label: Serial number, obj: "0x1018:04"}
+
+  - title: Status
+    fields:
+      - {label: Device type,    obj: "0x1000:00"}
+      - {label: Error register, obj: "0x1001:00"}
