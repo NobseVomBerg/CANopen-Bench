@@ -118,6 +118,26 @@ def test_the_trace_toolbar_offers_autosave():
     assert "auto.warn" in app and "never switches itself off" in app
 
 
+def test_the_run_box_keeps_its_height_whatever_the_step_line_says():
+    """The step line under the progress bar updates several times a second
+    and its text is a test case's own prose, so it wrapped to two lines on
+    one step and back to one on the next — and the box, and everything
+    below it in that column, moved with it. It reads as a flicker, on the
+    one part of the screen somebody watches during a run.
+
+    So the line is two lines tall whatever it says: `height` reserves the
+    space, the clamp stops a third line from claiming more. Drop either and
+    the jitter is back — the height alone lets long text overflow into the
+    box, the clamp alone lets short text shrink it.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    line = next((ln for ln in app.splitlines() if "-webkit-line-clamp" in ln), "")
+    assert line, "the step line no longer clamps — long text can grow the box"
+    assert "height:3.4em" in line, (
+        "the step line has no reserved height — short text shrinks the box")
+    assert "-webkit-line-clamp:2" in line
+
+
 def test_the_trace_table_places_rows_by_the_same_height_it_draws_them():
     """The table draws only the rows on screen and positions them by index
     rather than stacking them, because an hour of bus is 200k rows and no
