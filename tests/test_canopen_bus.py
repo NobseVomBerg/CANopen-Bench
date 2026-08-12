@@ -102,9 +102,9 @@ def master(channel, slave):
 def unplugged():
     """A bus with a trace queue and no interface behind it.
 
-    Everything about mapping a frame's timestamp happens in `poll_frames`,
-    out of a queue a test can fill by hand — no adapter, no Notifier, no
-    protocol. Borrowing `master` for those cost a virtual network per test
+    Everything about mapping a frame's timestamp happens in `poll_frames`
+    and `_rx_time`, out of a queue a test can fill by hand — no adapter, no
+    Notifier, no protocol. Borrowing `master` for those cost a virtual network per test
     and, worse, its teardown: `Network.disconnect()` joins the reader
     thread, and python-can's Notifier only looks at its stop flag between
     one-second receive timeouts. Two seconds per test, twelve of them, for
@@ -459,3 +459,106 @@ def test_poll_frames_reanchors_when_the_clock_steps(unplugged):
 
     fmt = "%H:%M:%S.%f"
     assert frames[1].time == datetime.fromtimestamp(host + 0.5).strftime(fmt)
+
+
+def _rx(bus, cob: int, hw_at: float, arrival_at: float) -> None:
+    bus._trace.queue.append(
+        ("RX", can.Message(arbitration_id=cob, data=[0], timestamp=hw_at), arrival_at))
+
+
+def _tx(bus, cob: int, host_at: float) -> None:
+    bus._trace.queue.append(
+        ("TX", can.Message(arbitration_id=cob, data=[0], timestamp=host_at), host_at))
+
+
+def test_a_response_stamped_before_its_request_corrects_the_clock(unplugged):
+    """The estimate is a statistic, and on the bench it came out a fifth of
+    a second low: every SDO response stamped ~212 ms before the request it
+    answered, hour after hour, while drift and window were doing their job.
+
+    Whatever the adapter's clock was up to, one thing about it is knowable
+    without measuring anything: the answer came after the question, because
+    we asked. The deficit is the error, and it is carried forward — pulling
+    up only the frame that gave it away would leave the next one just as
+    wrong, which is what makes this different from a clamp.
+    """
+    unplugged._trace = _TraceListener()
+    hw, host = 50644.0, time.time()
+
+    _rx(unplugged, 0x701, hw, host)                    # anchors the offset
+    # a sample 212 ms "too good" — the gap it reports is impossible, and the
+    # estimator has no way to know: it drops the offset there and then
+    _rx(unplugged, 0x701, hw + 0.213, host + 0.001)
+    _tx(unplugged, 0x601, host + 0.010)                # our request
+    _rx(unplugged, 0x581, hw + 0.011, host + 0.012)    # its answer, 1 ms later
+    _rx(unplugged, 0x181, hw + 0.015, host + 0.016)    # an unrelated frame after
+    frames = unplugged.poll_frames(max_frames=16)
+
+    fmt = "%H:%M:%S.%f"
+    request = datetime.strptime(frames[2].time, fmt)
+    answer = datetime.strptime(frames[3].time, fmt)
+    assert answer >= request, \
+        f"answer at {frames[3].time} before request at {frames[2].time}"
+
+    later = datetime.strptime(frames[4].time, fmt)
+    want = datetime.strptime(datetime.fromtimestamp(host + 0.015).strftime(fmt), fmt)
+    off_ms = abs((later - want).total_seconds()) * 1000
+    assert off_ms < 2.0, \
+        f"the frame after the correction is still {off_ms:.0f} ms out"
+
+
+def test_a_late_answer_is_left_where_it_is(unplugged):
+    """Only the impossible direction is corrected. A device that takes its
+    time is the normal case and carries no information about the clock —
+    reading a slow answer as an offset error would drag the whole trace.
+    """
+    unplugged._trace = _TraceListener()
+    hw, host = 50644.0, time.time()
+
+    _rx(unplugged, 0x701, hw, host)
+    _tx(unplugged, 0x601, host + 0.010)
+    _rx(unplugged, 0x581, hw + 0.060, host + 0.061)   # answered after 50 ms
+    frames = unplugged.poll_frames(max_frames=16)
+
+    fmt = "%H:%M:%S.%f"
+    assert frames[2].time == datetime.fromtimestamp(host + 0.060).strftime(fmt)
+    assert unplugged._ts_bias == 0.0
+
+
+def test_a_frame_is_never_stamped_after_we_read_it(unplugged):
+    """The other bound needs no protocol at all: a frame happened before we
+    got it. A driver clock running ahead of the PC's would otherwise put
+    receptions in the future, where they sort above frames that really are
+    newer.
+    """
+    unplugged._trace = _TraceListener()
+    host = time.time()
+    # epoch-based stamp (close enough to arrival that no offset is applied),
+    # 50 ms ahead of the wall clock
+    _rx(unplugged, 0x181, host + 0.050, host)
+    frames = unplugged.poll_frames(max_frames=8)
+
+    assert frames[0].time == datetime.fromtimestamp(host).strftime("%H:%M:%S.%f")
+
+
+def test_a_stepped_clock_drops_the_correction_with_the_offset(unplugged):
+    """A re-anchor says the mapping itself is gone — adapter reset, or a PC
+    clock that stepped. What causality proved about the old mapping says
+    nothing about the new one, and keeping it would bend every frame after
+    the step by that much.
+    """
+    unplugged._trace = _TraceListener()
+    hw, host = 50644.0, time.time()
+
+    _rx(unplugged, 0x701, hw, host)
+    _rx(unplugged, 0x701, hw + 0.213, host + 0.001)    # the impossible sample again
+    _tx(unplugged, 0x601, host + 0.010)
+    _rx(unplugged, 0x581, hw + 0.011, host + 0.012)    # corrects: bias ~0.21
+    assert unplugged.poll_frames(max_frames=16)
+    assert unplugged._ts_bias > 0.1
+
+    _rx(unplugged, 0x181, 12.5, host + 0.5)            # driver clock restarted
+    frames = unplugged.poll_frames(max_frames=8)
+
+    assert unplugged._ts_bias == 0.0
+    assert frames[0].time == datetime.fromtimestamp(host + 0.5).strftime("%H:%M:%S.%f")
