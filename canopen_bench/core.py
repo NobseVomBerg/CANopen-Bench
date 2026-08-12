@@ -3299,6 +3299,15 @@ class Bench:
                # PDO carried past three minutes ago must not look like a
                # reading taken just now
                "src": src, "age": round(age, 1)}
+        # every reading of the number for the tooltip — hex, decimal, and
+        # the symbolic one where a plugin declared fields. A panel prints
+        # decimal because that is what its units are read in, which is
+        # exactly why the other readings have to stay one hover away
+        # (the same `alternatives` the object table and favourites use)
+        shown = _typed_number(raw or "")
+        if shown is not None:
+            out["alt"] = alternatives(shown, self._object_fields.get(f.key, []),
+                                      self.symbols, len((raw or "").removeprefix("0x")) or 2)
         value = _typed_number(raw or "") or 0
         if f.widget == "flag":
             out["on"] = bool(value >> f.bit & 1)
