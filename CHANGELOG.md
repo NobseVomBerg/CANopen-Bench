@@ -69,7 +69,12 @@ development; the version counts from here.
 - Multi-workspace mode under `data/` — each workspace is a complete,
   self-contained configuration (db, EDS folder, traces, test cases,
   results)
-- Plugin system (`canopen_bench.plugins` entry-point group, 16 hooks)
+- Objects page panel view: a device's values as named boxes — grouped,
+  with the unit and the scaling an EDS does not carry, read per field,
+  per box or per page and never on a timer. Described by a
+  `*.panel.yaml` a plugin ships (`docs/panel-format.md`); the core ships
+  one for its own demo device
+- Plugin system (`canopen_bench.plugins` entry-point group, 17 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed

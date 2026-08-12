@@ -819,6 +819,61 @@ function outOfRange(display, min, max) {
   return (min != null && n < min) || (max != null && n > max);
 }
 
+// Panel view of the object area: a device's values as named boxes instead
+// of a numeric table, described by a file a plugin ships
+// (canopen_bench/panelspec.py). Everything shown here is formatted core-side
+// — scale, unit and digits belong to the field that declares them, and
+// formatting them a second time here is how the two readings drift apart.
+//
+// Boxes are read on demand, never on a timer: per field (⟳), per box, or
+// every box that is open. Folding one away is what says "not interested",
+// so a page-wide read skips it.
+function PanelBox({ g, busy }) {
+  const cell = (f) => {
+    // the unit column is there whether or not this field has one: a box
+    // where the rows with "mA" end in one place and the rows without end
+    // in another reads as two half-aligned lists
+    const unit = html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`;
+    return html`
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
+          title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
+        <span title=${`${f.idx}:${f.sub}`}
+          style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>
+        ${f.rw ? html`
+          <${SyncInput} value=${f.val} title="staged value — Write sends it"
+            onCommit=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, val: v })}
+            style="border:1px solid var(--inp);background:var(--panel);color:${f.val ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:78px;outline:none;text-align:right;flex:none" />
+          ${unit}
+          <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
+            style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
+        : html`
+          <span style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:66px;text-align:right;flex:none">${f.val || '—'}</span>
+          ${unit}
+          <span style="width:44px;flex:none"></span>`}
+      </div>`;
+  };
+  return html`
+    <div style="border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);align-self:start">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);border-bottom:${g.open ? '1px solid var(--bd2)' : 'none'}">
+        <span class="hv" onClick=${() => send('panel_fold', { group: g.title })}
+          title=${g.open ? 'fold this box away' : 'unfold'}
+          style="cursor:pointer;font-weight:600;font-size:12px;flex:1;min-width:0;display:flex;align-items:center;gap:7px">
+          <span style="color:var(--faint);font-size:10px">${g.open ? '▾' : '▸'}</span>${g.title}
+        </span>
+        <span style="font:10px ${MONO};color:var(--faint)">${g.fields.length}</span>
+        ${g.open && html`
+          <span class="hv-b" onClick=${() => !busy && send('panel_read', { group: g.title })}
+            title="read every value in this box"
+            style="${btn.acc}font-size:10.5px;padding:2px 9px;border-radius:4px;cursor:${busy ? 'default' : 'pointer'};opacity:${busy ? 0.5 : 1}">Read</span>`}
+      </div>
+      ${g.open && html`
+        <div style="display:grid;grid-template-columns:repeat(${g.cols}, minmax(0,1fr));gap:2px 18px;padding:8px 12px 10px">
+          ${g.fields.map(cell)}
+        </div>`}
+    </div>`;
+}
+
 function ObjectsPage({ s, ui, setUi }) {
   // favorites panel width: user-resizable via the divider, persisted
   const [favW, setFavW] = useState(() => Math.min(640, Math.max(240, parseInt(localStorage.getItem('cb-fav-w') || '340', 10) || 340)));
@@ -920,12 +975,54 @@ function ObjectsPage({ s, ui, setUi }) {
     ? `last known values · SN ${selDevs[0].sn} · from workspace db${s.favorites.lastDb ? ' (' + s.favorites.lastDb + ')' : ''}`
     : 'select a device to restore last known values (matched via 0x1018:04 serial number)';
 
+  // The object area shows one of two things: the numeric table, or the
+  // panel a plugin describes for this device. The switch only appears
+  // where there is something to switch to — a chip that can never do
+  // anything is worse than no chip.
+  const panel = s.objects.panel;
+  const view = panel ? 'panel' : 'table';
+  const viewChip = ([key, label]) => {
+    const on = view === key;
+    return html`
+      <span class=${on ? '' : 'hv'} onClick=${() => send('obj_view', { view: key })}
+        style="flex:1;text-align:center;padding:4px 0;border-radius:5px;cursor:pointer;font:600 11px 'IBM Plex Sans';border:1px solid ${on ? 'var(--acc-bd)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'}">${label}</span>`;
+  };
+  const viewSwitch = s.objects.hasPanel && html`
+    <div style="display:flex;gap:4px;padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid var(--bd2)">
+      ${[['table', 'Table'], ['panel', 'Panel']].map(viewChip)}
+    </div>`;
+
+  const panelArea = panel && [
+    html`
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--bd);background:var(--panel)">
+        <span style="font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${panel.name}</span>
+        <span style="font:10px ${MONO};color:var(--faint)">values are read on request — nothing here polls the device</span>
+        <span style="margin-left:auto;font:10px ${MONO};color:var(--faint)">node ${mirrorNode}</span>
+        <span class="hv-b" onClick=${() => !panel.busy && send('panel_read', {})}
+          title="read every value in every open box"
+          style="${btn.acc}font-size:10.5px;padding:3px 10px;border-radius:5px;cursor:${panel.busy ? 'default' : 'pointer'};opacity:${panel.busy ? 0.5 : 1}">${panel.busy ? '⟳ reading…' : '⟳ Read all open'}</span>
+      </div>`,
+    html`
+      <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;align-content:start">
+        ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy} />`)}
+      </div>`,
+  ];
+
   return html`
   <div style="flex:1;display:flex;min-height:0">
     <div style="width:200px;flex:none;border-right:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column;padding:12px 10px;gap:4px">
-      ${!s.objects.groups.length && html`
+      ${viewSwitch}
+      ${view === 'panel' && panel.groups.map((g) => html`
+        <div class="hv" onClick=${() => send('panel_fold', { group: g.title })}
+          title=${g.open ? 'fold this box away' : 'unfold this box'}
+          style="display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:${g.open ? 'var(--tx)' : 'var(--faint)'}">
+          <span style="color:var(--faint);font-size:10px">${g.open ? '▾' : '▸'}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.title}</span>
+          <span style="font:10px ${MONO};color:var(--faint)">${g.fields.length}</span>
+        </div>`)}
+      ${view !== 'panel' && !s.objects.groups.length && html`
         <div style="font-size:11px;color:var(--faint);line-height:1.5;padding:4px">${s.objects.hint}</div>`}
-      ${s.objects.groups.map((g) => {
+      ${view !== 'panel' && s.objects.groups.map((g) => {
         const on = ui.objGroup === g.key;
         return html`
         <div class=${on ? '' : 'hv'} onClick=${() => setUi({ ...ui, objGroup: g.key })}
@@ -937,6 +1034,7 @@ function ObjectsPage({ s, ui, setUi }) {
     </div>
 
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel2)">
+      ${view === 'panel' ? panelArea : html`
       <div style="display:grid;grid-template-columns:${cols};padding:7px 0 7px 14px;border-bottom:1px solid var(--bd);font:600 10.5px 'IBM Plex Sans';color:var(--dim);text-transform:uppercase;letter-spacing:.05em;background:var(--panel)">
         <span>Index</span><span>Sub</span><span>Name</span><span>Type</span><span>Acc</span>
         <span style="display:flex;align-items:center;gap:6px">Value
@@ -978,7 +1076,10 @@ function ObjectsPage({ s, ui, setUi }) {
             </span>
           </div>`;
         })}
-      </div>
+      </div>`}
+      ${''/* the RAW box belongs to both views: it is the same page's
+             free-hand end, and a panel that hid it would send someone
+             back to the table for one SDO */}
       <div style="flex:none;border-top:1px solid var(--bd);background:var(--panel);padding:8px 14px 10px;display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:600;font-size:11px;color:var(--dim)">RAW SDO · PDO · NMT</span>

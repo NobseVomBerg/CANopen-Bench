@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.86"
+version = "1.0.87"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
 license = "MIT"
@@ -78,7 +78,8 @@ include = ["canopen_bench*"]
 # testReportStyle.css is the report stylesheet, written into the results
 # folder on first use (report.default_css) — a file, not a string in
 # report.py, so it can be edited and diffed as the CSS it is.
-canopen_bench = ["static/**/*", "flows/*.yaml", "seed/*.eds", "testReportStyle.css"]
+canopen_bench = ["static/**/*", "flows/*.yaml", "panels/*.yaml", "seed/*.eds",
+                 "testReportStyle.css"]
 
 [tool.ruff]
 line-length = 110
