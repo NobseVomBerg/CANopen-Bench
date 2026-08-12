@@ -175,6 +175,94 @@ def test_favorites_toggle_read_and_persist(bench):
     assert bench.favorites == []
 
 
+#: an array whose sub-indices run past nine, which is where the addresses
+#: stop being digits — "0A" onwards. Written the way an EDS writes them.
+WIDE_ARRAY_EDS = SEED_EDS + """
+[2102]
+ParameterName=System Parameter
+ObjectType=0x8
+SubNumber=4
+
+[2102sub9]
+ParameterName=HW Version Aux Board
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+DefaultValue=6
+
+[2102subA]
+ParameterName=HW Version Main Board
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+DefaultValue=0
+
+[2102subB]
+ParameterName=AD Value Yarn Tension
+ObjectType=0x7
+DataType=0x0004
+AccessType=ro
+DefaultValue=415
+
+[2102subF]
+ParameterName=AD Value Winder Current
+ObjectType=0x7
+DataType=0x0004
+AccessType=ro
+DefaultValue=0
+"""
+
+
+def _with_wide_eds(bench) -> None:
+    """Select node 1 and give the EDS it is already assigned the wide array,
+    so the catalog these lookups read really holds sub-indices past nine."""
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.db.eds_write_file(bench.sel_devices[0]["eds"], WIDE_ARRAY_EDS)
+
+
+def test_an_object_past_sub_index_nine_answers_to_its_own_name(bench):
+    """"0A" is an address, not a number that names a base.
+
+    Sub-indices are written in hex, so past nine they start with a letter
+    — and the parser these lookups went through reads *values*, where a
+    leading zero followed by a letter announces a base ("0b1100" is
+    binary). None of 0A…0F announces one that exists, so all six came
+    back as "not a number", and a lookup comparing one of those against
+    another matched on the first row that also failed to parse. Every
+    object past sub-index nine answered to the name of 0x0A: the
+    favourites panel showed "HW Version Main Board" against six
+    different addresses, each with its own correct value beside it.
+    """
+    _with_wide_eds(bench)
+    for name, want in (("09", "System Parameter/HW Version Aux Board"),
+                       ("0A", "System Parameter/HW Version Main Board"),
+                       ("0B", "System Parameter/AD Value Yarn Tension"),
+                       ("0F", "System Parameter/AD Value Winder Current")):
+        assert bench._object_label("0x2102", name) == want, name
+        assert bench._object_label("2102", name) == want, f"{name} unprefixed"
+        assert bench._object_label("0x2102", f"0x{name}") == want, f"{name} prefixed"
+    # and an address that is no address at all still answers with nothing,
+    # rather than with whichever row fails to parse first
+    assert bench._object_label("0x2102", "zz") == ""
+
+
+def test_a_favorite_takes_the_name_the_catalog_gives_it_now(bench):
+    """The name is stored with the favourite, so one added while 0A…0F
+    resolved wrongly kept that name for good — the fix above would have
+    reached no workspace that already had favourites in it. The panel
+    shows the name looked up now; the stored one only stands in where
+    nothing can answer."""
+    _with_wide_eds(bench)
+    bench.favorites.append({"idx": "0x2102", "sub": "0B",
+                            "label": "HW Version Main Board"})   # the wrong one
+    assert bench._fav_view()[0]["label"] == "System Parameter/AD Value Yarn Tension"
+    assert bench.favorites[0]["label"] == "HW Version Main Board"  # untouched on disk
+
+    bench.dispatch("dev_toggle", {"node": 1})   # deselected — nothing to look up in
+    assert bench._fav_view()[0]["label"] == "HW Version Main Board"
+
+
 def test_favorites_migrates_legacy_fav_sets(tmp_path):
     """Old workspaces stored named favorite sets ("fav_sets" + active
     "fav_set"); those carry over into the single auto-saved list on init."""
