@@ -74,9 +74,13 @@ development; the version counts from here.
   results)
 - Objects page panel view: a device's values as named boxes — grouped,
   with the unit and the scaling an EDS does not carry, read per field,
-  per box or per page and never on a timer. Described by a
-  `*.panel.yaml` a plugin ships (`docs/panel-format.md`); the core ships
-  one for its own demo device
+  per box or per page and never on a timer. Values a plugin declared
+  symbolically appear as dropdowns and single-bit checkboxes, named by
+  the firmware's own headers, and both write back into the value last
+  read rather than over it. Described by a `*.panel.yaml` a plugin ships
+  (`docs/panel-format.md`); the core ships one for the objects CiA 301
+  makes mandatory, so every device has a panel, and one for its own demo
+  device
 - Plugin system (`canopen_bench.plugins` entry-point group, 17 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate

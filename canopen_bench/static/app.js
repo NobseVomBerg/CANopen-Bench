@@ -851,12 +851,44 @@ function PanelBox({ g, busy }) {
     // where the rows with "mA" end in one place and the rows without end
     // in another reads as two half-aligned lists
     const unit = html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`;
+    const head = html`
+      <span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
+        title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
+      <span title=${`${f.idx}:${f.sub}`}
+        style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
+    const writeBtn = f.rw ? html`
+      <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
+        style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
+      : html`<span style="width:44px;flex:none"></span>`;
+    // A named value and a single bit are the same object underneath, so both
+    // stage the way a number does: the change lands in the value, Write
+    // sends it. Neither may drop what it does not own — the core folds them
+    // into the value last read (Bench._panel_stage_part).
+    if (f.widget === 'enum') {
+      return html`
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          ${head}
+          <${OptionSelect} value=${f.val} options=${f.options}
+            style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};width:126px;outline:none;flex:none`}
+            onPick=${(v) => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, val: v })} />
+          ${writeBtn}
+        </div>`;
+    }
+    if (f.widget === 'flag') {
+      return html`
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          ${head}
+          <span onClick=${() => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, bit: f.bit, on: !f.on })}
+            title=${`bit ${f.bit} of ${f.idx}:${f.sub}`}
+            style="width:110px;flex:none;display:flex;justify-content:center">
+            <span style="width:15px;height:15px;border-radius:4px;display:grid;place-items:center;font-size:10px;cursor:${f.rw ? 'pointer' : 'default'};border:1px solid ${f.on ? 'var(--acc-bd)' : 'var(--inp)'};background:${f.on ? 'var(--acc-soft)' : 'var(--panel)'};color:var(--acc)">${f.on ? '✓' : ''}</span>
+          </span>
+          ${writeBtn}
+        </div>`;
+    }
     return html`
       <div style="display:flex;align-items:center;gap:8px;min-width:0">
-        <span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
-          title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
-        <span title=${`${f.idx}:${f.sub}`}
-          style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>
+        ${head}
         ${f.rw ? html`
           <${SyncInput} value=${f.val} title="staged value — Write sends it"
             onCommit=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, val: v })}
@@ -1000,11 +1032,16 @@ function ObjectsPage({ s, ui, setUi }) {
   const view = panel ? 'panel' : 'table';
   const viewChip = ([key, label]) => {
     const on = view === key;
+    const dead = key === 'panel' && !s.objects.hasPanel;
     return html`
-      <span class=${on ? '' : 'hv'} onClick=${() => send('obj_view', { view: key })}
-        style="flex:1;text-align:center;padding:4px 0;border-radius:5px;cursor:pointer;font:600 11px 'IBM Plex Sans';border:1px solid ${on ? 'var(--acc-bd)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'}">${label}</span>`;
+      <span class=${on || dead ? '' : 'hv'} onClick=${() => !dead && send('obj_view', { view: key })}
+        title=${dead ? 'no panel describes this device — panels come from a plugin (docs/panel-format.md)' : ''}
+        style="flex:1;text-align:center;padding:4px 0;border-radius:5px;cursor:${dead ? 'default' : 'pointer'};font:600 11px 'IBM Plex Sans';border:1px solid ${on ? 'var(--acc-bd)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${dead ? 'var(--faint)' : on ? 'var(--acc)' : 'var(--mid)'}">${label}</span>`;
   };
-  const viewSwitch = s.objects.hasPanel && html`
+  // Shown whenever a device is: a switch that only appears once something
+  // matches is a feature nobody can find, and "no panel for this device"
+  // then looks exactly like "the update did not install".
+  const viewSwitch = selDevs.length > 0 && html`
     <div style="display:flex;gap:4px;padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid var(--bd2)">
       ${[['table', 'Table'], ['panel', 'Panel']].map(viewChip)}
     </div>`;

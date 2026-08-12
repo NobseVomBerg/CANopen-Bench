@@ -74,6 +74,36 @@ general-purpose one rather than competing with it.
 | `scale` | optional | Raw × scale = what is shown; the reverse on write (default 1) |
 | `digits` | optional | Decimals shown (default: what the scale implies — `0.1` → 1) |
 | `rw` | optional | `true` gives the field an input and a Write button. Default read-only: a panel is written from a device's documentation, and a typo that only displays is cheaper than one that writes |
+| `widget` | optional | `number` (default), `enum` or `flag` — see below |
+| `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
+
+`scale`, `digits` and `unit` belong to a number; on an `enum` or a `flag`
+they are an error, because there is nothing they could mean there.
+
+### enum and flag
+
+```yaml
+      - {label: Operation Mode, obj: "0x2008:00", widget: enum, rw: true}
+      - {label: Stop On Drift,  obj: "0x2010:00", widget: flag, bit: 1, rw: true}
+```
+
+An `enum` takes its choices from the symbol table the plugin declared for
+that object (`BenchPlugin.object_fields`), so the names are the
+firmware's own — a list written into the panel file would be a second
+copy of the same table, kept in step by hand. A value no symbol names is
+offered as `?0x7` rather than snapped to the nearest name: an unexpected
+value is a fact about the device.
+
+A `flag` says which bit it is and needs no table for that; a status word
+has bit 3 whether or not a header names it.
+
+Both write the whole object, so both fold the change into the value last
+read and leave the rest of it alone. A part of a value nobody has read is
+refused rather than guessed — a checkbox that assumed zeros would clear
+every other flag in the register.
+
+Several fields may sit on the same object: a mode lane and the flags
+beside it are the normal case.
 
 Values are shown in decimal, always. The object table's hex/dec chip is a
 developer's reading habit; a box that says `mA` is read by someone who
