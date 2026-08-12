@@ -119,7 +119,7 @@ class EdsDemoBus(BusInterface):
         self._ods.retarget(eds_dir)
 
     # -- lifecycle ----------------------------------------------------------
-    def connect(self, adapter: str, bitrate: int) -> None:
+    def connect(self, adapter: str, bitrate: int, channel: str | int | None = None) -> None:
         self.adapter = adapter
         self.bitrate = bitrate
         self.connected = True
