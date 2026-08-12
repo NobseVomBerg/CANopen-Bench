@@ -48,6 +48,7 @@ only what you provide.
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |
 | `trace_decoders()` | `list[TraceDecoder]` | Decoding for vendor-specific frames in the trace monitor |
 | `device_panels()` | `list[DevicePanel]` | Sidebar boxes for a device family — front-panel mirror, virtual buttons, status LEDs |
+| `object_panels()` | `list[Path]` | Packaged `*.panel.yaml` files: the Objects page's panel view, where a device's values appear as named boxes with the unit and scaling no EDS carries ([panel-format.md](panel-format.md)). Read from the package, never copied into a workspace |
 | `emcy_codes()` | `dict[int, str]` | Vendor-/profile-specific EMCY error-code texts, merged over the built-in CiA-301 table (plugin wins on conflict) |
 | `actions(bench)` | `dict[str, callable]` | Extra API actions, dispatched as `<plugin>.<action>` — collision-free with core actions |
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
