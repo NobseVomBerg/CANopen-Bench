@@ -81,8 +81,17 @@ class BusInterface(ABC):
         number of nodes actually assigned. Default: not supported."""
         return 0
 
+    def channels(self, adapter: str) -> list[dict]:
+        """What this adapter's driver reports as available:
+        ``[{value, label}]``, empty where a backend cannot say. Offered to
+        the operator so the channel is picked from what is there rather
+        than typed from memory."""
+        return []
+
     @abstractmethod
-    def connect(self, adapter: str, bitrate: int) -> None: ...
+    def connect(self, adapter: str, bitrate: int, channel: str | int | None = None) -> None:
+        """Open the interface. ``channel`` overrides the backend's default
+        — which adapter counts channels how is the backend's business."""
 
     @abstractmethod
     def disconnect(self) -> None: ...
