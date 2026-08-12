@@ -35,21 +35,30 @@ _ADAPTER_BACKENDS: dict[str, tuple[str, str | int | None, dict]] = {
 }
 
 
-def _channel_arg(chosen: str | int | None, default: str | int | None):
-    """The channel to open: what the operator picked, else the backend's
-    default. Typed after the default, because the backends disagree —
-    IXXAT and Vector count channels with integers, PCAN names them
-    ("PCAN_USBBUS1"), and a string where an int belongs fails inside the
-    driver with a message about neither."""
+def _channel_kwargs(chosen: str | int | None, default: str | int | None) -> dict:
+    """How to address the channel the operator picked, as keyword
+    arguments for ``Network.connect`` — ``{}`` for "use the default".
+
+    Two forms, because the question has two honest answers. A device
+    identity, ``"<serial>:<port>"``, is what ``channels()`` offers and
+    what survives re-enumeration; anything else is a plain channel, typed
+    after the backend's default, because the backends disagree about what
+    a channel even is — IXXAT and Vector count with integers, PCAN names
+    them ("PCAN_USBBUS1"), and a string where an int belongs fails inside
+    the driver with a message about neither.
+    """
     if chosen is None or str(chosen).strip() == "":
-        return default
+        return {}
     text = str(chosen).strip()
+    serial, sep, port = text.partition(":")
+    if sep and serial.isdigit() and port.isdigit():
+        return {"serial": int(serial), "channel": int(port)}
     if isinstance(default, int):
         try:
-            return int(text, 0)
+            return {"channel": int(text, 0)}
         except ValueError:
-            return default  # not a number where one is required: keep the default
-    return text
+            return {}  # not a number where one is required: keep the default
+    return {"channel": text}
 
 
 def _backend_entry(value: tuple) -> tuple[str, str | int | None, dict]:
@@ -217,6 +226,7 @@ class CanopenBus(BusInterface):
         self.adapter = ""
         self.bitrate = 500
         self.channel: str | int | None = None  # what the last connect actually opened
+        self.serial: int | None = None         # ... and on which device, where one was named
         self._detach_lock = threading.Lock()  # one winner detaches the network
         # built-in mapping plus adapter keys contributed by bench plugins
         self._backends = {key: _backend_entry(value) for key, value
@@ -224,19 +234,23 @@ class CanopenBus(BusInterface):
 
     # -- lifecycle --------------------------------------------------------
     def channels(self, adapter: str) -> list[dict]:
-        """What this adapter's driver says is there: ``[{value, label}]``,
-        empty when the backend cannot enumerate (or nothing is attached).
+        """What this adapter's driver says is there:
+        ``[{value, label, open}]``, empty when the backend cannot
+        enumerate (or nothing is attached). ``open`` is what it takes to
+        open that entry — merged into the connect call as it is.
 
-        Worth asking, because the number in the channel field means
-        something different per backend and the wrong one does not fail —
-        it opens something quiet. On Vector it is the *global* channel
-        index across everything the XL driver knows, virtual channels
-        included, so index 0 on a machine with CANalyzer installed is
-        routinely a virtual channel: the port opens, the bus stays silent,
-        and re-plugging the cable changes nothing because the bench is
-        listening where no cable goes. The label carries the device and
-        the channel as it is printed on the housing, which is the only
-        form anybody can check against.
+        Worth asking, because the number in a channel field means
+        something different per backend and the wrong one does not fail:
+        it opens something quiet.
+
+        ``value`` names the *device*, not its place in a list. On Vector
+        the obvious number — the global channel index — is a position in
+        the driver's enumeration, and that position moves: a VN1630A that
+        was 0 and 1 came back as 7 and 8 after the bench was powered down
+        and up. A setting stored as 7 then points at whatever is seventh
+        next week, which is the same silent failure one level up. Serial
+        number and the port printed on the housing do not move, and
+        python-can resolves the pair itself.
         """
         interface = self._backends.get(adapter, ("", None, {}))[0]
         if not interface:
@@ -247,20 +261,22 @@ class CanopenBus(BusInterface):
             return []
         out: list[dict] = []
         for cfg in found:
-            # Vector: with app_name unset python-can wants the global index,
-            # which is *not* the "channel" key — that one is the number on
-            # the housing. Everywhere else the channel is the channel.
-            value = cfg.get("channel_index", cfg.get("channel"))
-            if value is None:
-                continue
             name = str(getattr(cfg.get("vector_channel_config"), "name", "") or "").strip()
             hw, serial = cfg.get("hw_channel"), cfg.get("serial")
-            parts = [name or f"channel {cfg.get('channel')}",
+            channel = cfg.get("channel")
+            if serial and isinstance(hw, int):
+                value, open_with = f"{serial}:{hw}", {"serial": int(serial), "channel": hw}
+            elif channel is not None:
+                value, open_with = str(channel), {"channel": channel}
+            else:
+                continue
+            parts = [name or f"channel {channel}",
                      # the number printed on the housing, which is the one
-                     # the cable is plugged into and counts from one
+                     # the cable goes into and counts from one
                      f"port {hw + 1}" if isinstance(hw, int) else "",
                      f"SN {serial}" if serial else ""]
-            out.append({"value": str(value), "label": " · ".join(p for p in parts if p)})
+            out.append({"value": value, "label": " · ".join(p for p in parts if p),
+                        "open": open_with})
         return out
 
     def connect(self, adapter: str, bitrate: int, channel: str | int | None = None) -> None:
@@ -270,18 +286,21 @@ class CanopenBus(BusInterface):
             self.disconnect()
 
         interface, default_channel, extra = self._backends[adapter]
-        channel = _channel_arg(channel, default_channel)
         network = canopen.Network()
         self._install_listeners(network)
         kwargs: dict = {"interface": interface, "bitrate": bitrate * 1000, **extra}
-        if channel is not None:
-            kwargs["channel"] = channel
+        if default_channel is not None:
+            kwargs["channel"] = default_channel
+        # after the default, so a chosen device identity replaces it whole
+        # (serial + port, rather than a position in the driver's list)
+        kwargs |= _channel_kwargs(channel, default_channel)
         network.connect(**kwargs)
 
         self.network = network
         self.adapter = adapter
         self.bitrate = bitrate
-        self.channel = channel
+        self.channel = kwargs.get("channel")
+        self.serial = kwargs.get("serial")
         self._ts_offset = self._ts_win_min = None
         self._ts_bias = 0.0
         self._sdo_sent.clear()

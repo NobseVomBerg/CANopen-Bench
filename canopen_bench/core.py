@@ -1669,8 +1669,12 @@ class Bench:
         # fail: it delivers silence, and a bus that is simply quiet looks
         # exactly the same. Named here, it is one glance instead of an
         # afternoon.
+        opened = getattr(self.bus, "channel", None)
+        on_device = getattr(self.bus, "serial", None)
         self.log(f"BUS  connected — {self._adapter_info()['full']} @ {self.bitrate} kbit/s"
-                 f"{f' · channel {ch}' if (ch := getattr(self.bus, 'channel', None)) is not None else ''}")
+                 + (f" · port {opened + 1}" if isinstance(opened, int) and on_device
+                    else f" · channel {opened}" if opened is not None else "")
+                 + (f" · SN {on_device}" if on_device else ""))
         # machine-control startup validation: the tool starts offline, so
         # "validate on start" (A-05) fires on connect
         if self.mc["enabled"] and self.mc.get("scanStart"):
