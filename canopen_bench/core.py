@@ -300,6 +300,30 @@ def _as_int(value) -> int | None:
         return None
 
 
+def _addr_int(value) -> int | None:
+    """An object address — an index or a sub-index — as a number.
+
+    Hexadecimal without asking, because that is the only way CANopen
+    writes one: every EDS section, every catalog row and every test case
+    spells sub-index eleven "0B".
+
+    `_as_int` cannot answer this and should not try. It reads *values*,
+    where a leading zero followed by a letter names a base — "0b1100" is
+    binary and has to be, or a written value quietly means something
+    else. Addresses have no such notation, and that rule swallowed 0A
+    through 0F whole: none of the six names a base, so each came back as
+    None, and a lookup comparing None against None matched the first row
+    that also failed to parse. Every favourite past sub-index nine
+    answered to the name of 0x0A.
+    """
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip(), 16)
+    except (ValueError, TypeError):
+        return None
+
+
 def _hexstr_width(value: object) -> int:
     """Byte width of a "0x001E"-style answer, or 0 when it is not one.
 
@@ -1569,7 +1593,7 @@ class Bench:
         od = self._ods.load(dev["eds"]) if dev else None
         if od is None:
             return False
-        want_i, want_s = _as_int(idx), _as_int(sub)
+        want_i, want_s = _addr_int(idx), _addr_int(sub)
         if want_i is None:
             return False
         var = find_var(od, want_i, want_s or 0)
@@ -3091,7 +3115,30 @@ class Bench:
 
     # -- favorites (named object sets, persisted in the workspace db) --------
     def _fav_rows(self) -> list[dict]:
+        """The stored list itself — callers add to it and remove from it."""
         return self.favorites
+
+    def _fav_view(self) -> list[dict]:
+        """The same favourites with their names looked up now.
+
+        The name is stored alongside the address when a favourite is added,
+        and that copy is the only thing a panel could show while no device
+        is selected — so it stays. But it was also the only thing shown
+        while one *is*, which made every stored name permanent: favourites
+        added while sub-indices 0A…0F resolved to the wrong object kept
+        that name after the resolving was fixed, and re-adding each one by
+        hand was the only way out. A name the catalog can answer for is
+        answered for here, every tick, and the stored one stands in when it
+        cannot.
+        """
+        if not self.favorites:
+            return self.favorites
+        catalog, _groups, _hint = self._object_catalog()
+        names = {(_addr_int(r[0]), _addr_int(r[1])): r[2]
+                 for rows in catalog.values() for r in rows}
+        return [{**f, "label": names.get((_addr_int(f["idx"]), _addr_int(f["sub"])),
+                                         f.get("label", ""))}
+                for f in self.favorites]
 
     def _save_favs(self) -> None:
         self.db.set("favorites", self.favorites)
@@ -3103,13 +3150,13 @@ class Bench:
         step writes it "0x04" — comparing the text found nothing, silently,
         for every caller that did not happen to use the catalog's spelling.
         """
-        want = (_as_int(idx), _as_int(sub))
-        if want[0] is None:
+        want = (_addr_int(idx), _addr_int(sub))
+        if want[0] is None or want[1] is None:
             return ""
         catalog, _groups, _hint = self._object_catalog()
         for rows in catalog.values():
             for r in rows:
-                if (_as_int(r[0]), _as_int(r[1])) == want:
+                if (_addr_int(r[0]), _addr_int(r[1])) == want:
                     return r[2]
         return ""
 
@@ -5221,7 +5268,7 @@ class Bench:
             "psu": self._psu_data(),
             "panels": self._panel_data(),
             "favorites": {
-                "rows": self._fav_rows(),
+                "rows": self._fav_view(),
                 "lastDb": self.db.last_values_ts(first["sn"]) if first else None,
             },
             "raw": self.raw_rows,
