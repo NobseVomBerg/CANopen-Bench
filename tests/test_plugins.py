@@ -1045,3 +1045,71 @@ def test_the_bench_says_it_in_the_state_log(monkeypatch, tmp_path):
     assert [p.name for p in bench.plugins] == ["twice"]
     assert any("installed twice" in entry["msg"] and entry["type"] == "emcy0"
                for entry in bench.logs)
+
+
+# -- the EDS files a plugin ships -------------------------------------------
+
+def _eds_plugin(folder: Path) -> BenchPlugin:
+    class EdsPlugin(BenchPlugin):
+        name = "edsy"
+
+        def eds_dirs(self):
+            return [folder]
+
+    return EdsPlugin()
+
+
+def test_a_plugin_brings_the_eds_files_its_rows_name(tmp_path):
+    """seed_eds() registers the rows; without the files those rows name,
+    a fresh bench has a registry pointing at nothing and somebody carries
+    the files from one machine to the next — the thing a plugin exists to
+    stop."""
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "efs2_920.eds").write_text("[FileInfo]\nFileName=efs2_920.eds\n",
+                                           encoding="utf-8")
+    (packaged / "notes.txt").write_text("not an EDS", encoding="utf-8")
+
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])
+
+    assert (bench.db.eds_dir / "efs2_920.eds").is_file()
+    assert not (bench.db.eds_dir / "notes.txt").exists()
+
+
+def test_the_workspaces_own_eds_outranks_the_packaged_one(tmp_path):
+    """The file in the workspace is what the devices on this bench answer
+    to, and it is regularly newer than the packaged copy. Editing it there
+    has to stick — the same rule flows and headers follow."""
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "efs2_920.eds").write_text("packaged", encoding="utf-8")
+
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])
+    (bench.db.eds_dir / "efs2_920.eds").write_text("edited here", encoding="utf-8")
+    Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])   # a later start
+
+    assert (bench.db.eds_dir / "efs2_920.eds").read_text() == "edited here"
+
+
+def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
+    """A bench whose EDS folder is read-only still runs; it just cannot
+    match identities, and that has to be readable somewhere."""
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "efs2_920.eds").write_text("packaged", encoding="utf-8")
+
+    class Boom(BenchPlugin):
+        name = "boom"
+
+        def eds_dirs(self):
+            return [packaged]
+
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[])
+    bench.plugins = [Boom()]
+    bench.db.eds_dir.mkdir(parents=True, exist_ok=True)
+    (bench.db.eds_dir / "efs2_920.eds").mkdir()      # a directory in the file's place
+    bench.logs.clear()
+    bench._seed_plugin_eds()                          # must not raise
+
+    assert not any("efs2_920" in entry["msg"] for entry in bench.logs), \
+        "an existing name is left alone, whatever it is"
