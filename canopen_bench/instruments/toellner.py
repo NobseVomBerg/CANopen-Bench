@@ -62,7 +62,7 @@ written down so the next question does not need this file again:
 """
 from __future__ import annotations
 
-from . import Channel, PowerSupply, SerialLink, SupplyState
+from . import Channel, PowerSupply, SerialLink, SupplyState, split_idn
 
 #: what the unit calls itself: "TOELLNER,TOE8952-60,102625,3.63-3.62"
 _VENDOR = "TOELLNER"
@@ -108,7 +108,7 @@ class Toellner8952(PowerSupply):
             st = self._scpi_state()
         self.dialect = SHORT if raw and parse_settings(raw).channels else SCPI
         st.port = self.link.port
-        st.model, st.serial, st.firmware = _split_idn(self.idn)
+        st.vendor, st.model, st.serial, st.firmware = split_idn(self.idn)
         self._read_measured(st)
         return st
 
@@ -175,13 +175,6 @@ class Toellner8952(PowerSupply):
         else:
             self.link.write(f"EX {1 if on else 0}")
 
-
-def _split_idn(idn: str) -> tuple[str, str, str]:
-    """"TOELLNER,TOE8952-60,102625,3.63-3.62" -> model, serial, firmware."""
-    parts = [p.strip() for p in idn.split(",")]
-    while len(parts) < 4:
-        parts.append("")
-    return parts[1], parts[2], parts[3]
 
 
 def _number(text: str) -> float | None:
