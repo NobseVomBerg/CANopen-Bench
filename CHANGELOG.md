@@ -83,7 +83,7 @@ development; the version counts from here.
   ships (`docs/panel-format.md`); the core ships one for the objects CiA
   301 makes mandatory, so every device has a panel, and one for its own
   demo device
-- Plugin system (`canopen_bench.plugins` entry-point group, 17 hooks)
+- Plugin system (`canopen_bench.plugins` entry-point group, 18 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed. The same

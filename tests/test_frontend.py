@@ -176,17 +176,38 @@ def test_the_trace_table_places_rows_by_the_same_height_it_draws_them():
     assert "/api/trace/rows" in app             # and where rows past the snapshot come from
 
 
-def test_a_two_column_box_takes_two_of_the_pages_columns():
-    """Both halves of the layout, or neither. Splitting one page column in
-    two gave each cell half the width a one-column box gives it, and a flex
-    row gives up the label first: a box of "Pr...", "S...", "Ya..." over
-    inputs that still looked right, and Write buttons reading "Writ".
+def test_the_panel_area_is_columns_rather_than_a_grid():
+    """A grid puts the boxes in rows and makes every row as tall as the
+    tallest box in it, so one long box leaves a hole beside it the same
+    height. On a wide screen that hole is most of the screen, which is what
+    the boxes-with-nothing-under-them looked like.
 
-    grid-auto-columns is the other half. On a window narrow enough for one
-    column, a box asking for two spans into an implicit track; sized to its
-    content that track takes the page sideways, and the point of the span
-    was to give the box room, not to take it from the page.
+    Columns have no rows to align. The page column is two field columns
+    wide, so a box asking for two gets the room a one-column box gives its
+    rows — the other half of the same complaint. `cols` is the most a box
+    uses, not a promise it keeps in a column too narrow to hold them: the
+    inner grid falls back to fewer, rather than to squeezed labels.
     """
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "grid-column:span ${g.cols}" in app
-    assert "grid-auto-columns:minmax(0,1fr)" in app
+    assert "columns:${PANEL_COL}px" in app
+    assert "break-inside:avoid" in app, "a box could be split across columns"
+    assert "const PANEL_COL = 700" in app and "const FIELD_MIN = 300" in app
+    assert "repeat(auto-fit,minmax(max(${FIELD_MIN}px" in app
+    assert "grid-column:span" not in app, "the old row grid is still there"
+
+
+def test_the_panel_view_leaves_the_favorites_out():
+    """Favorites are the table's companion — a shortlist pulled out of a
+    long list. The panel is already a shortlist somebody wrote down, and on
+    this page width is what the boxes are short of."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert app.count("view !== 'panel' && html`") == 2   # divider and column
+
+
+def test_a_value_is_not_dimmed_for_being_a_minute_old():
+    """Age belongs in the tooltip, which says it in words. Fading the
+    number instead makes every box that has not just been read look like
+    it is failing at something, and a bench reads a value once."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "panelAge" not in app
+    assert "panelWhen" in app, "the tooltip is where age is still said"

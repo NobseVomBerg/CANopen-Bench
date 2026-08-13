@@ -1127,6 +1127,9 @@ class Bench:
         self.teach: dict | None = None  # {step, of, text} while teaching
         self._teach_abort = False
 
+        # the files first, then the rows that name them — a row whose EDS is
+        # not in the folder matches no identity and reads as a broken install
+        self._seed_plugin_eds()
         if not db.eds_count(devices_only=True):
             seed_eds = list(data.SEED_EDS_FILES) + [e for p in self.plugins
                                                     for e in p.seed_eds()]
@@ -2605,6 +2608,30 @@ class Bench:
             {"key": "svc", "label": "Service mode", "badge": "SVC"},
         ])
 
+    def _seed_plugin_eds(self) -> None:
+        """The EDS files a plugin ships (``eds_dirs()``), into the workspace
+        EDS folder. Never over a file already there: that one is what the
+        devices on this bench answer to, and it is regularly newer than the
+        packaged copy — the same rule flows and headers follow.
+
+        Every start, not only the first, so a workspace made before a
+        plugin shipped its files still gets them. Failing to copy one is
+        logged rather than raised: a bench whose EDS folder is read-only
+        still runs, it just cannot match identities.
+        """
+        for packaged in [d for p in self.plugins for d in p.eds_dirs()]:
+            if not packaged.is_dir():
+                continue
+            for src in sorted(packaged.glob("*.eds")):
+                dst = self.db.eds_dir / src.name
+                if dst.exists():
+                    continue
+                try:
+                    self.db.eds_dir.mkdir(parents=True, exist_ok=True)
+                    dst.write_bytes(src.read_bytes())
+                except OSError as exc:
+                    self.log(f"EDS  {src.name} could not be installed — {exc}", "emcy0")
+
     def _seed_base_eds(self) -> None:
         """Install the generic CiA 301 EDS and register it with no identity.
 
@@ -3178,6 +3205,10 @@ class Bench:
     # value strings are hex by convention (with or without 0x); string-,
     # octet- and domain-typed objects must never be reformatted
     _NO_PAD_TYPES = {0x09, 0x0A, 0x0B, 0x0F}  # VISIBLE/OCTET/UNICODE_STRING, DOMAIN
+    #: the subset of those whose bytes are characters — a panel prints them
+    #: as the word they are. OCTET_STRING and DOMAIN are bytes that happen
+    #: not to be padded, and guessing an encoding for them would invent one
+    _TEXT_TYPES = {0x09, 0x0B}                # VISIBLE_STRING, UNICODE_STRING
 
     @staticmethod
     def _pad_hex(value: str, width_bytes: int) -> str:
@@ -3210,6 +3241,18 @@ class Bench:
         if var is None or var.data_type in self._NO_PAD_TYPES:
             return 0
         return max(len(var) // 8, 1)
+
+    def _eds_is_text(self, node: int, idx: str, sub: str) -> bool:
+        """Whether the EDS declares this object as text rather than a
+        number — a device name, a version string. Those bytes are read as
+        a number nowhere: 0x4546533200 is "EFS2", not 297 billion."""
+        eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
+        od = self._ods.load(eds) if eds and eds != "—" else None
+        try:
+            var = find_var(od, int(idx, 16), int(sub or "0", 16)) if od else None
+        except ValueError:
+            return False
+        return var is not None and var.data_type in self._TEXT_TYPES
 
     def act_obj_write(self, p: dict) -> None:
         idx, sub = p["idx"], p["sub"]
@@ -3303,8 +3346,28 @@ class Bench:
             return None, "", 0.0
         return mine, "read", (now - mine_at if mine_at else 0.0)
 
+    @staticmethod
+    def _as_text(raw: str) -> str:
+        """The bytes behind a hex value as the word they spell. A device
+        name comes back from the bus as hex like every other object, and
+        read as a number it is nineteen digits of nothing."""
+        digits = str(raw).removeprefix("0x").removeprefix("0X")
+        if len(digits) % 2 or not digits:
+            return str(raw)
+        try:
+            data = bytes.fromhex(digits)
+        except ValueError:
+            return str(raw)
+        return data.decode("utf-8", "replace").rstrip("\x00").strip() or str(raw)
+
     def _panel_field_view(self, f, node: int) -> dict:
         raw, src, age = self._panel_value(f.key, node)
+        # a text object is a word, whatever the wire carried it as; the
+        # widgets below all mean numbers, so this is the whole of it
+        if raw and f.widget == "number" and self._eds_is_text(node, f.idx, f.sub):
+            return {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": "",
+                    "rw": f.rw, "widget": "number", "val": self._as_text(raw),
+                    "src": src, "age": round(age, 1)}
         out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
                "rw": f.rw, "widget": f.widget, "val": f.show(raw),
                # where the number comes from and how old it is: a value a
@@ -3482,6 +3545,12 @@ class Bench:
             addrs += [(f.idx, f.sub) for f in g.fields]
         seen: set[tuple[str, str]] = set()  # one read per object, in panel order
         addrs = [a for a in addrs if not (a in seen or seen.add(a))]
+        # a write-only object cannot be read, and asking anyway turns one
+        # Read of a box into a row of aborts in the log that look like a
+        # fault and are only the EDS telling the truth (same as fav_read_all)
+        catalog, _groups, _hint = self._object_catalog()
+        acc = {f"{row[0]}:{row[1]}": row[4] for rows in catalog.values() for row in rows}
+        addrs = [a for a in addrs if acc.get(f"{a[0]}:{a[1]}") != "wo"]
         if addrs:
             self._spawn(self._panel_read_async(addrs))
 
