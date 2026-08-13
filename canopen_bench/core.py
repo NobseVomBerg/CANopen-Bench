@@ -831,7 +831,12 @@ class Bench:
         # None -> entry-point discovery; a list (possibly empty) -> injected,
         # same pattern as the bus parameter (tests, embedding).
         self.logs: list[dict] = []  # before the plugin hooks: symbol loading logs
-        self.plugins = load_plugins() if plugins is None else list(plugins)
+        # the note goes into the state log rather than only into logging:
+        # the one thing it reports — the same package installed twice — is
+        # read as "my change did not arrive", and nobody debugging that
+        # looks at a console the bench was not started from
+        self.plugins = (load_plugins(note=lambda msg: self.log(msg, "emcy0"))
+                        if plugins is None else list(plugins))
         # symbol tables from the device's own C headers, parsed before the
         # hooks below because object_fields() is written against them — the
         # workspace copy is the firmware actually under test, and the field

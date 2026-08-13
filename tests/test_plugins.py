@@ -929,3 +929,119 @@ def test_a_plugin_that_raises_while_naming_does_not_stop_the_run(tmp_path):
 
     bench = Bench(Db(tmp_path / "b.db"), plugins=[Broken()])
     assert bench._label_step("sdo_read", {"index": "0x2345", "sub": 1}) == "read 0x2345:0x01"
+
+
+# -- the same package installed twice ---------------------------------------
+
+class _FakeDist:
+    """Just enough of importlib.metadata.Distribution for _installed_at()."""
+
+    def __init__(self, name: str, version: str, path: str):
+        self.name, self.version, self._path = name, version, path
+
+    def locate_file(self, _):
+        return self._path
+
+
+class _FakeEP:
+    def __init__(self, name: str, target, dist):
+        self.name, self.value, self.dist = name, f"{target.__module__}:x", dist
+        self._target = target
+
+    def load(self):
+        return self._target
+
+
+class _Twice(BenchPlugin):
+    name = "twice"
+
+
+def _entry_points(monkeypatch, eps):
+    monkeypatch.setattr("canopen_bench.plugin.metadata.entry_points",
+                        lambda **kw: list(eps))
+
+
+def test_one_plugin_installed_twice_is_loaded_once(monkeypatch):
+    """A wheel uploaded under Setup > Extensions and the same package
+    installed into the environment both register their entry point. Loading
+    both gives one bench two of every hook — two sidebar panels, every
+    seeded EDS row twice, every trace frame decoded twice."""
+    _entry_points(monkeypatch, [
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "2.0", "/data/plugins")),
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "1.0", "/site-packages")),
+    ])
+    notes: list[str] = []
+
+    plugins = load_plugins(note=notes.append)
+
+    assert len(plugins) == 1
+    assert len(notes) == 1
+
+
+def test_the_duplicate_names_both_places_and_both_versions(monkeypatch):
+    """Which of the two actually runs is decided by sys.path, not by the
+    entry-point list, so a message saying only "installed twice" leaves the
+    reader exactly where they were: the version the UI shows belongs to one
+    installation and the running code may be the other."""
+    _entry_points(monkeypatch, [
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "2.0", "/data/plugins")),
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "1.0", "/site-packages")),
+    ])
+    notes: list[str] = []
+
+    load_plugins(note=notes.append)
+
+    assert "/data/plugins" in notes[0] and "/site-packages" in notes[0]
+    assert "2.0" in notes[0] and "1.0" in notes[0]
+    assert "sys.path" in notes[0]
+
+
+def test_two_different_plugins_are_not_a_duplicate(monkeypatch):
+    """The check is per entry-point name. Two packages are the normal case
+    and must not warn about each other."""
+    _entry_points(monkeypatch, [
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "2.0", "/site-packages")),
+        _FakeEP("brox", _Twice, _FakeDist("cob-brox", "1.0", "/site-packages")),
+    ])
+    notes: list[str] = []
+
+    assert len(load_plugins(note=notes.append)) == 2
+    assert notes == []
+
+
+def test_a_duplicate_survives_a_metadata_backend_that_cannot_say_where(monkeypatch):
+    """The message is a diagnostic; a distribution that cannot be asked
+    where it lives costs a vaguer sentence, not the startup."""
+    class _MuteEP(_FakeEP):
+        @property
+        def dist(self):
+            raise RuntimeError("no metadata here")
+
+        @dist.setter
+        def dist(self, _value):
+            pass
+
+    _entry_points(monkeypatch, [
+        _MuteEP("acme", _Twice, None), _MuteEP("acme", _Twice, None),
+    ])
+    notes: list[str] = []
+
+    assert len(load_plugins(note=notes.append)) == 1
+    assert "installed twice" in notes[0]
+
+
+def test_the_bench_says_it_in_the_state_log(monkeypatch, tmp_path):
+    """Not only through logging: a duplicate reads as "my change did not
+    arrive", and nobody debugging that looks at a console the bench was
+    never started from."""
+    monkeypatch.setattr("canopen_bench.core.load_plugins", load_plugins)
+    _entry_points(monkeypatch, [
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "2.0", "/data/plugins")),
+        _FakeEP("acme", _Twice, _FakeDist("cob-acme", "1.0", "/site-packages")),
+    ])
+
+    bench = Bench(Db(tmp_path / "x.db"), plugins=None)
+
+    assert [p.name for p in bench.plugins] == ["twice"]
+    assert any("installed twice" in entry["msg"] and entry["type"] == "emcy0"
+               for entry in bench.logs)
