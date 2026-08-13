@@ -92,6 +92,9 @@ read asks for the condition objects too, so one Read settles them.
 | `unit` | optional | Printed after the value — `mA`, `mV`, `%`, `°C`. Display only |
 | `scale` | optional | Raw × scale = what is shown; the reverse on write (default 1) |
 | `digits` | optional | Decimals shown (default: what the scale implies — `0.1` → 1) |
+| `rw` | optional | `true` gives the field an input and a Write button. Default read-only: a panel is written from a device's documentation, and a typo that only displays is cheaper than one that writes |
+| `widget` | optional | `number` (default), `enum` or `flag` — see below |
+| `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
 
 A field that gives neither `unit` nor `scale` takes whatever the plugin
 declared for that address (`BenchPlugin.object_units`,
@@ -100,12 +103,14 @@ about the device, not about this view of it, and the same fact written
 down in two places is the same fact drifting apart in two. Giving them
 here overrides that, which is what a box written against one device's
 documentation is for.
-| `rw` | optional | `true` gives the field an input and a Write button. Default read-only: a panel is written from a device's documentation, and a typo that only displays is cheaper than one that writes |
-| `widget` | optional | `number` (default), `enum` or `flag` — see below |
-| `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
 
 `scale`, `digits` and `unit` belong to a number; on an `enum` or a `flag`
 they are an error, because there is nothing they could mean there.
+
+Every value in a box ends at the same edge, whichever of the four it is —
+a staged number, a value only read, a checkbox, a dropdown — and the unit
+column is reserved for all of them. A dropdown is the one that may reach
+further left, because it has to hold the firmware's own names.
 
 ### enum and flag
 
@@ -118,8 +123,9 @@ An `enum` takes its choices from the symbol table the plugin declared for
 that object (`BenchPlugin.object_fields`), so the names are the
 firmware's own — a list written into the panel file would be a second
 copy of the same table, kept in step by hand. A value no symbol names is
-offered as `?0x7` rather than snapped to the nearest name: an unexpected
-value is a fact about the device.
+offered as the bare `0x7` rather than snapped to the nearest name: an
+unexpected value is a fact about the device, and a question mark beside
+it only says the bench has nothing to add.
 
 A `flag` says which bit it is and needs no table for that; a status word
 has bit 3 whether or not a header names it.

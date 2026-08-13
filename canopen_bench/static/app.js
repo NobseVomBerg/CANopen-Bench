@@ -933,16 +933,26 @@ const FIELD_MIN = 300;
 //: has to be read across it.
 const FIELD_MAX = 520;
 const CELL = `display:flex;align-items:center;gap:8px;min-width:0;max-width:${FIELD_MAX}px`;
+//: one width for every value in a box, whatever kind it is — a staged
+//: number, a value only read, a checkbox, a dropdown. They used to be
+//: 78, 66, 110 and 126 px wide, and the two that are not numbers also
+//: skipped the unit column, so a row with a dropdown ended 40px further
+//: right than the row above it. A column of values that does not line up
+//: reads as a column of mistakes.
+const VALUE_W = 92;
+//: how far a dropdown may grow past that. It sizes to its longest option
+//: — the firmware's own names, which are not short — and every pixel it
+//: takes comes off the label beside it
+const ENUM_MAX = 170;
 
-function PanelBox({ g, busy }) {
-  // Reserved per box, not per field: a box where the rows with "mA" end in
-  // one place and the rows without end in another reads as two
-  // half-aligned lists. Per *box* is the part that matters — reserving
-  // both columns everywhere took 76px from every cell, and in a
-  // two-column box that is the whole name: the labels were squeezed to
-  // nothing while the numbers looked fine.
-  const anyUnit = g.fields.some((f) => f.unit);
-  const anyWrite = g.fields.some((f) => f.rw);
+function PanelBox({ g, busy, anyUnit, anyWrite }) {
+  // The unit and Write columns are reserved for the whole panel, not per
+  // box: a page where the boxes with a unit end 40px short of the boxes
+  // without one reads as a page of lists that were laid out separately —
+  // and it is, since every box works out its own width. It costs 92px of
+  // label in the worst case, out of a cell that is a fixed 520px wide, so
+  // there is room for it now. There was not when the cells sized
+  // themselves and this was per box.
   const cell = (f) => {
     const unit = anyUnit
       ? html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`
@@ -960,13 +970,18 @@ function PanelBox({ g, busy }) {
     // stage the way a number does: the change lands in the value, Write
     // sends it. Neither may drop what it does not own — the core folds them
     // into the value last read (Bench._panel_stage_part).
+    // Every kind of value ends at the same edge, and the unit column is
+    // reserved for all of them. A dropdown is the one that may reach
+    // further left — it has to hold the firmware's own names — but its
+    // right edge is the others'.
     if (f.widget === 'enum') {
       return html`
         <div style=${CELL}>
           ${head}
           <${OptionSelect} value=${f.val} options=${f.options}
-            style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};width:126px;outline:none;flex:none`}
+            style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;outline:none;flex:none`}
             onPick=${(v) => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, val: v })} />
+          ${unit}
           ${writeBtn}
         </div>`;
     }
@@ -976,9 +991,10 @@ function PanelBox({ g, busy }) {
           ${head}
           <span onClick=${() => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, bit: f.bit, on: !f.on })}
             title=${`bit ${f.bit} of ${f.idx}:${f.sub}`}
-            style="width:110px;flex:none;display:flex;justify-content:center">
+            style="width:${VALUE_W}px;flex:none;display:flex;justify-content:flex-end">
             <span style="width:15px;height:15px;border-radius:4px;display:grid;place-items:center;font-size:10px;cursor:${f.rw ? 'pointer' : 'default'};border:1px solid ${f.on ? 'var(--acc-bd)' : 'var(--inp)'};background:${f.on ? 'var(--acc-soft)' : 'var(--panel)'};color:var(--acc)">${f.on ? '✓' : ''}</span>
           </span>
+          ${unit}
           ${writeBtn}
         </div>`;
     }
@@ -988,13 +1004,18 @@ function PanelBox({ g, busy }) {
         ${f.rw ? html`
           <${SyncInput} value=${f.val} title=${panelWhen(f) + ' · type to stage a new one, Write sends it'}
             onCommit=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, val: v })}
-            style="border:1px solid var(--inp);background:var(--panel);color:${f.val ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:78px;outline:none;text-align:right;flex:none" />
+            style="border:1px solid var(--inp);background:var(--panel);color:${f.val ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:${VALUE_W}px;box-sizing:border-box;outline:none;text-align:right;flex:none" />
           ${unit}
           <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
             style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
         : html`
+          ${''/* min-width, not width: a serial number is twelve digits and
+                a device name is a word, and neither fits the width a
+                number needs. Growing leftward keeps the right edge where
+                every other value has it — the same room a dropdown takes
+                for the firmware's own names. */}
           <span title=${panelWhen(f)}
-            style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:66px;text-align:right;flex:none">${f.val || '—'}</span>
+            style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 7px;border-radius:4px;min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;box-sizing:border-box;text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.val || '—'}</span>
           ${unit}
           ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}`}
       </div>`;
@@ -1017,7 +1038,13 @@ function PanelBox({ g, busy }) {
             style="${btn.acc}font-size:10.5px;padding:2px 9px;border-radius:4px;cursor:${busy ? 'default' : 'pointer'};opacity:${busy ? 0.5 : 1}">Read</span>`}
       </div>
       ${g.open && html`
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px">
+        ${''/* auto-fill, not auto-fit: auto-fit collapses a track nothing
+              lands in, so the last row of an odd-numbered box — and every
+              row of a one-field box — stretched to the full width and put
+              its value a hundred pixels right of the value above it. The
+              empty track stays, and every cell in every box is the same
+              width. */}
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px">
           ${g.fields.map(cell)}
         </div>`}
     </div>`;
@@ -1165,7 +1192,9 @@ function ObjectsPage({ s, ui, setUi }) {
              each box starts where the one above it ended. */}
       <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px">
         <div style="columns:${PANEL_COL}px;column-gap:12px">
-          ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy} />`)}
+          ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy}
+            anyUnit=${panel.groups.some((x) => x.fields.some((f) => f.unit))}
+            anyWrite=${panel.groups.some((x) => x.fields.some((f) => f.rw))} />`)}
         </div>
       </div>`,
   ];

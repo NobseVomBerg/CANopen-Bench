@@ -187,13 +187,33 @@ def test_the_panel_area_is_columns_rather_than_a_grid():
     rows — the other half of the same complaint. `cols` is the most a box
     uses, not a promise it keeps in a column too narrow to hold them: the
     inner grid falls back to fewer, rather than to squeezed labels.
+
+    auto-fill inside the box, not auto-fit: auto-fit collapses a track
+    nothing lands in, so a box's last row — and every row of a one-field
+    box — stretched to the full width and put its value a hundred pixels
+    right of the value above it.
     """
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "columns:${PANEL_COL}px" in app
     assert "break-inside:avoid" in app, "a box could be split across columns"
     assert "const PANEL_COL = 700" in app and "const FIELD_MIN = 300" in app
-    assert "repeat(auto-fit,minmax(max(${FIELD_MIN}px" in app
+    assert "repeat(auto-fill,minmax(max(${FIELD_MIN}px" in app
     assert "grid-column:span" not in app, "the old row grid is still there"
+
+
+def test_every_kind_of_value_in_a_box_ends_at_one_edge():
+    """A staged number, a value only read, a checkbox and a dropdown are
+    four different controls in one column, and they were four different
+    widths — 78, 66, 110 and 126px. The two that are not numbers also
+    skipped the unit column, so a row with a dropdown ended 40px right of
+    the row above it. Reserved for the whole panel rather than per box:
+    every box works out its own width, so per box left the boxes with a
+    unit ending short of the boxes without one."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "const VALUE_W = " in app
+    assert app.count("${VALUE_W}px") >= 4, "input, read-only, flag and enum"
+    assert "anyUnit=${panel.groups.some(" in app
+    assert "anyWrite=${panel.groups.some(" in app
 
 
 def test_the_panel_view_leaves_the_favorites_out():
