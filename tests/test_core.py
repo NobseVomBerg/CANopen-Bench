@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from canopen.objectdictionary.eds import import_eds
-from conftest import SEED_EDS, connect_and_scan, write_seed_eds_files
+from conftest import SEED_EDS, connect_and_scan, drive_verify, write_seed_eds_files
 
 import canopen_bench.core as core_mod
 import canopen_bench.testcases as tclib
@@ -24,22 +24,6 @@ from canopen_bench.plugin import BenchPlugin
 
 DEMO_DEVICE_EDS = core_mod.SEED_EDS
 
-
-def drive_verify(bench: Bench, timeout: float = 3.0) -> None:
-    """Dispatch mc_verify and wait for its async scan+compare to finish."""
-    orig = core_mod.SCAN_DELAY_S
-    core_mod.SCAN_DELAY_S = 0.02
-    try:
-        async def go():
-            bench.dispatch("mc_verify", {})
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout
-            while bench.mc["busy"] and loop.time() < deadline:
-                await asyncio.sleep(0.02)
-        asyncio.run(go())
-    finally:
-        core_mod.SCAN_DELAY_S = orig
-    assert not bench.mc["busy"], "verify did not finish in time"
 
 MINIMAL_EDS = """\
 [FileInfo]
