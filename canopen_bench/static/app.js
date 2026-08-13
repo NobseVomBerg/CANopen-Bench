@@ -114,6 +114,15 @@ const btn = {
   ghost: 'border:1px solid var(--inp);color:var(--mid);font-weight:600;',
 };
 
+// One box on the Setup page. Written out once because four of them sit in
+// two rows of a two-column grid and any difference between them reads as a
+// mistake: the grid stretches a row's boxes to the taller of the pair, so
+// the padding and the border have to agree or one looks misaligned against
+// its neighbour. A column, so `margin-top:auto` on a box's last row puts it
+// at the bottom instead of leaving the stretched height as a hole.
+const BOX = 'background:var(--panel);border:1px solid var(--bd);border-radius:8px;'
+  + 'padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0';
+
 // One shape for every on/off control on the page: green while the thing is
 // on, a faint red wash while it is not.
 //
@@ -158,39 +167,60 @@ function PsuBox({ psu }) {
   // when nothing was ever connected.
   if (!psu || !psu.found) {
     return html`
-    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px">
-      <span style="font-weight:600;font-size:12px;flex:none">Power supply</span>
-      <span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>
-      <span class="hv" onClick=${() => send('psu_search')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;flex:none">Search…</span>
-      ${psu && psu.error
-        ? html`<span style="font-size:11px;color:var(--red);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${psu.error}</span>`
-        : html`<span style="font-size:10.5px;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-        Only ports whose description a driver recognises are opened — a serial port might be the CAN adapter.</span>`}
+    <div style=${BOX}>
+      <div style="font-weight:600;font-size:13px">Power supply</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>
+        <span class="hv" onClick=${() => send('psu_search')} style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;flex:none">Search…</span>
+      </div>
+      ${psu && psu.error && html`<div style="font-size:11px;color:var(--red)">${psu.error}</div>`}
+      <div style="margin-top:auto;font-size:10.5px;color:var(--faint);line-height:1.5">
+        A bench supply on a serial port, driven from here: set values, output on/off, and what the
+        terminals actually measure. Only ports whose description a driver recognises are opened —
+        a serial port might be the CAN adapter.</div>
     </div>`;
   }
   const on = psu.output;
+  const measured = (psu.channels || []).some((c) => c.mvolt !== null && c.mvolt !== undefined);
   return html`
-  <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;flex-direction:column;gap:10px">
+  <div style=${BOX}>
     <div style="display:flex;align-items:center;gap:10px;min-width:0">
-      <span style="font-weight:600;font-size:12px;flex:none">Power supply</span>
+      <span style="font-weight:600;font-size:13px;flex:none">Power supply</span>
       <span title=${psu.raw || ''} style="flex:none;font:600 11px ${MONO};color:var(--tx)">${psu.model || psu.name}</span>
-      <span style="flex:none;font:10.5px ${MONO};color:var(--faint)">${psu.port}${psu.sn ? ` · SN ${psu.sn}` : ''}${psu.fw ? ` · ${psu.fw}` : ''}</span>
+      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:var(--faint)">${psu.port}${psu.sn ? ` · SN ${psu.sn}` : ''}${psu.fw ? ` · ${psu.fw}` : ''}</span>
+      ${''/* Both of these are about the box rather than about the supply —
+             where it appears, and whether the bench holds the port at all —
+             so they belong with the heading and out of the way of the
+             controls that move volts. Beside it rather than flung to the
+             far edge by `margin-left:auto`: that put them a screen's width
+             from everything they refer to, and the space in between said
+             nothing. The identity text is what gives way when the box is
+             narrow, which is right — it is the one part that repeats
+             itself in the tooltip. */}
+      <span style="flex:none;display:flex;align-items:center;gap:10px;padding-left:4px;
+                   border-left:1px solid var(--bd2)">
+        <label onClick=${() => send('psu_sidebar_toggle')} title="A second, smaller box in the sidebar: the set values, output and a read — no port, no serial number, those stay here"
+          style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11.5px;color:var(--dim);padding-left:6px">
+          ${Cb(psu.sidebar, 'flex:none;')}Quick access</label>
+        <span class="hv" onClick=${() => send('psu_release')} title="Hand the serial port back to the system"
+          style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">Release</span>
+      </span>
+    </div>
+    ${psu.error && html`<div style="font-size:11px;color:var(--red)">${psu.error}</div>`}
+
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      ${head('OUTPUT')}
       ${toggle(on, on === null || on === undefined ? '?' : on ? 'On' : 'Off',
         () => send('psu_output', { on: !on }),
         `The output is ${on === null || on === undefined ? 'in an unknown state' : on ? 'live' : 'off'} — click to turn it ${on ? 'off' : 'on'}`,
         'flex:none;')}
-      <span class="hv-white" title="Read the supply — nothing here polls" onClick=${() => send('psu_refresh')} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
-      <label onClick=${() => send('psu_sidebar_toggle')} title="A second, smaller box in the sidebar: the set values, output and a refresh — no port, no serial number, those stay here"
-        style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11.5px;color:var(--dim);flex:none;margin-left:auto">
-        ${Cb(psu.sidebar, 'flex:none;')}Quick access</label>
-      <span class="hv" onClick=${() => send('psu_release')} title="Hand the serial port back to the system"
-        style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none">Release</span>
     </div>
-    ${psu.error && html`<div style="font-size:11px;color:var(--red)">${psu.error}</div>`}
-    <div style="display:flex;gap:18px;flex-wrap:wrap">
+
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+      ${head('SET')}
       ${(psu.channels || []).map((c, i) => html`
         <div style="display:flex;align-items:center;gap:8px">
-          ${head(`CH ${i + 1}`)}
+          ${(psu.channels || []).length > 1 ? head(`CH ${i + 1}`) : ''}
           <${SyncInput} value=${String(c.volt)} style=${fieldStyle} title=${`set voltage${c.limit ? ` · the supply reports a limit of ${c.limit} V` : ''}`}
             onCommit=${(v) => send('psu_set', { ch: i + 1, volt: v })} />
           <span style="font-size:11px;color:var(--dim)">V</span>
@@ -198,18 +228,27 @@ function PsuBox({ psu }) {
             onCommit=${(v) => send('psu_set', { ch: i + 1, curr: v })} />
           <span style="font-size:11px;color:var(--dim)">A</span>
         </div>`)}
-      <span style="font-size:10.5px;color:var(--faint);align-self:center">set values, read from the supply</span>
     </div>
-    ${(psu.channels || []).some((c) => c.mvolt !== null && c.mvolt !== undefined) && html`
-    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
-      ${(psu.channels || []).map((c, i) => html`
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:10.5px;color:var(--dim);font-weight:600">CH ${i + 1}</span>
-          <span style="font:11px ${MONO};color:var(--tx)">${c.mvolt ?? '—'} V</span>
-          <span style="font:11px ${MONO};color:var(--tx)">${c.mcurr ?? '—'} A</span>
-        </div>`)}
-      <span style="font-size:10.5px;color:var(--faint)">measured at the terminals</span>
-    </div>`}
+
+    ${''/* The read used to be a bare ⟳ beside the output toggle, where it
+          read as something that acts on the output — a reset, a restart —
+          and where a single grey glyph on grey was easy to miss besides.
+          It belongs to the numbers it fetches, so it stands at the end of
+          the row that shows them, with a word saying what it does. */}
+    <div style="margin-top:auto;display:flex;gap:18px;flex-wrap:wrap;align-items:center;
+                border-top:1px solid var(--bd2);padding-top:9px">
+      ${head('MEASURED')}
+      ${measured
+        ? (psu.channels || []).map((c, i) => html`
+          <div style="display:flex;align-items:center;gap:8px">
+            ${(psu.channels || []).length > 1 ? head(`CH ${i + 1}`) : ''}
+            <span style="font:11px ${MONO};color:var(--tx)">${c.mvolt ?? '—'} V</span>
+            <span style="font:11px ${MONO};color:var(--tx)">${c.mcurr ?? '—'} A</span>
+          </div>`)
+        : html`<span style="font-size:10.5px;color:var(--faint)">nothing read yet</span>`}
+      <span class="hv" onClick=${() => send('psu_refresh')} title="Ask the supply for its set values and what the terminals measure — nothing here polls, so a knob turned on the instrument shows up when you ask"
+        style="${btn.ghost}margin-left:auto;font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none;white-space:nowrap">⟳ Read</span>
+    </div>
   </div>`;
 }
 
@@ -253,8 +292,13 @@ function psuBox(psu) {
         <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
           title=${`Output is ${on === null || on === undefined ? 'unknown' : on ? 'on' : 'off'} — click to turn it ${on ? 'off' : 'on'}`}
           style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid ${on ? 'var(--grn)' : on == null ? 'var(--inp)' : 'var(--off-bd)'};background:${on ? 'var(--grn)' : on == null ? 'transparent' : 'var(--off)'};color:${on ? '#fff' : 'var(--dim)'}">⏻</span>
-        <span class="hv-white" onClick=${() => send('psu_refresh')} title="Read the supply — nothing here polls"
-          style="color:var(--faint);cursor:pointer">⟳</span>
+        ${''/* the same chip shape as the output button beside it: a lone
+              grey glyph on grey next to a bordered button does not read as
+              a button at all, and this is a sidebar with no room for the
+              word that says so in Setup */}
+        <span class="hv-chip" onClick=${() => send('psu_refresh')}
+          title="Ask the supply for its set values — nothing here polls, so a knob turned on the instrument shows up when you ask"
+          style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid var(--inp);color:var(--dim)">⟳</span>
       </span>
     </div>
     ${psu.error
@@ -591,7 +635,7 @@ function SetupPage({ s }) {
         style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">＋ New…</span>
       <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: data/${s.workspace}</span>
     </div>`}
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div style=${BOX}>
       <div style="font-weight:600;font-size:13px">Bus interface</div>
       <!-- grid, not a wrapping flex row: with flex-grow a card that wraps into
            a row of its own stretches across the full panel, so the adapters
@@ -660,7 +704,7 @@ function SetupPage({ s }) {
       </div>
     </div>
 
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div style=${BOX}>
       <div style="font-weight:600;font-size:13px">EDS files</div>
       <div style="display:flex;gap:6px;align-items:center">
         <span style="font-size:11px;color:var(--dim);font-weight:600;flex:none">EDS FOLDER</span>
@@ -710,23 +754,22 @@ function SetupPage({ s }) {
 
     <${PsuBox} psu=${s.psu} />
 
-    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;display:flex;flex-direction:column;gap:10px">
+    <div style=${BOX}>
       <div style="display:flex;align-items:center;gap:10px;min-width:0">
-        <span style="font-weight:600;font-size:12px;flex:none">Extensions</span>
+        <span style="font-weight:600;font-size:13px;flex:none">Extensions</span>
         ${(s.ext?.plugins || []).length
           ? html`<span style="flex:none;font:600 10px ${MONO};background:var(--grn-soft);color:var(--grn);padding:2px 8px;border-radius:9px">${s.ext.plugins.length} PLUGIN${s.ext.plugins.length > 1 ? 'S' : ''}</span>
-                 <span style="flex:none;font:600 11px ${MONO};color:var(--tx)">${s.ext.plugins.join(' · ')}</span>
-                 <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--faint)">vendor packages loaded — their adapters, procedures and seeds are active</span>`
-          : html`<span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>
-                 <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--faint)">vendor-specific features — addressing procedures & session identities, special adapters, SWDL protocols — ship as separately installed plugin packages</span>`}
+                 <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 11px ${MONO};color:var(--tx)">${s.ext.plugins.join(' · ')}</span>`
+          : html`<span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>`}
       </div>
-      ${s.ext?.canInstall && html`
-        <div style="display:flex;align-items:center;gap:10px">
-          <input type="file" id="plugin-file-input" accept=".whl" style="display:none" onChange=${handlePluginFile} />
-          <span class="hv" onClick=${() => document.getElementById('plugin-file-input').click()}
-            style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;flex:none">+ Install plugin…</span>
-          <span style="font-size:10.5px;color:var(--faint)">Upload a plugin package (.whl) — extracted and activated immediately, no restart. Plugins are executable code: only install packages from a source you trust.</span>
-        </div>`}
+      ${''/* the sentence on its own line rather than trailing the names: at
+            half the page's width it was the part that got ellipsed away, and
+            it is the part that says what a plugin actually does here */}
+      <div style="font-size:10.5px;color:var(--faint);line-height:1.5">
+        ${(s.ext?.plugins || []).length
+          ? 'Vendor packages loaded — their adapters, addressing procedures, EDS seeds and panels are active.'
+          : 'Vendor-specific features — addressing procedures & session identities, special adapters, SWDL protocols — ship as separately installed plugin packages.'}
+      </div>
       ${!!s.ext?.installed?.length && html`
         <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
           ${s.ext.installed.map((pkg) => html`
@@ -737,6 +780,14 @@ function SetupPage({ s }) {
               <span class="hv" onClick=${() => send('plugin_remove', { pkg: pkg.name })} title="remove this package"
                 style="color:var(--faint);cursor:pointer">✕</span>
             </div>`)}
+        </div>`}
+      ${s.ext?.canInstall && html`
+        <div style="margin-top:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+                    border-top:1px solid var(--bd2);padding-top:9px">
+          <input type="file" id="plugin-file-input" accept=".whl" style="display:none" onChange=${handlePluginFile} />
+          <span class="hv" onClick=${() => document.getElementById('plugin-file-input').click()}
+            style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;flex:none">+ Install plugin…</span>
+          <span style="flex:1;min-width:180px;font-size:10.5px;color:var(--faint);line-height:1.5">A plugin package (.whl) — extracted and activated immediately, no restart. Plugins are executable code: only install packages from a source you trust.</span>
         </div>`}
     </div>
 
