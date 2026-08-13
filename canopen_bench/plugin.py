@@ -16,6 +16,7 @@ each hook's contract.
 from __future__ import annotations
 
 import logging
+import sys
 from importlib import metadata
 from pathlib import Path
 
@@ -372,10 +373,45 @@ class BenchPlugin:
         return None
 
 
-def load_plugins() -> list[BenchPlugin]:
+def _installed_at(ep) -> str:
+    """Where an entry point's package sits, in enough detail to tell two
+    installations of the same package apart. Best effort: the message this
+    feeds is a diagnostic, so a metadata backend that cannot answer costs
+    a vaguer sentence, not the startup."""
+    try:
+        dist = ep.dist
+        return f"{dist.name} {dist.version} in {dist.locate_file('')}"
+    except Exception:
+        return str(ep.value)
+
+
+def _loaded_from(plugin: BenchPlugin) -> str:
+    """The file the code actually came from — which is the question, once
+    the same package is installed in two places. Import resolution follows
+    ``sys.path``, not the entry-point list, so this can name a different
+    installation than the one whose version the UI shows."""
+    module = sys.modules.get(type(plugin).__module__)
+    return str(getattr(module, "__file__", "?"))
+
+
+def load_plugins(note=None) -> list[BenchPlugin]:
     """Discover and instantiate all installed plugins, sorted by entry-point
     name for a stable order. A broken plugin is logged and skipped — it must
-    never take the bench down."""
+    never take the bench down.
+
+    A name that appears twice is loaded once, and ``note`` is told about
+    it. Two installations of the same package both register their entry
+    point — a wheel uploaded under Setup > Extensions and the same package
+    installed into the environment is the way this happens — and loading
+    both would give one bench two of every hook: two sidebar panels, every
+    seeded EDS row twice, every trace frame decoded twice.
+
+    Which of the two the import then resolves to is decided by ``sys.path``
+    and not by this list, so the message names both places and the file the
+    code came from. That last one is the point: the version shown under
+    Extensions belongs to one installation and the running code may be the
+    other, which looks exactly like a change that did not arrive.
+    """
     plugins: list[BenchPlugin] = []
     try:
         entry_points = sorted(metadata.entry_points(group=ENTRY_POINT_GROUP),
@@ -383,10 +419,25 @@ def load_plugins() -> list[BenchPlugin]:
     except Exception:  # metadata backends misbehaving — run without plugins
         log.exception("plugin discovery failed — continuing without plugins")
         return plugins
+    seen: dict[str, str] = {}
     for ep in entry_points:
+        where = _installed_at(ep)
+        if ep.name in seen:
+            message = (f"PLUGIN {ep.name!r} is installed twice — {where} is "
+                       f"ignored, {seen[ep.name]} is used. Which one runs is "
+                       f"decided by sys.path, so the version shown may belong "
+                       f"to the other; remove one of the two")
+            log.warning("%s", message)
+            if note:
+                note(message)
+            continue
+        seen[ep.name] = where
         try:
-            plugins.append(ep.load()())
-            log.info("loaded plugin %r (%s)", ep.name, ep.value)
+            plugin = ep.load()()
         except Exception:
             log.exception("plugin %r failed to load — skipped", ep.name)
+            continue
+        plugins.append(plugin)
+        log.info("loaded plugin %r (%s) from %s",
+                 ep.name, ep.value, _loaded_from(plugin))
     return plugins

@@ -13,7 +13,7 @@ from canopen_bench.app import create_app
 @pytest.fixture(autouse=True)
 def _no_installed_plugins(monkeypatch):
     """Keep the suite hermetic, same as test_core.py's fixture."""
-    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda: [])
+    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda **kw: [])
 
 
 def test_root_mode_defaults_to_default_workspace(tmp_path, monkeypatch):
