@@ -49,8 +49,9 @@ def _payload_width(var: ODVariable | None) -> int:
 def _sdo_payload(var: ODVariable | None, value: str, width: int) -> bytes:
     """4-byte little-endian expedited payload for a value string. Numeric
     EDS types are masked/packed to `width`, matching the read-side hex
-    formatting in `_format`; text types — or a value that isn't hex — fall
-    back to ASCII, both padded to the expedited frame's fixed 4-byte data
+    formatting in `_format`; the types whose content is bytes rather than
+    a number (`eds_od.RAW_TYPES`) — or a value that isn't hex — fall back
+    to ASCII, both padded to the expedited frame's fixed 4-byte data
     field."""
     if var is None or var.data_type not in RAW_TYPES:
         num = _parse_int(value)
