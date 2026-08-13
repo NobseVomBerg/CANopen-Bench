@@ -3328,7 +3328,15 @@ class Bench:
             field = self._panel_enum(f.key)
             table = self.symbols.tables.get(field.table, {}) if field else {}
             shift = field.resolved_shift(self.symbols) if field else 0
-            out["options"] = [[str(sym.value), sym.name] for sym in table.values()]
+            # every choice sheds the prefix it shares with its table:
+            # "eTensionMode_" on all four of them says nothing that the one
+            # open dropdown does not already say, and costs the width the
+            # word itself needs — the same reason describe_object drops it
+            # from an object's name. removeprefix, so a table whose members
+            # are named otherwise keeps them whole.
+            prefix = f"{field.table}_" if field else ""
+            out["options"] = [[str(sym.value), sym.name.removeprefix(prefix)]
+                              for sym in table.values()]
             out["val"] = str(field.extract(value, self.symbols)) if field else out["val"]
             # a value no symbol names is still a fact about the device, so
             # it is shown rather than snapped to the nearest name

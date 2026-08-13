@@ -61,7 +61,7 @@ general-purpose one rather than competing with it.
 |---|---|---|
 | `title` | required | Box heading, and the key the folded state is remembered under — two groups may not share one |
 | `fields` | required | The values in the box |
-| `cols` | optional | 1…4 columns inside the box (default 1) |
+| `cols` | optional | 1…4 columns inside the box (default 1). The box is also that many of the page's columns wide, so a row has the same room it would have in a one-column box |
 | `collapsed` | optional | How the box opens the first time. What the operator folds afterwards outranks it, per workspace |
 | `when` | optional | `{obj: <address>, bit: N}` or `{obj: <address>, value: N}` — the box exists only where that holds |
 

@@ -289,7 +289,10 @@ def test_an_enum_offers_the_names_the_firmware_uses(tmp_path):
     bench.obj_vals["0x2040:01"] = "0x12"          # lane 0x0F = 2 = eMode_Run
     mode = _fields(bench)[0]
     assert mode["widget"] == "enum"
-    assert ["0", "eMode_Off"] in mode["options"] and ["2", "eMode_Run"] in mode["options"]
+    # …without the prefix all four of them share with the table: "eMode_"
+    # on every line says nothing the one open dropdown does not, and costs
+    # the width the word itself needs
+    assert ["0", "Off"] in mode["options"] and ["2", "Run"] in mode["options"]
     assert mode["val"] == "2"
 
 
