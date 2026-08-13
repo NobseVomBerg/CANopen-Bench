@@ -327,6 +327,22 @@ class BenchPlugin:
         front-panel mirrors, virtual buttons, status LEDs."""
         return []
 
+    def eds_dirs(self) -> list[Path]:
+        """Directories with the device family's own EDS files, copied into
+        the workspace EDS folder like flows and headers — and like those,
+        never over a file that is already there.
+
+        ``seed_eds()`` registers the rows; this brings the files those rows
+        name. Without it a fresh bench has a registry pointing at nothing
+        and somebody has to carry the files from one machine to the next,
+        which is the thing a plugin exists to stop.
+
+        A copy, not a read-through: the file in the workspace is the EDS
+        the devices on this bench actually answer to, and it regularly
+        moves ahead of the packaged one. Editing it there has to stick.
+        """
+        return []
+
     def object_panels(self) -> list[Path]:
         """Packaged panel files (``*.panel.yaml``, or the directories
         holding them): the Objects page's panel view, where a device's

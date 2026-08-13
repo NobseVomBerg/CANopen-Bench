@@ -61,7 +61,7 @@ general-purpose one rather than competing with it.
 |---|---|---|
 | `title` | required | Box heading, and the key the folded state is remembered under — two groups may not share one |
 | `fields` | required | The values in the box |
-| `cols` | optional | 1…4 columns inside the box (default 1). The box is also that many of the page's columns wide, so a row has the same room it would have in a one-column box |
+| `cols` | optional | At most this many columns of values inside the box, 1…4 (default 1). Fewer where the page is too narrow to give each one room — the label is the first thing a squeezed row drops, and a box of `Pr…` is worse than a longer box |
 | `collapsed` | optional | How the box opens the first time. What the operator folds afterwards outranks it, per workspace |
 | `when` | optional | `{obj: <address>, bit: N}` or `{obj: <address>, value: N}` — the box exists only where that holds |
 
@@ -159,10 +159,19 @@ The newer of the two wins, which orders them correctly by itself: a value
 just typed is newer than a PDO from before it, so typing is never
 overwritten; a PDO from a second ago is newer than a read from ten
 minutes back, so the box follows the device. Every value carries where it
-came from and how old it is — fresh numbers are printed at full strength
-and fade as they age, and the tooltip says it in words. A number a PDO
-carried past three minutes ago must not look like a reading taken just
-now.
+came from and how old it is, and the tooltip says it in words — "read,
+4 min ago". It is not said in the rendering: a bench reads a value once
+and then works with it, so fading everything that is not seconds old
+leaves the whole page looking like it is failing at something.
+
+A value the EDS declares as text is printed as the word it is. The bus
+carries a device name as bytes like everything else, and read as a number
+those bytes are nineteen digits of nothing.
+
+Write-only objects are skipped by a box read and a page read — the SDO
+could only abort, and a row of aborts in the log reads as a fault when it
+is the EDS telling the truth. The ⟳ at the field still asks, because that
+one is somebody deciding to.
 
 ## What a panel does not do
 
