@@ -25,7 +25,6 @@ from typing import Any, NamedTuple, TextIO
 
 from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ODVariable
-from canopen.objectdictionary.eds import import_eds
 
 from . import __version__, data, instruments
 from . import report as reportlib
@@ -34,7 +33,7 @@ from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
 from .bus.interface import NO_SERIAL, BusInterface, SdoResult
 from .db import Db
-from .eds_od import OdCache, find_var, pdo_mapping
+from .eds_od import OdCache, eds_text, find_var, load_eds, pdo_mapping
 from .panelspec import PanelError, load_panels
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 from .symbols import SymbolTables, load_symbols
@@ -2658,7 +2657,7 @@ class Bench:
         self.db.eds_write_file(BASE_EDS.name, content)
         self.db.eds_add(BASE_EDS.name, "CiA 301 base (generic)", "", "", True)
 
-    def add_eds_file(self, filename: str, content: str) -> tuple[bool, str]:
+    def add_eds_file(self, filename: str, content: str | bytes) -> tuple[bool, str]:
         """Parse and register a real EDS file, stored as a plain file under
         db.eds_dir (not a DB blob) so it stays individually browsable and
         copyable outside the app — the sqlite row only holds metadata keyed
@@ -2672,8 +2671,12 @@ class Bench:
         if not safe_name or safe_name in (".", ".."):
             return False, f"invalid filename: {filename!r}"
 
+        # bytes where the caller has them — an upload does. The encoding an
+        # EDS was written in is a property of its bytes, and a str has
+        # already had that decided for it, possibly wrongly.
+        raw = content.encode("utf-8") if isinstance(content, str) else content
         try:
-            od = import_eds(io.StringIO(content), None)
+            od = load_eds(raw)
         except Exception as exc:  # malformed EDS - report, don't crash the bench
             return False, f"could not parse EDS: {exc}"
 
@@ -2684,14 +2687,31 @@ class Bench:
             return False, "EDS has no VendorNumber/ProductNumber in [DeviceInfo] — can't match devices on scan"
         ident = f"0x{vendor:X}·0x{product:X}"
 
-        self.db.eds_write_file(safe_name, content)
+        # stored as UTF-8 whatever it arrived as: the characters are the
+        # vendor's, the encoding is nobody's, and normalising once here
+        # means every later reader gets it right without asking
+        self.db.eds_write_file(safe_name, eds_text(raw))
         self.db.eds_add(safe_name, dev_name, ident, code=safe_name[:3].upper())
         self.log(f'EDS  "{safe_name}" added — {dev_name}, identity {ident}')
         self._rematch_devices()
         return True, "ok"
 
     def act_eds_upload(self, p: dict) -> None:
-        ok, msg = self.add_eds_file(p["filename"], p["content"])
+        """An EDS from the browser, as base64 of the file's own bytes.
+
+        Not as text: a browser reading a file as text decodes it as UTF-8,
+        and the EDS files vendors ship are INI files written on Windows —
+        an umlaut in a parameter name then arrives as a replacement
+        character and is written to disk that way. The original is on the
+        far side of that, and there is no getting it back.
+        """
+        try:
+            raw = base64.b64decode(str(p.get("content", "")), validate=True)
+        except Exception:
+            self.log(f'EDS  "{p.get("filename", "")}" rejected — unreadable upload',
+                     "emcy0")
+            return
+        ok, msg = self.add_eds_file(p["filename"], raw)
         if not ok:
             self.log(f'EDS  "{p["filename"]}" rejected — {msg}', "emcy0")
 
@@ -5515,7 +5535,7 @@ class Bench:
             return cached[1]
 
         try:
-            od = import_eds(str(path), None)
+            od = load_eds(path)
         except Exception as exc:
             err = f'EDS "{file}" could not be parsed — {exc}'
             self._catalog_cache[file] = (mtime, err)
