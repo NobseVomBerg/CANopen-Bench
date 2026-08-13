@@ -636,6 +636,32 @@ def test_a_case_can_drive_the_power_supply(tc_bench):
                         "SEL 2;C 2.000", "EX 0"]
 
 
+def test_what_a_case_sets_arrives_in_the_supply_box(tc_bench):
+    """The box follows a run without anybody pressing Read: every step
+    that changes the supply reads it back (``_psu_read``), exactly as a
+    click on the page does, and the tick loop pushes the snapshot.
+
+    Which is also the whole of it — that read is the only one there is.
+    A voltage the case never touched, or a current the device started
+    drawing, stands still until somebody asks. Nothing polls.
+    """
+    from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
+    tc_bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
+    assert tc_bench._psu_connect("COM6")
+    before = tc_bench.snapshot()["psu"]
+    assert before["channels"][1]["volt"] == 57.0 and before["output"] is True
+
+    _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
+    run_selected(tc_bench, {"0017"})
+    assert tc_bench.results == {"0017": "PASS"}
+
+    # the case ends on `psu: {ch: 2, volt: 57.5, curr: 2}` then `output: off`
+    after = tc_bench.snapshot()["psu"]
+    assert after["channels"][1]["volt"] == 57.5
+    assert after["channels"][1]["curr"] == 2.0
+    assert after["output"] is False
+
+
 def test_without_a_supply_the_case_errors_rather_than_blaming_the_device(tc_bench):
     """No instrument is a bench problem. FAIL would read as "the DUT did
     the wrong thing", which is a different message entirely."""
