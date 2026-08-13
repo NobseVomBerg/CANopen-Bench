@@ -304,7 +304,7 @@ def test_a_value_no_symbol_names_is_shown_rather_than_snapped_to_one(tmp_path):
     bench.obj_vals["0x2040:01"] = "0x07"          # lane = 7, named by nothing
     mode = _fields(bench)[0]
     assert mode["val"] == "7"
-    assert ["7", "?0x7"] in mode["options"]
+    assert ["7", "0x7"] in mode["options"]
 
 
 def test_picking_a_name_keeps_the_bits_it_does_not_own(tmp_path):

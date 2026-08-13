@@ -5,12 +5,9 @@ come from the EDS file the user uploaded on the Setup page.
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-from conftest import connect_and_scan, seed_test_registry
+from conftest import connect_and_scan, drive_verify, seed_test_registry
 
-import canopen_bench.core as core_mod
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 
@@ -231,15 +228,7 @@ def test_demo_mc_verify_scan_also_self_heals(tmp_path):
     bench.dispatch("connect_toggle", {})
     bench.mc["enabled"] = True
 
-    orig = core_mod.SCAN_DELAY_S
-    core_mod.SCAN_DELAY_S = 0.02
-    try:
-        async def go():
-            bench.dispatch("mc_verify", {})
-            await asyncio.sleep(0.3)
-        asyncio.run(go())
-    finally:
-        core_mod.SCAN_DELAY_S = orig
+    drive_verify(bench)
 
     assert bench.devices
     assert all(d["eds"] == "DemoDevice.eds" for d in bench.devices)

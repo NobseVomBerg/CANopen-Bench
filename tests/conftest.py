@@ -130,6 +130,31 @@ def connect_and_scan(bench: Bench, timeout: float = 10.0) -> None:
         core_mod.SCAN_DELAY_S = orig
 
 
+def drive_verify(bench: Bench, timeout: float = 10.0) -> None:
+    """Dispatch mc_verify and wait for its async scan+compare to finish.
+
+    Waits on the bench's own busy flag rather than on a stopwatch. A fixed
+    sleep is the shape of flake that only ever fires in CI: 0.3 s was
+    enough on a laptop and not on a loaded runner, where the scan had not
+    finished yet and the test failed as "no devices found" — in a test
+    about finding devices. Same bound as connect_and_scan, and for the
+    same reason.
+    """
+    orig = core_mod.SCAN_DELAY_S
+    core_mod.SCAN_DELAY_S = 0.02
+    try:
+        async def go():
+            bench.dispatch("mc_verify", {})
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            while bench.mc["busy"] and loop.time() < deadline:
+                await asyncio.sleep(0.02)
+        asyncio.run(go())
+    finally:
+        core_mod.SCAN_DELAY_S = orig
+    assert not bench.mc["busy"], f"scan & verify did not finish within {timeout}s"
+
+
 class FakeSupplyPort:
     """A Töllner-like serial port for tests that need the bench to have a
     power supply. Same answers as tests/test_instruments.py uses, kept
