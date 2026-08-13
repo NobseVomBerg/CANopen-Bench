@@ -180,6 +180,110 @@ class ValueError_(ValueError):
     """Input that could not be read. The message is shown to the operator."""
 
 
+def _digits_for(scale: float) -> int:
+    """How many decimals a scale implies: 0.1 -> 1, 0.01 -> 2. Spelling it
+    out beside the factor would be one more thing to keep in step with
+    it."""
+    text = f"{scale:.10f}".rstrip("0")
+    return len(text.partition(".")[2])
+
+
+@dataclass(frozen=True)
+class Quantity:
+    """What a stored number *is*: the unit it is read in and the factor
+    between the two.
+
+    No object dictionary carries this. An EDS says an object is a
+    UNSIGNED16 and says nothing about it being tenths of a centinewton —
+    that lives in the device's documentation, which is why it reaches the
+    bench through a plugin (``BenchPlugin.object_units``) or, for a value
+    that appears in one box and nowhere else, through a panel file.
+
+    ``scale`` computes and ``unit`` labels, and the two stay separate on
+    purpose: a device storing tenths of a cN shows 16.0 with
+    ``Quantity("cN", 0.1)``, and what a write sends is the raw 160 again.
+    """
+
+    unit: str = ""
+    scale: float = 1.0
+    #: decimals shown; None = as many as the scale implies
+    digits: int | None = None
+
+    @property
+    def places(self) -> int:
+        return _digits_for(self.scale) if self.digits is None else self.digits
+
+    @property
+    def stated(self) -> bool:
+        """Whether this says anything at all. An address with no unit and
+        no scale is one nobody has described, and a caller may look
+        elsewhere for a description of it."""
+        return bool(self.unit) or self.scale != 1.0
+
+    def show(self, raw: str | None, signed_bits: int = 0) -> str:
+        """The value as it is read: scaled, to as many decimals as the
+        scale implies, without the unit — that is a label and belongs
+        beside the number, not inside it.
+
+        ``raw`` is what the bus answered (a hex string) or None for "not
+        read yet"; a value that is not a number — a device name, a serial
+        — is passed through untouched.
+
+        ``signed_bits`` is the object's width where the EDS declares it a
+        signed integer, and 0 where it does not. A word is bits on the
+        wire and says nothing about its own sign, so a motor turning
+        backwards reads as 65036 rather than -500 unless somebody says how
+        wide it is. That is the worst kind of wrong number: it is in
+        range, it moves when the device moves, and it is not the value.
+        """
+        if raw in (None, "", "—"):
+            return ""
+        try:
+            value = int(str(raw), 16)
+        except ValueError:
+            return str(raw)
+        if signed_bits and value >= 1 << (signed_bits - 1):
+            value -= 1 << signed_bits
+        scaled = value * self.scale
+        return f"{scaled:.{self.places}f}" if self.places else f"{round(scaled)}"
+
+    def with_unit(self, raw: str | None, signed_bits: int = 0) -> str:
+        """The same reading with its unit — "16.0 cN". What a box prints
+        beside a raw number, and what a report line says a value means."""
+        text = self.show(raw, signed_bits)
+        return f"{text} {self.unit}".strip() if text else ""
+
+    def to_raw(self, text: str, signed_bits: int = 0) -> int:
+        """What somebody typed, back to the number the device stores.
+        Reads the way the rest of the bench reads typed values: ``0x…`` is
+        hex, anything else decimal — a scaled quantity is decimal by its
+        nature ("16.0 cN"), and the two must not disagree.
+
+        A minus sign is only accepted where the EDS says the object is
+        signed, and comes back as the two's complement of that width: a
+        box that shows -500 has to be able to send it, and one that does
+        not know the width cannot tell -500 from a very large number.
+        """
+        text = str(text).strip()
+        if not text:
+            raise ValueError_("empty")
+        try:
+            value = int(text, 16) if text.lower().startswith("0x") else float(text)
+        except ValueError:
+            raise ValueError_(f"{text!r} is not a number") from None
+        raw = round(value / self.scale) if self.scale != 1.0 else round(value)
+        if raw < 0:
+            if not signed_bits:
+                raise ValueError_(f"{text!r} is negative — the EDS declares this "
+                                  f"object unsigned")
+            if raw < -(1 << (signed_bits - 1)):
+                raise ValueError_(f"{text!r} does not fit in {signed_bits} signed bits")
+            raw += 1 << signed_bits
+        elif signed_bits and raw >= 1 << (signed_bits - 1):
+            raise ValueError_(f"{text!r} does not fit in {signed_bits} signed bits")
+        return raw
+
+
 def parse_value(text: str, fields: list[Field], symbols) -> int:
     """Typed input to a number.
 

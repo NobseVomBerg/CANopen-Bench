@@ -7,6 +7,12 @@ holds no device knowledge; a plugin ships the file that says what to
 show. Everything below a box (reading, staging, writing, the EDS width a
 download is sized to) is the object machinery that was already there.
 
+A field may leave ``unit`` and ``scale`` out and take whatever the plugin
+declared for that address (``BenchPlugin.object_units``): what an object
+means physically is a fact about the device rather than about this view
+of it, and a fact written down in two places is a fact that drifts apart
+in two places.
+
 Values are shown in decimal, always. The object table's hex/dec chip is a
 developer's reading habit; a box that says "mA" is read by someone who
 wants 167, not 0xA7.
@@ -43,6 +49,8 @@ from pathlib import Path
 
 import yaml
 
+from .values import Quantity, _digits_for
+
 #: what a field may say — anything else is a typo, and typos are loud here
 _FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit"}
 _WIDGETS = {"number", "enum", "flag"}
@@ -78,14 +86,6 @@ def _addr(text: str) -> tuple[str, str]:
     return f"0x{int(idx, 16):04X}", f"{int(sub, 16):02X}"
 
 
-def _digits_for(scale: float) -> int:
-    """How many decimals a scale implies: 0.1 -> 1, 0.01 -> 2. Spelling it
-    out per field would be one more thing to keep in step with the factor
-    next to it."""
-    text = f"{scale:.10f}".rstrip("0")
-    return len(text.partition(".")[2])
-
-
 @dataclass
 class PanelField:
     """One value: what to call it, where it lives, how to read it."""
@@ -93,9 +93,11 @@ class PanelField:
     label: str
     idx: str
     sub: str
-    unit: str = ""
-    scale: float = 1.0
-    digits: int = 0
+    #: the unit and scale this file gives the value, if it gives any.
+    #: A file that gives none leaves the address to whatever the plugin
+    #: declared for it (``BenchPlugin.object_units``) — the same fact
+    #: written down twice is the same fact drifting apart twice
+    quantity: Quantity = field(default_factory=Quantity)
     rw: bool = False
     #: how it is shown and written. ``number`` is the default; ``enum``
     #: takes its choices from the symbol table a plugin declared for this
@@ -109,59 +111,6 @@ class PanelField:
     @property
     def key(self) -> str:
         return f"{self.idx}:{self.sub}"
-
-    def show(self, raw: str | None, signed_bits: int = 0) -> str:
-        """The value as the box prints it. ``raw`` is what the bus answered
-        (a hex string) or None for "not read yet"; a value that is not a
-        number — a device name, a serial — is passed through untouched.
-
-        ``signed_bits`` is the object's width where the EDS declares it a
-        signed integer, and 0 where it does not. A word is bits on the
-        wire and says nothing about its own sign, so a motor turning
-        backwards reads as 65036 rather than -500 unless somebody says
-        how wide it is. That is the worst kind of wrong number: it is in
-        range, it moves when the device moves, and it is not the value.
-        """
-        if raw in (None, "", "—"):
-            return ""
-        try:
-            value = int(str(raw), 16)
-        except ValueError:
-            return str(raw)
-        if signed_bits and value >= 1 << (signed_bits - 1):
-            value -= 1 << signed_bits
-        scaled = value * self.scale
-        return f"{scaled:.{self.digits}f}" if self.digits else f"{round(scaled)}"
-
-    def to_raw(self, text: str, signed_bits: int = 0) -> int:
-        """What somebody typed into the box, back to the number the device
-        stores. Reads the way the rest of the bench reads typed values:
-        ``0x…`` is hex, anything else decimal — a scaled field is decimal
-        by its nature ("16.0 cN"), and the two must not disagree.
-
-        A minus sign is only accepted where the EDS says the object is
-        signed, and comes back as the two's complement of that width: a
-        box that shows -500 has to be able to send it, and one that does
-        not know the width cannot tell -500 from a very large number.
-        """
-        text = str(text).strip()
-        if not text:
-            raise PanelError("empty")
-        try:
-            value = int(text, 16) if text.lower().startswith("0x") else float(text)
-        except ValueError:
-            raise PanelError(f"{text!r} is not a number") from None
-        raw = round(value / self.scale) if self.scale != 1.0 else round(value)
-        if raw < 0:
-            if not signed_bits:
-                raise PanelError(f"{text!r} is negative — the EDS declares this "
-                                 f"object unsigned")
-            if raw < -(1 << (signed_bits - 1)):
-                raise PanelError(f"{text!r} does not fit in {signed_bits} signed bits")
-            raw += 1 << signed_bits
-        elif signed_bits and raw >= 1 << (signed_bits - 1):
-            raise PanelError(f"{text!r} does not fit in {signed_bits} signed bits")
-        return raw
 
 
 @dataclass
@@ -281,9 +230,8 @@ def _fields(raw, where: str) -> list[PanelField]:
         out.append(PanelField(
             label=str(item.get("label") or f"{idx}:{sub}"),
             idx=idx, sub=sub,
-            unit=str(item.get("unit", "")),
-            scale=scale,
-            digits=int(item.get("digits", _digits_for(scale))),
+            quantity=Quantity(unit=str(item.get("unit", "")), scale=scale,
+                              digits=int(item.get("digits", _digits_for(scale)))),
             rw=bool(item.get("rw", False)),
             widget=widget,
             bit=bit if widget == "flag" else None,
