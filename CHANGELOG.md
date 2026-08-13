@@ -32,7 +32,13 @@ development; the version counts from here.
   and the connect line names it — opening the wrong one does not fail,
   it delivers silence
 - Object browser from EDS catalogs with identity matching (0x1018),
-  favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id)
+  favorites, and typed RAW rows (SDO / PDO / NMT, per-row node-id).
+  What an object *is* — signed or not, text or a number, how wide, what
+  it may be called, what range it accepts — is read once from the EDS
+  (`eds_od.ObjectInfo`) and used by the table, the panel, the trace and
+  the report alike, so one device cannot answer to two readings on one
+  screen. Where a plugin's headers name an object, that name wins over
+  the EDS's in every view
 - Trace monitor: 200k-frame ring buffer, newest frame at the top and the
   whole buffer (or an opened capture) scrollable rather than a screenful,
   server-side class/node filters,

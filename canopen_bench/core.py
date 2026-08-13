@@ -23,7 +23,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple, TextIO
 
-from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ODVariable
 
 from . import __version__, data, instruments
@@ -33,7 +32,16 @@ from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
 from .bus.interface import NO_SERIAL, BusInterface, SdoResult
 from .db import Db
-from .eds_od import OdCache, eds_text, find_var, load_eds, pdo_mapping
+from .eds_od import (
+    ObjectInfo,
+    OdCache,
+    eds_text,
+    find_var,
+    info_of,
+    load_eds,
+    object_info,
+    pdo_mapping,
+)
 from .panelspec import PanelError, load_panels
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 from .symbols import SymbolTables, load_symbols
@@ -134,14 +142,6 @@ TRACE_CLASSES = ("NMT", "SDO", "PDO", "EMCY", "HB")
 NMT_LABEL = {"start": "start", "preop": "pre-op", "stop": "stop", "reset": "reset node"}
 NMT_STATE = {"start": "Operational", "preop": "Pre-Operational", "stop": "Stopped",
              "reset": "Pre-Operational"}
-
-_TYPE_NAMES = {
-    odlib.BOOLEAN: "BOOL", odlib.INTEGER8: "I8", odlib.INTEGER16: "I16",
-    odlib.INTEGER32: "I32", odlib.INTEGER64: "I64", odlib.UNSIGNED8: "U8",
-    odlib.UNSIGNED16: "U16", odlib.UNSIGNED32: "U32", odlib.UNSIGNED64: "U64",
-    odlib.REAL32: "F32", odlib.REAL64: "F64", odlib.VISIBLE_STRING: "STR",
-    odlib.OCTET_STRING: "OCT", odlib.UNICODE_STRING: "USTR", odlib.DOMAIN: "DOM",
-}
 
 
 def now_str() -> str:
@@ -617,9 +617,15 @@ def _emcy_wanted(val: dict) -> str:
     return "expect_emcy " + (", ".join(parts) if parts else "any")
 
 
-#: CiA 301 data types whose content is characters, not a number
-#: (VISIBLE_STRING, OCTET_STRING, UNICODE_STRING)
-_TEXT_TYPES = (0x09, 0x0A, 0x0B)
+def _out_of_range(value: int, lo: object, hi: object) -> bool:
+    """Whether a value falls outside the limits the EDS states, which is
+    the only place a bench can learn them from. Limits it does not state
+    are no limit — most objects state none, and a missing LowLimit must
+    not read as zero."""
+    try:
+        return (lo is not None and value < int(lo)) or (hi is not None and value > int(hi))
+    except (TypeError, ValueError):
+        return False
 
 
 def _in_base_of(value: object, like: object) -> str:
@@ -896,6 +902,10 @@ class Bench:
         self._push_again = False
         self._push_error = ""
         self._catalog_cache: dict[str, tuple[float, tuple[dict, list] | str]] = {}
+        #: what the plugins' headers call an address (see _symbol_label).
+        #: Asked per trace frame and per table row per tick, and answered
+        #: from the symbol tables alone — so it is worked out once
+        self._sym_labels: dict[tuple[str, str], str] = {}
         self._ods = OdCache(db.eds_dir)  # object names for the trace interpreter
         # bus backends report a vanished interface (adapter unplugged) from
         # their worker threads; the captured loop gets us back on the loop
@@ -1594,7 +1604,7 @@ class Bench:
             # the firmware's own name wins where a plugin can give one: the
             # case was written against the headers, and its author is who
             # this line is for. The EDS name stands in when none can be
-            name = self._symbol_label(idx, sub) or self._object_label(idx, sub)
+            name = self._label(idx, sub, self._object_label(idx, sub))
             if name:
                 text += f"  ({name})"
         return text
@@ -1602,15 +1612,43 @@ class Bench:
     def _symbol_label(self, idx: str, sub: str) -> str:
         """What a plugin's headers call this object, or "" — first answer
         wins, and a plugin that raises is one that does not get to stop a
-        run over a label."""
+        run over a label.
+
+        Memoised, because the answer depends on the loaded symbol tables
+        and on nothing else: the trace asks it per frame, and the object
+        table per row per tick. ``act_symbols_reload`` empties the memo,
+        which is the only thing that can change an answer.
+        """
+        hit = self._sym_labels.get((idx, sub))
+        if hit is not None:
+            return hit
+        found = ""
         for plugin in self.plugins:
             try:
                 name = plugin.describe_object(idx, sub, self.symbols)
             except Exception:
                 continue
             if name:
-                return name
-        return ""
+                found = name
+                break
+        self._sym_labels[(idx, sub)] = found
+        return found
+
+    def _label(self, idx: str, sub: str, eds_name: str = "") -> str:
+        """What to call this object, wherever it is shown.
+
+        The firmware's own name wins where a plugin can give one, and the
+        EDS's stands in when none can. Object dictionaries are historical
+        documents — a name in one was right when it was written and has
+        been carried forward ever since — while the headers the firmware
+        is built from are what its authors actually call the thing today.
+
+        One rule, in the report line, the object table, the favourites,
+        the signal plot and the trace alike. It used to hold in the
+        report only, so the same object answered to two names on one
+        screen depending on which box you were looking at.
+        """
+        return self._symbol_label(idx, sub) or eds_name
 
     def _value_note(self, idx: str, sub: str, value: object, like: object = None) -> str:
         """A value as the report should show it: what came back, and what
@@ -1624,23 +1662,12 @@ class Bench:
         # an object the EDS calls a string is one somebody wants to read,
         # not decode: 0x0000003332315F4F4D4544 is "DEMO_123" written back
         # to front, and nobody recognises their device name in that
-        if self._is_text_object(idx, sub):
+        info = self._sel_info(idx, sub)
+        if info is not None and info.is_text:
             text = _hex_to_text(value)
             if text is not None:
                 return f'"{text}"'
         return _in_base_of(value, like)
-
-    def _is_text_object(self, idx: str, sub: str) -> bool:
-        """Whether the EDS declares this object as one of the string types."""
-        dev = self.sel_devices[0] if self.sel_devices else None
-        od = self._ods.load(dev["eds"]) if dev else None
-        if od is None:
-            return False
-        want_i, want_s = _addr_int(idx), _addr_int(sub)
-        if want_i is None:
-            return False
-        var = find_var(od, want_i, want_s or 0)
-        return getattr(var, "data_type", None) in _TEXT_TYPES
 
     def dispatch(self, action: str, p: dict[str, Any]) -> None:
         fn = self._plugin_actions.get(action)  # namespaced "<plugin>.<name>"
@@ -1923,33 +1950,34 @@ class Bench:
         cmd, idx, sub = data[0], data[1] | (data[2] << 8), data[3]
         obj = f"0x{idx:04X}:{sub:02X}"
         node = cob & 0x7F
-        eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
-        var = None
-        if eds and eds != "—":
-            od = self._ods.load(eds)
-            var = find_var(od, idx, sub) if od else None
-            if var is not None and var.name:
-                obj += f" {var.name}"
+        info = self._object_info(node, f"0x{idx:04X}", f"{sub:02X}")
+        name = self._label(f"0x{idx:04X}", f"{sub:02X}", info.name if info else "")
+        if name:
+            obj += f" {name}"
         row["obj"] = obj
         if cmd == 0x80 and len(data) >= 8:
             row["val"] = f"abort 0x{int.from_bytes(data[4:8], 'little'):08X}"
         elif (n := self._EXPEDITED_LEN.get(cmd)) and len(data) >= 4 + n:
             value = int.from_bytes(data[4:4 + n], "little")
-            row["val"] = str(value)
+            # what a word means as a number is what the EDS declares it to
+            # be, here as everywhere else: -1 rather than 65535. The plot
+            # follows, or a signed signal jumps the height of its range
+            # every time it crosses zero
+            shown = info.signed(value, n * 8) if info is not None else value
+            row["val"] = str(shown)
             if live:
-                self._plot_sample(idx, sub, value)
+                self._plot_sample(idx, sub, shown)
                 # not a text object: an expedited frame carries the first
                 # four bytes of a device name, and "DemoDevice" would come
                 # back as 68 — the first letter read as a number. The
                 # rest arrives in segments this decoder does not follow,
                 # so there is nothing here worth remembering for one.
-                if var is None or var.data_type not in self._NO_PAD_TYPES:
+                if info is None or info.width:
                     self._bus_sample(node, idx, sub, value, n)
 
     # predefined connection set: PDO function code -> mapping object
     _PDO_MAPPING_INDEX = {0x180: 0x1A00, 0x280: 0x1A01, 0x380: 0x1A02, 0x480: 0x1A03,
                           0x200: 0x1600, 0x300: 0x1601, 0x400: 0x1602, 0x500: 0x1603}
-    _SIGNED_TYPES = {0x02, 0x03, 0x04, 0x15}  # INTEGER8/16/32/64 (CiA-301 data types)
 
     def _annotate_pdo(self, row: dict, live: bool = True) -> None:
         """Decode PDO payloads into named signals via the default mapping
@@ -1987,10 +2015,13 @@ class Bench:
             val = (raw >> pos) & ((1 << bits) - 1)
             pos += bits
             var = find_var(od, idx, sub)
-            if var is not None and var.data_type in self._SIGNED_TYPES \
-                    and val >= 1 << (bits - 1):
-                val -= 1 << bits
-            name = var.name if var is not None and var.name else f"0x{idx:04X}:{sub:02X}"
+            info = info_of(var) if var is not None else None
+            # sign-extended at the *mapped* width, not the declared one: a
+            # mapping may carry fewer bits of an object than it has
+            if info is not None:
+                val = info.signed(val, bits)
+            name = self._label(f"0x{idx:04X}", f"{sub:02X}", info.name if info else "") \
+                or f"0x{idx:04X}:{sub:02X}"
             decoded.append((name, idx, sub, val))
             if live:
                 self._plot_sample(idx, sub, val)
@@ -3222,17 +3253,6 @@ class Bench:
         self.obj_vals[key] = f"0x{value:0{width}X}"
         self.obj_vals_at[key] = time.monotonic()
 
-    # value strings are hex by convention (with or without 0x); string-,
-    # octet- and domain-typed objects must never be reformatted
-    _NO_PAD_TYPES = {0x09, 0x0A, 0x0B, 0x0F}  # VISIBLE/OCTET/UNICODE_STRING, DOMAIN
-    #: the subset of those whose bytes are characters — a panel prints them
-    #: as the word they are. OCTET_STRING and DOMAIN are bytes that happen
-    #: not to be padded, and guessing an encoding for them would invent one
-    _TEXT_TYPES = {0x09, 0x0B}                # VISIBLE_STRING, UNICODE_STRING
-    #: INTEGER8/16/32 and how wide each is. A word carries no sign of its
-    #: own, so this is the only thing that can tell -500 from 65036
-    _SIGNED_BITS = {0x02: 8, 0x03: 16, 0x04: 32}
-
     @staticmethod
     def _pad_hex(value: str, width_bytes: int) -> str:
         """Normalize a typed value to the object's byte width, so the SDO
@@ -3255,41 +3275,38 @@ class Bench:
         digits = max(width_bytes * 2, (num.bit_length() + 3) // 4)
         return f"0x{num:0{digits}X}"
 
-    def _eds_write_width(self, node: int, idx: str, sub: str) -> int:
-        """Byte width of an object per the EDS assigned to the node;
-        0 = unknown or a type that must not be padded."""
+    def _eds_of(self, node: int) -> str:
+        """The EDS file assigned to a node, or "" — "—" is the registry's
+        way of writing "none", and loading it would be a missing file."""
         eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
-        od = self._ods.load(eds) if eds and eds != "—" else None
-        var = find_var(od, int(idx, 16), int(sub or "0", 16)) if od else None
-        if var is None or var.data_type in self._NO_PAD_TYPES:
-            return 0
-        return max(len(var) // 8, 1)
+        return "" if eds in ("", "—") else eds
 
-    def _eds_data_type(self, node: int, idx: str, sub: str) -> int | None:
-        """What the EDS assigned to this node says this object is. None
-        where there is no EDS, or no such object in it — the panel then
-        treats the value as the plain unsigned word it always was."""
-        eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
-        od = self._ods.load(eds) if eds and eds != "—" else None
-        try:
-            var = find_var(od, int(idx, 16), int(sub or "0", 16)) if od else None
-        except ValueError:
+    def _object_info(self, node: int, idx: str, sub: str) -> ObjectInfo | None:
+        """What the EDS assigned to this node says about one object.
+
+        The one question the panel, the table, the trace and the write
+        path all used to ask separately — each with its own copy of the
+        CiA-301 type numbers, and two of those copies disagreed. None
+        where there is no EDS or no such object in it; every caller then
+        treats the value as the plain unsigned word it always was, which
+        is what they all did before anything was asked.
+        """
+        want_i, want_s = _addr_int(idx), _addr_int(sub)
+        if want_i is None:
             return None
-        return None if var is None else var.data_type
+        od = self._ods.load(self._eds_of(node)) if self._eds_of(node) else None
+        return object_info(od, want_i, want_s or 0)
 
-    def _eds_is_text(self, node: int, idx: str, sub: str) -> bool:
-        """Whether the EDS declares this object as text rather than a
-        number — a device name, a version string. Those bytes are read as
-        a number nowhere: 0x726564656546 is "Feeder", not 126 billion."""
-        return self._eds_data_type(node, idx, sub) in self._TEXT_TYPES
-
-    def _panel_signed_bits(self, node: int, idx: str, sub: str) -> int:
-        """The width of a signed object, 0 for everything else — what
-        ``PanelField.show``/``to_raw`` need to read and write a negative
-        number. Unknown counts as unsigned: that is what the panel did
-        before anything asked, and a guessed sign bit turns half a range
-        into negatives."""
-        return self._SIGNED_BITS.get(self._eds_data_type(node, idx, sub), 0)
+    def _sel_info(self, idx: str, sub: str) -> ObjectInfo | None:
+        """The same for the selected device — what a report line and the
+        object table are written about."""
+        dev = self.sel_devices[0] if self.sel_devices else None
+        if dev is None:
+            return None
+        want_i, want_s = _addr_int(idx), _addr_int(sub)
+        if want_i is None:
+            return None
+        return object_info(self._ods.load(dev["eds"]), want_i, want_s or 0)
 
     def act_obj_write(self, p: dict) -> None:
         idx, sub = p["idx"], p["sub"]
@@ -3302,7 +3319,8 @@ class Bench:
                 for r in rows:
                     if r[0] == idx and r[1] == sub:
                         value = r[5]
-        value = self._pad_hex(value, self._eds_write_width(node, idx, sub))
+        info = self._object_info(node, idx, sub)
+        value = self._pad_hex(value, info.width if info else 0)
         res = self.bus.sdo_write(node, idx, sub, value)
         if res.ok:
             self.obj_vals[key] = value
@@ -3383,39 +3401,17 @@ class Bench:
             return None, "", 0.0
         return mine, "read", (now - mine_at if mine_at else 0.0)
 
-    @staticmethod
-    def _as_text(raw: str) -> str:
-        """The bytes behind a hex value as the word they spell. A device
-        name comes back from the bus as hex like every other object, and
-        read as a number it is nineteen digits of nothing.
-
-        Reversed, because the hex is a *number*: the bus formats a payload
-        little-endian (``_bytes_to_hex``), which is right for the integers
-        that are most of an object dictionary and puts the last byte of a
-        string first. Undoing that here rather than there keeps every
-        existing value string meaning what it meant.
-
-        A value that is already text — the trace decodes SDO answers and
-        stores the word — is passed through: it is not hex, so it does not
-        parse as hex.
-        """
-        digits = str(raw).removeprefix("0x").removeprefix("0X")
-        if len(digits) % 2 or not digits:
-            return str(raw)
-        try:
-            data = bytes.fromhex(digits)[::-1]
-        except ValueError:
-            return str(raw)
-        return data.decode("utf-8", "replace").rstrip("\x00").strip() or str(raw)
-
     def _panel_field_view(self, f, node: int) -> dict:
         raw, src, age = self._panel_value(f.key, node)
-        bits = self._panel_signed_bits(node, f.idx, f.sub) if f.widget == "number" else 0
+        info = self._object_info(node, f.idx, f.sub)
+        bits = info.signed_bits if info is not None and f.widget == "number" else 0
         # a text object is a word, whatever the wire carried it as; the
-        # widgets below all mean numbers, so this is the whole of it
-        if raw and f.widget == "number" and self._eds_is_text(node, f.idx, f.sub):
+        # widgets below all mean numbers, so this is the whole of it. A
+        # value that is already a word — the trace decodes SDO answers and
+        # stores one — passes through, since it does not parse as hex
+        if raw and f.widget == "number" and info is not None and info.is_text:
             return {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": "",
-                    "rw": f.rw, "widget": "number", "val": self._as_text(raw),
+                    "rw": f.rw, "widget": "number", "val": _hex_to_text(raw) or str(raw),
                     "src": src, "age": round(age, 1)}
         out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
                "rw": f.rw, "widget": f.widget, "val": f.show(raw, bits),
@@ -3431,7 +3427,8 @@ class Bench:
         shown = _typed_number(raw or "")
         if shown is not None:
             out["alt"] = alternatives(shown, self._object_fields.get(f.key, []),
-                                      self.symbols, len((raw or "").removeprefix("0x")) or 2)
+                                      self.symbols, len((raw or "").removeprefix("0x")) or 2,
+                                      info.signed(shown) if info is not None else None)
         value = _typed_number(raw or "") or 0
         if f.widget == "flag":
             out["on"] = bool(value >> f.bit & 1)
@@ -3514,8 +3511,9 @@ class Bench:
             self._panel_stage_part(fld, p)
             return
         node = self._target_node()
-        bits = (self._panel_signed_bits(node, p.get("idx", ""), p.get("sub", ""))
-                if fld is not None else 0)
+        info = (self._object_info(node, p.get("idx", ""), p.get("sub", ""))
+                if fld is not None else None)
+        bits = info.signed_bits if info is not None else 0
         # an unscaled field goes through the object table's own parsing,
         # which knows hex, binary and symbol names. A signed one does not:
         # that path stages the digits as an unsigned word, and -500 leaves
@@ -5549,6 +5547,7 @@ class Bench:
         def add_row(var: ODVariable) -> None:
             for key, _, lo, hi in group_defs:
                 if lo <= var.index <= hi:
+                    info = info_of(var)
                     default = var.value if var.value is not None else var.default
                     if default is None:
                         val = "—"
@@ -5557,22 +5556,12 @@ class Bench:
                     elif isinstance(default, float):
                         val = str(default)
                     else:
-                        width = max(len(var) // 8, 1) * 2
-                        val = f"0x{int(default) & ((1 << (len(var) or 8)) - 1):0{width}X}"
-                    acc = var.access_type if var.access_type in ("ro", "rw", "wo") else \
-                        ("ro" if not var.writable else "rw")
-                    # canopen's own qualname joins a member to its object with
-                    # a dot; the bench separates index from sub-index with a
-                    # slash everywhere — in the report line of a step and in
-                    # this table — so the two never read as different notions
-                    parent = getattr(var, "parent", None)
-                    qual = (f"{parent.name}/{var.name}"
-                            if parent is not None and hasattr(parent, "subindices")
-                            else var.name)
+                        width = max(info.bits // 8, 1) * 2
+                        val = f"0x{int(default) & ((1 << (info.bits or 8)) - 1):0{width}X}"
+                    idx, sub = f"0x{var.index:04X}", f"{var.subindex:02X}"
                     catalog[key].append([
-                        f"0x{var.index:04X}", f"{var.subindex:02X}", qual,
-                        _TYPE_NAMES.get(var.data_type, f"0x{var.data_type:02X}"), acc, val,
-                        var.min, var.max,
+                        idx, sub, self._label(idx, sub, info.name),
+                        info.type_name, info.access, val, info.lo, info.hi,
                     ])
                     return
 
@@ -5644,6 +5633,11 @@ class Bench:
         """Re-parse the workspace symbol directory, so dropping in the
         headers of a newer firmware does not need a restart."""
         self.symbols = self._load_symbols()
+        # the names every view shows come from those tables (see _label),
+        # so a reload that did not empty this would leave the old firmware
+        # naming the objects of the new one
+        self._sym_labels.clear()
+        self._catalog_cache.clear()
         self._load_testcases()
 
     def _value_view(self, catalog: dict) -> dict[str, dict]:
@@ -5668,14 +5662,35 @@ class Bench:
             raw = self.obj_vals.get(key) or default
             if raw in (None, "", "—"):
                 continue
+            idx, _, sub = key.partition(":")
+            info = self._sel_info(idx, sub)
+            # a device name is a word. The table used to read it as the
+            # number its bytes happen to spell, in whichever base — and
+            # neither reading of nineteen digits is the name
+            if info is not None and info.is_text and (text := _hex_to_text(raw)):
+                out[key] = {"txt": text, "alt": f"{text} · {raw}", "sym": "", "oor": False}
+                continue
             try:
                 value = int(str(raw), 16)
             except ValueError:
                 continue  # string-typed object: leave it exactly as it is
             fields = self._object_fields.get(key, [])
-            out[key] = {"txt": format_number(value, self.num_base, width),
-                        "alt": alternatives(value, fields, self.symbols, width),
-                        "sym": describe(value, fields, self.symbols) if fields else ""}
+            # what the word *means* as a number. Hex stays the word as
+            # stored — that is what a word is — while decimal is the
+            # reading the EDS declares: 0xFE0C is -500 on an INTEGER16 and
+            # 65036 on a UNSIGNED16, and only the file can say which
+            dec = info.signed(value) if info is not None else value
+            out[key] = {
+                "txt": format_number(value, "hex", width) if self.num_base == "hex"
+                else str(dec),
+                "alt": alternatives(value, fields, self.symbols, width, dec),
+                "sym": describe(value, fields, self.symbols) if fields else "",
+                # the EDS's own limits, checked against that same reading.
+                # It used to be checked in the browser, against the text on
+                # screen parsed as hex — so with the table in decimal a 500
+                # was compared as 0x500, and the warning was about 1280
+                "oor": info is not None and _out_of_range(dec, info.lo, info.hi),
+            }
         return out
 
     def _mirror_slots(self, eds: str) -> list[dict]:

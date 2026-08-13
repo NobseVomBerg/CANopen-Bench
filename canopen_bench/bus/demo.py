@@ -13,17 +13,10 @@ matching traffic and out-of-range writes abort like a real device would.
 """
 from __future__ import annotations
 
-from canopen.objectdictionary import (
-    DOMAIN,
-    OCTET_STRING,
-    UNICODE_STRING,
-    VISIBLE_STRING,
-    ObjectDictionary,
-    ODVariable,
-)
+from canopen.objectdictionary import ObjectDictionary, ODVariable
 
 from ..db import Db
-from ..eds_od import OdCache, find_var, pdo_mapping
+from ..eds_od import RAW_TYPES, OdCache, find_var, pdo_mapping
 from .canopen_bus import _decode_cob
 from .interface import BusInterface, FoundDevice, Frame, SdoResult
 
@@ -37,7 +30,6 @@ _NMT_TO_STATE = {"start": "Operational", "preop": "Pre-Operational",
 # real-hardware traces (see its _EXPEDITED_LEN table).
 _UPLOAD_CMD = {1: 0x4F, 2: 0x4B, 3: 0x47, 4: 0x43}    # read response
 _DOWNLOAD_CMD = {1: 0x2F, 2: 0x2B, 3: 0x27, 4: 0x23}  # write request
-_TEXT_TYPES = {VISIBLE_STRING, UNICODE_STRING, DOMAIN, OCTET_STRING}
 
 
 def _parse_int(value: str) -> int | None:
@@ -60,7 +52,7 @@ def _sdo_payload(var: ODVariable | None, value: str, width: int) -> bytes:
     formatting in `_format`; text types — or a value that isn't hex — fall
     back to ASCII, both padded to the expedited frame's fixed 4-byte data
     field."""
-    if var is None or var.data_type not in _TEXT_TYPES:
+    if var is None or var.data_type not in RAW_TYPES:
         num = _parse_int(value)
         if num is not None:
             return (num & ((1 << (width * 8)) - 1)).to_bytes(width, "little").ljust(4, b"\x00")
