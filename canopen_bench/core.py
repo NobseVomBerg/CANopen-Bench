@@ -3154,7 +3154,10 @@ class Bench:
         if st is None:
             return base | {"port": self.psu.link.port, "channels": []}
         return base | {
-            "model": st.model, "sn": st.serial, "fw": st.firmware,
+            # vendor and model as two fields rather than one string: the
+            # box sets them in different weights, and a driver that knows
+            # only one of the two must not print a stray space
+            "vendor": st.vendor, "model": st.model, "sn": st.serial, "fw": st.firmware,
             "port": st.port, "output": st.output, "raw": st.raw,
             "channels": [{"volt": ch.volt, "curr": ch.curr, "limit": ch.limit,
                           "mvolt": ch.meas_volt, "mcurr": ch.meas_curr,
