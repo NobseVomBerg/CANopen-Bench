@@ -3245,7 +3245,7 @@ class Bench:
     def _eds_is_text(self, node: int, idx: str, sub: str) -> bool:
         """Whether the EDS declares this object as text rather than a
         number — a device name, a version string. Those bytes are read as
-        a number nowhere: 0x466565646572 is "Feeder", not 77 billion."""
+        a number nowhere: 0x726564656546 is "Feeder", not 126 billion."""
         eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
         od = self._ods.load(eds) if eds and eds != "—" else None
         try:
@@ -3350,12 +3350,23 @@ class Bench:
     def _as_text(raw: str) -> str:
         """The bytes behind a hex value as the word they spell. A device
         name comes back from the bus as hex like every other object, and
-        read as a number it is nineteen digits of nothing."""
+        read as a number it is nineteen digits of nothing.
+
+        Reversed, because the hex is a *number*: the bus formats a payload
+        little-endian (``_bytes_to_hex``), which is right for the integers
+        that are most of an object dictionary and puts the last byte of a
+        string first. Undoing that here rather than there keeps every
+        existing value string meaning what it meant.
+
+        A value that is already text — the trace decodes SDO answers and
+        stores the word — is passed through: it is not hex, so it does not
+        parse as hex.
+        """
         digits = str(raw).removeprefix("0x").removeprefix("0X")
         if len(digits) % 2 or not digits:
             return str(raw)
         try:
-            data = bytes.fromhex(digits)
+            data = bytes.fromhex(digits)[::-1]
         except ValueError:
             return str(raw)
         return data.decode("utf-8", "replace").rstrip("\x00").strip() or str(raw)

@@ -590,12 +590,23 @@ def _bench_with_text_eds(tmp_path) -> Bench:
     return bench
 
 
+def test_the_bytes_of_a_word_are_read_back_the_way_they_were_sent(tmp_path):
+    """The bus formats a payload little-endian, which is right for the
+    integers that are most of an object dictionary and puts the last byte
+    of a string first. Read straight, a name comes out backwards — which
+    looks enough like a name that nobody checks it twice."""
+    assert Bench._as_text("0x726564656546") == "Feeder"
+    assert Bench._as_text("0x00726564656546") == "Feeder"   # trailing NUL
+    assert Bench._as_text("DemoDevice") == "DemoDevice"     # already a word
+    assert Bench._as_text("0xABC") == "0xABC"               # not whole bytes
+
+
 def test_a_device_name_is_a_word_not_nineteen_digits(tmp_path):
     """The bus carries a name as bytes like everything else, and a box that
     reads those bytes as a number prints 3472900244173440512 where the
     device said its name. The EDS is what knows the difference."""
     bench = _bench_with_text_eds(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x466565646572"        # "Feeder"
+    bench.obj_vals["0x1008:00"] = "0x726564656546"        # "Feeder", as the bus spells it
     bench.obj_vals["0x2000:00"] = "0x2A"
     name, counter, _ = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
     assert name["val"] == "Feeder"
@@ -607,7 +618,7 @@ def test_a_unit_on_a_word_is_dropped_rather_than_printed(tmp_path):
     device's documentation may well carry one by accident. "Feeder mV" would
     be the one reading nobody can correct from the screen."""
     bench = _bench_with_text_eds(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x466565646572"
+    bench.obj_vals["0x1008:00"] = "0x726564656546"
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["unit"] == ""
 
 
