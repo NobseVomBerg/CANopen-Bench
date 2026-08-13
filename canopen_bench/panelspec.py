@@ -170,17 +170,18 @@ class PanelCondition:
 
     Different from folding. Folding says "not interested right now" and is
     the operator's; this says "this machine does not have that part" and
-    is the device's — a backwinder the device does not carry has no box,
-    rather than an empty one to open.
+    is the device's — an axis the device does not carry has no box, rather
+    than an empty one to open.
 
     ``idx``/``sub`` name the object; ``bit`` tests one bit of it,
     ``values`` are the values that count as yes. Exactly one of the two.
 
-    Several values, because a device family is numbered rather than
-    flagged: the part is on the 920 and the 922 and on nothing else, and
-    the variant object says 920 or 922 — there is no bit anywhere that
-    says "has a backwinder". Writing that as two boxes with one value each
-    would duplicate every field in them to express an "or".
+    Several values, because a device family is usually numbered rather
+    than flagged: the part is on two of the variants and on none of the
+    others, and the variant object answers one number or the other.
+    Object dictionaries rarely carry a bit that says "has that part", and
+    writing it as two boxes with one value each would duplicate every
+    field in them to express an "or".
     """
 
     idx: str
@@ -310,7 +311,7 @@ def _when(raw, where: str) -> PanelCondition | None:
         raise PanelError(f"{where}: when: bit must be 0…31")
     values: tuple[int, ...] = ()
     if not has_bit:
-        # one value or a list of them — "the 920 and the 922 have it" is a
+        # one value or a list of them — "these two variants have it" is a
         # list in the file rather than the same box written out twice
         given = raw["value"]
         given = given if isinstance(given, list) else [given]
