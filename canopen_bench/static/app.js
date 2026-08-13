@@ -547,8 +547,13 @@ function SetupPage({ s }) {
     const file = ev.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => send('eds_upload', { filename: file.name, content: reader.result });
-    reader.readAsText(file);
+    // the file's own bytes, not readAsText: that decodes as UTF-8, and an
+    // EDS is an INI file written on Windows often enough that an umlaut in
+    // a parameter name would arrive as a replacement character — and be
+    // written to disk that way, with the original on the far side of it
+    reader.onload = () => send('eds_upload',
+      { filename: file.name, content: String(reader.result).split(',')[1] || '' });
+    reader.readAsDataURL(file);
     ev.target.value = '';
   };
   const handlePluginFile = (ev) => {
