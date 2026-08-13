@@ -133,19 +133,44 @@ def connect_and_scan(bench: Bench, timeout: float = 10.0) -> None:
 class FakeSupplyPort:
     """A Töllner-like serial port for tests that need the bench to have a
     power supply. Same answers as tests/test_instruments.py uses, kept
-    here because the executor tests need one too."""
+    here because the executor tests need one too.
+
+    It remembers what was written to it, and its ``*LRN?`` answers with
+    that. A fake that always read back the values it started with would
+    pass every test about *sending* a setting and none about the setting
+    arriving anywhere — which is the half somebody looking at the box
+    actually sees.
+    """
 
     IDN = "TOELLNER,TOE8952-60,102625,3.63-3.62"
-    LRN = "SEL 1;V 005.00;C 00.500;SEL 2;V 057.00;C 07.000;EX 1"
 
     def __init__(self):
         self.written: list[str] = []
         self._pending = ""
         self.closed = False
+        self._sel = 1                                   # SEL n, until the next one
+        self._ch = {1: [5.0, 0.5], 2: [57.0, 7.0]}      # volts, amps per channel
+        self._out = True
+
+    @property
+    def LRN(self) -> str:                               # noqa: N802 (SCPI's name)
+        return ";".join(
+            [f"SEL {n};V {v:06.2f};C {a:06.3f}" for n, (v, a) in sorted(self._ch.items())]
+            + [f"EX {1 if self._out else 0}"])
 
     def write(self, data: bytes) -> None:
         cmd = data.decode("ascii").strip()
         self.written.append(cmd)
+        for part in cmd.split(";"):
+            head, _, tail = part.strip().partition(" ")
+            if head == "SEL":
+                self._sel = int(tail)
+            elif head == "V":
+                self._ch.setdefault(self._sel, [0.0, 0.0])[0] = float(tail)
+            elif head == "C":
+                self._ch.setdefault(self._sel, [0.0, 0.0])[1] = float(tail)
+            elif head == "EX":
+                self._out = tail == "1"
         self._pending = {"*IDN?": self.IDN, "*LRN?": self.LRN}.get(cmd, "")
 
     def readline(self) -> bytes:
