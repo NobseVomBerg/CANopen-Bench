@@ -155,6 +155,14 @@ const toggle = (on, label, act, title, extra = '') => html`
 // exists with one output and with two — so the row is drawn from the data,
 // never from a fixed pair of boxes. Values are the supply's *set* values;
 // the label says so, because a set voltage is not a measurement.
+// What to call the instrument: what the label on its front says, which is
+// the vendor and then the model. `*IDN?` answers both and the drivers used
+// to drop the first field, so a bench with two supplies on it named them
+// "DC605S" and "TOE8952-60" — model numbers, and no help at all to somebody
+// looking for the grey one. Either half may be missing; the driver's own
+// name stands in when both are.
+const psuName = (psu) => [psu.vendor, psu.model].filter(Boolean).join(' ') || psu.name;
+
 function PsuBox({ psu }) {
   const fieldStyle = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);font:11px ${MONO};border-radius:5px;padding:4px 7px;outline:none;width:64px`;
   const head = (t) => html`<span style="font-size:10.5px;color:var(--dim);font-weight:600">${t}</span>`;
@@ -181,40 +189,38 @@ function PsuBox({ psu }) {
     </div>`;
   }
   const on = psu.output;
+  const name = psuName(psu);
   const measured = (psu.channels || []).some((c) => c.mvolt !== null && c.mvolt !== undefined);
   return html`
   <div style=${BOX}>
+    ${''/* The heading carries what the supply *is* and, at the far right,
+          the two things that switch: hand the port back, and the output.
+          Right-aligned as a pair, so they sit where a box's actions sit
+          everywhere else on the page rather than drifting with the length
+          of a model name. The output is the one control here that changes
+          the bench rather than a number, which is why it is up here and
+          not filed between the rows of values. */}
     <div style="display:flex;align-items:center;gap:10px;min-width:0">
       <span style="font-weight:600;font-size:13px;flex:none">Power supply</span>
-      <span title=${psu.raw || ''} style="flex:none;font:600 11px ${MONO};color:var(--tx)">${psu.model || psu.name}</span>
+      <span title=${psu.raw || ''} style="flex:none;font:600 11px ${MONO};color:var(--tx)">${name}</span>
       <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:var(--faint)">${psu.port}${psu.sn ? ` · SN ${psu.sn}` : ''}${psu.fw ? ` · ${psu.fw}` : ''}</span>
-      ${''/* Both of these are about the box rather than about the supply —
-             where it appears, and whether the bench holds the port at all —
-             so they belong with the heading and out of the way of the
-             controls that move volts. Beside it rather than flung to the
-             far edge by `margin-left:auto`: that put them a screen's width
-             from everything they refer to, and the space in between said
-             nothing. The identity text is what gives way when the box is
-             narrow, which is right — it is the one part that repeats
-             itself in the tooltip. */}
-      <span style="flex:none;display:flex;align-items:center;gap:10px;padding-left:4px;
-                   border-left:1px solid var(--bd2)">
-        <label onClick=${() => send('psu_sidebar_toggle')} title="A second, smaller box in the sidebar: the set values, output and a read — no port, no serial number, those stay here"
-          style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11.5px;color:var(--dim);padding-left:6px">
-          ${Cb(psu.sidebar, 'flex:none;')}Quick access</label>
+      <span style="flex:none;display:flex;align-items:center;gap:8px;margin-left:auto">
         <span class="hv" onClick=${() => send('psu_release')} title="Hand the serial port back to the system"
           style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">Release</span>
+        ${toggle(on, on === null || on === undefined ? '?' : on ? 'On' : 'Off',
+          () => send('psu_output', { on: !on }),
+          `The output is ${on === null || on === undefined ? 'in an unknown state' : on ? 'live' : 'off'} — click to turn it ${on ? 'off' : 'on'}`,
+          'flex:none;')}
       </span>
     </div>
     ${psu.error && html`<div style="font-size:11px;color:var(--red)">${psu.error}</div>`}
 
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-      ${head('OUTPUT')}
-      ${toggle(on, on === null || on === undefined ? '?' : on ? 'On' : 'Off',
-        () => send('psu_output', { on: !on }),
-        `The output is ${on === null || on === undefined ? 'in an unknown state' : on ? 'live' : 'off'} — click to turn it ${on ? 'off' : 'on'}`,
-        'flex:none;')}
-    </div>
+    ${''/* about the box rather than about the supply — where it appears,
+          not what it does — so it sits under the heading and out of the
+          way of the two rows that carry volts */}
+    <label onClick=${() => send('psu_sidebar_toggle')} title="A second, smaller box in the sidebar: the set values, output and a read — no port, no serial number, those stay here"
+      style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11.5px;color:var(--dim);align-self:flex-start">
+      ${Cb(psu.sidebar, 'flex:none;')}Quick access</label>
 
     <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
       ${head('SET')}
@@ -231,10 +237,12 @@ function PsuBox({ psu }) {
     </div>
 
     ${''/* The read used to be a bare ⟳ beside the output toggle, where it
-          read as something that acts on the output — a reset, a restart —
-          and where a single grey glyph on grey was easy to miss besides.
-          It belongs to the numbers it fetches, so it stands at the end of
-          the row that shows them, with a word saying what it does. */}
+          read as something that acts on the output — a reset, a restart.
+          It belongs to the numbers it fetches, so it stands directly
+          after them, with a word saying what it does. Not pushed to the
+          far edge either: at the end of a wide row it is a button on its
+          own with nothing beside it, and nothing about it says which of
+          the rows above it refreshes. */}
     <div style="margin-top:auto;display:flex;gap:18px;flex-wrap:wrap;align-items:center;
                 border-top:1px solid var(--bd2);padding-top:9px">
       ${head('MEASURED')}
@@ -247,7 +255,7 @@ function PsuBox({ psu }) {
           </div>`)
         : html`<span style="font-size:10.5px;color:var(--faint)">nothing read yet</span>`}
       <span class="hv" onClick=${() => send('psu_refresh')} title="Ask the supply for its set values and what the terminals measure — nothing here polls, so a knob turned on the instrument shows up when you ask"
-        style="${btn.ghost}margin-left:auto;font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none;white-space:nowrap">⟳ Read</span>
+        style="${btn.ghost}font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex:none;white-space:nowrap">⟳ Read</span>
     </div>
   </div>`;
 }
@@ -284,26 +292,28 @@ function psuBox(psu) {
         ${field(c, i, 'volt', 'V')}${field(c, i, 'curr', 'A')}
       </div>
     </div>`;
+  // The read stands in front of the values it fetches rather than up in
+  // the header beside the output switch, where it read as something that
+  // acts on the output. The chip shape is the output button's, so it still
+  // says "button" without room for the word that says so in Setup.
+  const read = html`
+    <span class="hv-chip" onClick=${() => send('psu_refresh')}
+      title="Ask the supply for its set values — nothing here polls, so a knob turned on the instrument shows up when you ask"
+      style="flex:none;align-self:center;display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid var(--inp);color:var(--dim)">⟳</span>`;
   return html`
   <div style="margin:8px 10px 0;background:var(--sb-box);border:1px solid var(--sb-bd);border-radius:8px;overflow:hidden">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--sb-bd)">
-      <span style="font-weight:600;color:var(--tx);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${psu.model || psu.name}</span>
-      <span style="display:flex;align-items:center;gap:8px;flex:none">
-        <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
-          title=${`Output is ${on === null || on === undefined ? 'unknown' : on ? 'on' : 'off'} — click to turn it ${on ? 'off' : 'on'}`}
-          style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid ${on ? 'var(--grn)' : on == null ? 'var(--inp)' : 'var(--off-bd)'};background:${on ? 'var(--grn)' : on == null ? 'transparent' : 'var(--off)'};color:${on ? '#fff' : 'var(--dim)'}">⏻</span>
-        ${''/* the same chip shape as the output button beside it: a lone
-              grey glyph on grey next to a bordered button does not read as
-              a button at all, and this is a sidebar with no room for the
-              word that says so in Setup */}
-        <span class="hv-chip" onClick=${() => send('psu_refresh')}
-          title="Ask the supply for its set values — nothing here polls, so a knob turned on the instrument shows up when you ask"
-          style="display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid var(--inp);color:var(--dim)">⟳</span>
-      </span>
+      <span style="font-weight:600;color:var(--tx);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${psuName(psu)}</span>
+      <span class="hv-chip" onClick=${() => send('psu_output', { on: !on })}
+        title=${`Output is ${on === null || on === undefined ? 'unknown' : on ? 'on' : 'off'} — click to turn it ${on ? 'off' : 'on'}`}
+        style="flex:none;display:grid;place-items:center;width:22px;height:18px;border-radius:5px;cursor:pointer;font-size:11px;border:1px solid ${on ? 'var(--grn)' : on == null ? 'var(--inp)' : 'var(--off-bd)'};background:${on ? 'var(--grn)' : on == null ? 'transparent' : 'var(--off)'};color:${on ? '#fff' : 'var(--dim)'}">⏻</span>
     </div>
     ${psu.error
       ? html`<div style="padding:8px 10px;font-size:11px;color:var(--red)">${psu.error}</div>`
-      : html`<div style="display:flex;justify-content:space-around;gap:10px;padding:9px 8px">${chans.map(channel)}</div>`}
+      : html`<div style="display:flex;align-items:center;gap:10px;padding:9px 8px">
+          ${read}
+          <div style="flex:1;min-width:0;display:flex;justify-content:space-around;gap:10px">${chans.map(channel)}</div>
+        </div>`}
   </div>`;
 }
 
