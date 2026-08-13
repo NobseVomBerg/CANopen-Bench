@@ -1016,7 +1016,8 @@ function ObjectsPage({ s, ui, setUi }) {
   // below changes what the *table* shows and nothing about that — it
   // used to decide both, so with the table in hex a typed 12345678 came
   // back as 0x12345678: the same digits, a different number.
-  const numberHint = ' · a number (0x… for hex, 0b… for binary, otherwise decimal) or a symbol name';
+  const numberHint = ' · a number (0x… for hex, 0b… for binary, otherwise decimal) or a symbol name'
+    + ' — a minus where the EDS declares the object signed';
   const baseChip = html`
     <span class="hv-chip" onClick=${() => send('num_base')}
       title="show values as hex or decimal — the other reading stays in the tooltip. Typing is unaffected: 0x… is hex, bare digits are decimal"

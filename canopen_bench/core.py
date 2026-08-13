@@ -3249,7 +3249,27 @@ class Bench:
         except ValueError as exc:
             self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
             return
-        width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
+        # a box that shows a negative has to accept one back. Stored as the
+        # two's complement of the object's own width, because that is the
+        # only width at which a two's complement is itself — the digits of
+        # whatever the last read happened to answer are not it
+        info = self._object_info(self._target_node(), p["idx"], p["sub"])
+        bits = info.signed_bits if info is not None else 0
+        if value < 0:
+            if not bits:
+                self.log(f"OBJ  {key} ← {text!r} rejected — the EDS declares this "
+                         "object unsigned", "emcy0")
+                return
+            if value < -(1 << (bits - 1)):
+                self.log(f"OBJ  {key} ← {text!r} rejected — does not fit in {bits} "
+                         "signed bits", "emcy0")
+                return
+            value += 1 << bits
+        # a positive number is taken at face value even where it is above
+        # the signed half of the range: with the table in hex, 0xFE0C is
+        # what the box *shows* for -500, and a field that will not accept
+        # back what it just printed is worse than one that is strict
+        width = (bits // 4) or len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
         self.obj_vals[key] = f"0x{value:0{width}X}"
         self.obj_vals_at[key] = time.monotonic()
 
@@ -5654,6 +5674,12 @@ class Bench:
         for key in self.obj_vals:
             keys.setdefault(key, (2, ""))
 
+        # loaded once for the whole table rather than per row: OdCache
+        # stats the file on every call, and a catalog is a thousand rows
+        # asked again on every tick
+        dev = self.sel_devices[0] if self.sel_devices else None
+        od = self._ods.load(dev["eds"]) if dev else None
+
         out: dict[str, dict] = {}
         for key, (width, default) in keys.items():
             # an object nobody has read yet still shows its EDS default, and
@@ -5663,7 +5689,8 @@ class Bench:
             if raw in (None, "", "—"):
                 continue
             idx, _, sub = key.partition(":")
-            info = self._sel_info(idx, sub)
+            want_i, want_s = _addr_int(idx), _addr_int(sub)
+            info = object_info(od, want_i, want_s or 0) if want_i is not None else None
             # a device name is a word. The table used to read it as the
             # number its bytes happen to spell, in whichever base — and
             # neither reading of nineteen digits is the name

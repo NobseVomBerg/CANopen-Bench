@@ -174,6 +174,37 @@ def test_the_range_check_is_made_where_the_number_is_known(tmp_path):
     assert bench.snapshot()["objects"]["fmt"]["0x2070:00"]["oor"] is True
 
 
+def test_a_box_that_shows_a_negative_accepts_one_back(tmp_path):
+    """Stored as the two's complement of the object's own width, which is
+    the only width at which a two's complement is itself. It used to be
+    staged as the digits of whatever the last read answered, so a typed
+    -500 became the literal string "0x-1F4"."""
+    bench = _bench(tmp_path)
+    bench.dispatch("obj_set", {"idx": "0x2070", "sub": "00", "val": "-500"})
+    assert bench.obj_vals["0x2070:00"] == "0xFE0C"
+
+    bench.dispatch("num_base", {})
+    assert bench.snapshot()["objects"]["fmt"]["0x2070:00"]["txt"] == "-500", "round trip"
+
+
+def test_the_hex_the_box_prints_is_hex_the_box_takes(tmp_path):
+    """With the table in hex, 0xFE0C is what -500 looks like. A field that
+    refused back what it had just printed — because the number is above
+    the signed half of the range — would be strict about the wrong thing."""
+    bench = _bench(tmp_path)
+    bench.dispatch("obj_set", {"idx": "0x2070", "sub": "00", "val": "0xFE0C"})
+    assert bench.obj_vals["0x2070:00"] == "0xFE0C"
+
+
+def test_a_minus_is_refused_where_the_eds_says_unsigned(tmp_path):
+    """Wrapping it would store 4294967096 and show it, which is a number
+    the operator neither typed nor meant."""
+    bench = _bench(tmp_path)
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "-200"})
+    assert "0x2000:00" not in bench.obj_vals
+    assert any("unsigned" in entry["msg"] for entry in bench.logs[-3:])
+
+
 def test_an_object_with_no_limits_is_never_out_of_range(tmp_path):
     bench = _bench(tmp_path)
     bench.obj_vals["0x2000:00"] = "0xFFFFFFFF"
