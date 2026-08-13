@@ -86,7 +86,11 @@ development; the version counts from here.
 - Plugin system (`canopen_bench.plugins` entry-point group, 17 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
-  straight from Setup > Extensions, no shell or restart needed
+  straight from Setup > Extensions, no shell or restart needed. The same
+  package installed in two places is loaded once and reported in the
+  state log, naming both places and the file the code came from —
+  otherwise one bench gets two of every hook, and the version the UI
+  shows belongs to whichever of the two `sys.path` did not pick
 - `plugins/cob-cpcusb/` — CPC-USB/ARM7 support as a worked reference
   for what a plugin package looks like: a python-can driver over pyusb
   plus the bench adapter card, its own tests, its own `PROTOCOL.md`,
