@@ -1080,7 +1080,9 @@ def test_obj_set_stages_value_and_write_sends_it(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})  # select the write target
     bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x260001"})
-    assert bench.obj_vals["0x2000:00"] == "0x260001"  # staged only — no bus write yet
+    # staged only — no bus write yet — and written at the width the EDS
+    # declares, which is what the download will carry anyway
+    assert bench.obj_vals["0x2000:00"] == "0x00260001"
     bench.dispatch("obj_write", {"idx": "0x2000", "sub": "00"})
     res = bench.bus.sdo_read(1, "0x2000", "00")
     assert res.ok and res.value == "0x00260001"  # padded to the EDS's U32 width

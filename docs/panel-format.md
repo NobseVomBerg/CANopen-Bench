@@ -92,6 +92,14 @@ read asks for the condition objects too, so one Read settles them.
 | `unit` | optional | Printed after the value — `mA`, `mV`, `%`, `°C`. Display only |
 | `scale` | optional | Raw × scale = what is shown; the reverse on write (default 1) |
 | `digits` | optional | Decimals shown (default: what the scale implies — `0.1` → 1) |
+
+A field that gives neither `unit` nor `scale` takes whatever the plugin
+declared for that address (`BenchPlugin.object_units`,
+[extending.md](extending.md)) — what an object means physically is a fact
+about the device, not about this view of it, and the same fact written
+down in two places is the same fact drifting apart in two. Giving them
+here overrides that, which is what a box written against one device's
+documentation is for.
 | `rw` | optional | `true` gives the field an input and a Write button. Default read-only: a panel is written from a device's documentation, and a typo that only displays is cheaper than one that writes |
 | `widget` | optional | `number` (default), `enum` or `flag` — see below |
 | `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
@@ -133,6 +141,12 @@ version string — is passed through as it is.
 labels. A device storing tenths of a centinewton shows 16.0 with
 `{unit: cN, scale: 0.1}`, and what a Write sends is the raw 160 again,
 padded to the width the EDS declares for that object.
+
+The object table shows the same reading beside the raw number wherever a
+plugin declared one — `0x00A0` and `16.0 cN` — rather than instead of it.
+There you type the number the device stores; in a box you type the
+quantity, because a box is read by somebody who thinks in centinewtons
+and the table by somebody who is looking at a register.
 
 Signedness comes from the EDS too, and nothing in the file says it: a
 word carries no sign of its own, so an object the EDS calls INTEGER16

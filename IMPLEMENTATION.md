@@ -62,7 +62,12 @@ browser):
   HighLimit an out-of-range value is measured against. The table, the
   panel, the trace decoder and a step's report line all read that one
   description, so a value cannot be shown one way in one box and
-  another way in the next. Names follow the same rule
+  another way in the next. The one thing an EDS cannot answer — what a
+  number *means*, tenths of a centinewton rather than a bare 160 —
+  arrives from a plugin (`object_units`, `values.Quantity`) and is shown
+  beside the raw number in the table, in a report line, and as the
+  default for a panel field that gives no unit of its own; a panel need
+  not repeat what is written down once. Names follow the same rule
   (`Bench._label`): the firmware's own name wins wherever a plugin can
   give one (`describe_object`), and the EDS name stands in — object
   dictionaries are historical documents, headers are what the device's

@@ -20,7 +20,7 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
-from .values import Field
+from .values import Field, Quantity
 
 log = logging.getLogger(__name__)
 
@@ -268,6 +268,30 @@ class BenchPlugin:
         convention that ties a table to an object, a mask that the header
         itself names. That derivation is the plugin's business, not the
         core's — the convention belongs to whoever writes the headers.
+        """
+        return {}
+
+    def object_units(self, symbols) -> dict[str, Quantity]:
+        """What an object's number *means* physically: "0x2007:02" ->
+        ``Quantity("cN", 0.1)`` — the unit it is read in and the factor
+        between the stored number and that reading.
+
+        The one thing about an object that no EDS can answer. A file says
+        UNSIGNED16 and stops there; that the sixteen bits are tenths of a
+        centinewton is in the device's documentation, and this is where
+        that reaches the bench. (CiA profiles do define SI-unit objects
+        here and there, but a manufacturer area never has them, and that
+        is where the values somebody watches actually live.)
+
+        Declared once per address and used wherever the value is shown:
+        the object table prints the reading beside the raw number, a
+        report line says what a step's answer means, and a panel field
+        that gives no unit of its own takes this one — so a panel need
+        not repeat what is already written down here.
+
+        ``symbols`` is the parsed symbol table, for a plugin whose
+        headers name the scaling factors (``object_fields`` gets it for
+        the same reason).
         """
         return {}
 

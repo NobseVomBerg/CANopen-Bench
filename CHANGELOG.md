@@ -38,7 +38,11 @@ development; the version counts from here.
   (`eds_od.ObjectInfo`) and used by the table, the panel, the trace and
   the report alike, so one device cannot answer to two readings on one
   screen. Where a plugin's headers name an object, that name wins over
-  the EDS's in every view
+  the EDS's in every view. What a number *means* physically — tenths of
+  a centinewton rather than a bare 160 — is the one thing no EDS carries;
+  a plugin declares it per address (`object_units`) and it appears beside
+  the raw value in the table, in a report line, and as the default for a
+  panel field that gives no unit of its own
 - Trace monitor: 200k-frame ring buffer, newest frame at the top and the
   whole buffer (or an opened capture) scrollable rather than a screenful,
   server-side class/node filters,
@@ -89,7 +93,7 @@ development; the version counts from here.
   ships (`docs/panel-format.md`); the core ships one for the objects CiA
   301 makes mandatory, so every device has a panel, and one for its own
   demo device
-- Plugin system (`canopen_bench.plugins` entry-point group, 18 hooks)
+- Plugin system (`canopen_bench.plugins` entry-point group, 19 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed. The same
