@@ -178,34 +178,34 @@ def test_favorites_toggle_read_and_persist(bench):
 #: an array whose sub-indices run past nine, which is where the addresses
 #: stop being digits — "0A" onwards. Written the way an EDS writes them.
 WIDE_ARRAY_EDS = SEED_EDS + """
-[2102]
-ParameterName=System Parameter
+[2080]
+ParameterName=Board data
 ObjectType=0x8
 SubNumber=4
 
-[2102sub9]
-ParameterName=HW Version Aux Board
+[2080sub9]
+ParameterName=Aux board revision
 ObjectType=0x7
 DataType=0x0005
 AccessType=ro
 DefaultValue=6
 
-[2102subA]
-ParameterName=HW Version Main Board
+[2080subA]
+ParameterName=Main board revision
 ObjectType=0x7
 DataType=0x0005
 AccessType=ro
 DefaultValue=0
 
-[2102subB]
-ParameterName=AD Value Yarn Tension
+[2080subB]
+ParameterName=Sensor reading
 ObjectType=0x7
 DataType=0x0004
 AccessType=ro
 DefaultValue=415
 
-[2102subF]
-ParameterName=AD Value Winder Current
+[2080subF]
+ParameterName=Coil current
 ObjectType=0x7
 DataType=0x0004
 AccessType=ro
@@ -231,20 +231,20 @@ def test_an_object_past_sub_index_nine_answers_to_its_own_name(bench):
     back as "not a number", and a lookup comparing one of those against
     another matched on the first row that also failed to parse. Every
     object past sub-index nine answered to the name of 0x0A: the
-    favourites panel showed "HW Version Main Board" against six
+    favourites panel showed "Main board revision" against six
     different addresses, each with its own correct value beside it.
     """
     _with_wide_eds(bench)
-    for name, want in (("09", "System Parameter/HW Version Aux Board"),
-                       ("0A", "System Parameter/HW Version Main Board"),
-                       ("0B", "System Parameter/AD Value Yarn Tension"),
-                       ("0F", "System Parameter/AD Value Winder Current")):
-        assert bench._object_label("0x2102", name) == want, name
-        assert bench._object_label("2102", name) == want, f"{name} unprefixed"
-        assert bench._object_label("0x2102", f"0x{name}") == want, f"{name} prefixed"
+    for name, want in (("09", "Board data/Aux board revision"),
+                       ("0A", "Board data/Main board revision"),
+                       ("0B", "Board data/Sensor reading"),
+                       ("0F", "Board data/Coil current")):
+        assert bench._object_label("0x2080", name) == want, name
+        assert bench._object_label("2080", name) == want, f"{name} unprefixed"
+        assert bench._object_label("0x2080", f"0x{name}") == want, f"{name} prefixed"
     # and an address that is no address at all still answers with nothing,
     # rather than with whichever row fails to parse first
-    assert bench._object_label("0x2102", "zz") == ""
+    assert bench._object_label("0x2080", "zz") == ""
 
 
 def test_a_favorite_takes_the_name_the_catalog_gives_it_now(bench):
@@ -254,13 +254,13 @@ def test_a_favorite_takes_the_name_the_catalog_gives_it_now(bench):
     shows the name looked up now; the stored one only stands in where
     nothing can answer."""
     _with_wide_eds(bench)
-    bench.favorites.append({"idx": "0x2102", "sub": "0B",
-                            "label": "HW Version Main Board"})   # the wrong one
-    assert bench._fav_view()[0]["label"] == "System Parameter/AD Value Yarn Tension"
-    assert bench.favorites[0]["label"] == "HW Version Main Board"  # untouched on disk
+    bench.favorites.append({"idx": "0x2080", "sub": "0B",
+                            "label": "Main board revision"})   # the wrong one
+    assert bench._fav_view()[0]["label"] == "Board data/Sensor reading"
+    assert bench.favorites[0]["label"] == "Main board revision"  # untouched on disk
 
     bench.dispatch("dev_toggle", {"node": 1})   # deselected — nothing to look up in
-    assert bench._fav_view()[0]["label"] == "HW Version Main Board"
+    assert bench._fav_view()[0]["label"] == "Main board revision"
 
 
 def test_favorites_migrates_legacy_fav_sets(tmp_path):
@@ -1282,7 +1282,8 @@ def test_eds_remove_deletes_the_file_from_disk(bench):
 
 def test_eds_upload_action_logs_rejection(bench):
     n_logs = len(bench.logs)
-    bench.dispatch("eds_upload", {"filename": "bad.eds", "content": "not an eds"})
+    bench.dispatch("eds_upload", {"filename": "bad.eds",
+                                  "content": _b64("not an eds")})
     assert len(bench.logs) == n_logs + 1
     assert bench.logs[-1]["type"] == "emcy0"
     assert "bad.eds" in bench.logs[-1]["msg"]
@@ -2444,8 +2445,12 @@ def _candump_text(*lines: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _b64(text: str) -> str:
-    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+def _b64(text: str | bytes) -> str:
+    """What a browser sends for an uploaded file: base64 of its own bytes.
+    Bytes as well as text, because the encoding an EDS was written in is a
+    property of those bytes and a str has already had it decided for it."""
+    raw = text.encode("utf-8") if isinstance(text, str) else text
+    return base64.b64encode(raw).decode("ascii")
 
 
 def test_trace_import_candump_happy_path(bench):
@@ -2904,7 +2909,7 @@ def _bare_device(node: int = 1, ident: str = "0x4D2·0x1150") -> dict:
 
 def test_rematch_on_upload_assigns_matching_device(bench):
     bench.devices = [_bare_device()]
-    bench.dispatch("eds_upload", {"filename": "new_match.eds", "content": SEED_EDS})
+    bench.dispatch("eds_upload", {"filename": "new_match.eds", "content": _b64(SEED_EDS)})
     dev = bench.devices[0]
     assert dev["eds"] == "new_match.eds"
     snap = bench.snapshot()
@@ -2942,7 +2947,7 @@ def test_toggle_to_disabled_does_not_rematch(bench):
 
 def test_rematch_ignores_devices_with_different_identity(bench):
     bench.devices = [_bare_device(ident="0x1·0x2")]
-    bench.dispatch("eds_upload", {"filename": "no_match.eds", "content": SEED_EDS})
+    bench.dispatch("eds_upload", {"filename": "no_match.eds", "content": _b64(SEED_EDS)})
     dev = bench.devices[0]
     assert dev["eds"] == "—"
     assert "no EDS file assigned" in bench.snapshot()["objects"]["hint"]
@@ -3139,7 +3144,8 @@ def test_eds_upload_lands_in_the_configured_folder(bench, tmp_path):
     pool = tmp_path / "pool"
     bench.dispatch("set_path", {"which": "eds", "value": str(pool)})
 
-    bench.dispatch("eds_upload", {"filename": "pool_upload.eds", "content": MINIMAL_EDS})
+    bench.dispatch("eds_upload", {"filename": "pool_upload.eds",
+                                  "content": _b64(MINIMAL_EDS)})
 
     assert (pool / "pool_upload.eds").is_file()
     assert not (default_dir / "pool_upload.eds").exists()
@@ -4570,3 +4576,61 @@ def test_a_device_identity_outlives_the_drivers_numbering(tmp_path):
     assert opened == [{"serial": 569359, "channel": 1}]
     # and the log says which device it landed on, in the terms on the housing
     assert any("port 2" in ln["msg"] and "SN 569359" in ln["msg"] for ln in bench.logs)
+
+
+# -- an EDS is not always UTF-8 ---------------------------------------------
+
+# A parameter name with an umlaut in it, written the way the tools that
+# produce EDS files write one. One byte tells the story: 0xE4 is "ä" in
+# cp1252 and the start of nothing at all in UTF-8.
+LATIN1_EDS = MINIMAL_EDS + """
+[2000]
+ParameterName=Betriebsstundenzähler
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+DefaultValue=0
+"""
+LATIN1_BYTES = LATIN1_EDS.encode("cp1252")
+
+
+def test_an_eds_written_on_windows_still_parses(tmp_path):
+    """CiA 306 calls an EDS ASCII; the ones vendors ship are INI files with
+    a name in them. Read as UTF-8 the file raises, and the one place that
+    mattered swallowed it — no object widths, no PDO signal names, no data
+    types, and nothing on screen saying why."""
+    from canopen_bench.eds_od import eds_text, load_eds
+
+    assert b"\xe4" in LATIN1_BYTES
+    with pytest.raises(UnicodeDecodeError):
+        LATIN1_BYTES.decode("utf-8")
+
+    assert "ä" in eds_text(LATIN1_BYTES)
+    assert load_eds(LATIN1_BYTES).device_information.product_name == "TEST_DEV"
+
+    path = tmp_path / "windows.eds"
+    path.write_bytes(LATIN1_BYTES)
+    assert load_eds(path).device_information.product_name == "TEST_DEV"
+
+
+def test_a_file_in_no_encoding_at_all_still_gives_an_object_dictionary():
+    """One unreadable character in a device's name is worth more than no
+    object dictionary — the alternative is a bench that knows nothing about
+    the device because somebody's editor wrote one odd byte."""
+    from canopen_bench.eds_od import eds_text, load_eds
+
+    broken = LATIN1_BYTES.replace(b"\xe4", b"\x81")     # undefined in cp1252
+    assert load_eds(broken).device_information.product_name == "TEST_DEV"
+    assert eds_text(broken)
+
+
+def test_an_upload_keeps_the_bytes_the_file_was_written_in(bench, tmp_path):
+    """A browser reading a file as text decodes it as UTF-8, so the umlaut
+    arrived as a replacement character and was written to disk that way —
+    the original on the far side of it. The action takes the bytes."""
+    bench.dispatch("eds_upload", {"filename": "windows.eds", "content": _b64(LATIN1_BYTES)})
+
+    assert not any("rejected" in ln["msg"] for ln in bench.logs)
+    stored = (bench.db.eds_dir / "windows.eds").read_text(encoding="utf-8")
+    assert "Betriebsstundenzähler" in stored
+    assert "�" not in stored, "the character was lost on the way in"
