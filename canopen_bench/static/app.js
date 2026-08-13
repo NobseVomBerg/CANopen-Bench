@@ -920,8 +920,14 @@ function PanelBox({ g, busy }) {
           ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}`}
       </div>`;
   };
+  // A two-column box takes two of the page's columns. Splitting one
+  // column's width in two gave each cell half of what a one-column box
+  // gives it, and the label is what a flex row gives up first: a box of
+  // "Pr...", "S...", "Ya..." over inputs that still looked fine, and Write
+  // buttons reading "Writ". The number of columns a box asks for is what
+  // its rows need side by side, so it is also how wide the box has to be.
   return html`
-    <div style="border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);align-self:start">
+    <div style="grid-column:span ${g.cols};min-width:0;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);align-self:start">
       <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);border-bottom:${g.open ? '1px solid var(--bd2)' : 'none'}">
         <span class="hv" onClick=${() => send('panel_fold', { group: g.title })}
           title=${g.open ? 'fold this box away' : 'unfold'}
@@ -1075,7 +1081,11 @@ function ObjectsPage({ s, ui, setUi }) {
           style="${btn.acc}font-size:10.5px;padding:3px 10px;border-radius:5px;cursor:${panel.busy ? 'default' : 'pointer'};opacity:${panel.busy ? 0.5 : 1}">${panel.busy ? '⟳ reading…' : '⟳ Read all open'}</span>
       </div>`,
     html`
-      <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;align-content:start">
+      ${''/* grid-auto-columns, for the window narrow enough that only one
+             column fits: a box asking for two then spans into an implicit
+             track, and without this that track sizes to its content and
+             takes the page sideways instead of letting the box shrink */}
+      <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));grid-auto-columns:minmax(0,1fr);gap:12px;align-content:start">
         ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy} />`)}
       </div>`,
   ];
