@@ -849,11 +849,25 @@ function outOfRange(display, min, max) {
 // three minutes ago must not look like a reading taken just now, so it
 // fades: full strength while it is fresh, then down to a third. The
 // tooltip says it in words, because a shade is a hint and not a fact.
-const panelAge = (f) => (!f.src ? 1 : f.age < 3 ? 1 : f.age < 60 ? 0.62 : 0.38);
 const panelWhen = (f) => ((f.alt ? f.alt + ' · ' : '') + (!f.src ? 'not read yet'
   : `${f.src === 'bus' ? 'seen on the bus' : 'read'} ${f.age < 1 ? 'just now'
     : f.age < 60 ? Math.round(f.age) + ' s ago'
     : Math.round(f.age / 60) + ' min ago'}`));
+
+// One page column is two field columns wide, so a box asking for two gets
+// the room a one-column box gives its rows — that was the whole complaint.
+// Wider would mean fewer columns and more scrolling; narrower squeezes the
+// labels again.
+const PANEL_COL = 700;
+//: what one field column needs for ⟳, label, value, unit and Write
+const FIELD_MIN = 300;
+//: and how far it may stretch. In a column wide enough for two field
+//: columns but not for two boxes, one cell gets 600px and the label —
+//: the part that grows — pulls its value half a screen away from it.
+//: The slack goes to the right edge of the box instead, where nothing
+//: has to be read across it.
+const FIELD_MAX = 520;
+const CELL = `display:flex;align-items:center;gap:8px;min-width:0;max-width:${FIELD_MAX}px`;
 
 function PanelBox({ g, busy }) {
   // Reserved per box, not per field: a box where the rows with "mA" end in
@@ -883,7 +897,7 @@ function PanelBox({ g, busy }) {
     // into the value last read (Bench._panel_stage_part).
     if (f.widget === 'enum') {
       return html`
-        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style=${CELL}>
           ${head}
           <${OptionSelect} value=${f.val} options=${f.options}
             style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};width:126px;outline:none;flex:none`}
@@ -893,7 +907,7 @@ function PanelBox({ g, busy }) {
     }
     if (f.widget === 'flag') {
       return html`
-        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style=${CELL}>
           ${head}
           <span onClick=${() => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, bit: f.bit, on: !f.on })}
             title=${`bit ${f.bit} of ${f.idx}:${f.sub}`}
@@ -904,7 +918,7 @@ function PanelBox({ g, busy }) {
         </div>`;
     }
     return html`
-      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <div style=${CELL}>
         ${head}
         ${f.rw ? html`
           <${SyncInput} value=${f.val} title=${panelWhen(f) + ' · type to stage a new one, Write sends it'}
@@ -915,19 +929,16 @@ function PanelBox({ g, busy }) {
             style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
         : html`
           <span title=${panelWhen(f)}
-            style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};opacity:${panelAge(f)};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:66px;text-align:right;flex:none">${f.val || '—'}</span>
+            style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:66px;text-align:right;flex:none">${f.val || '—'}</span>
           ${unit}
           ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}`}
       </div>`;
   };
-  // A two-column box takes two of the page's columns. Splitting one
-  // column's width in two gave each cell half of what a one-column box
-  // gives it, and the label is what a flex row gives up first: a box of
-  // "Pr...", "S...", "Ya..." over inputs that still looked fine, and Write
-  // buttons reading "Writ". The number of columns a box asks for is what
-  // its rows need side by side, so it is also how wide the box has to be.
+  // break-inside, because the page is a column layout rather than a grid:
+  // a grid aligns rows, so one tall box leaves a hole beside it as high as
+  // itself. Columns pack top to bottom and have no rows to align.
   return html`
-    <div style="grid-column:span ${g.cols};min-width:0;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);align-self:start">
+    <div style="break-inside:avoid;-webkit-column-break-inside:avoid;width:100%;margin-bottom:12px;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel)">
       <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);border-bottom:${g.open ? '1px solid var(--bd2)' : 'none'}">
         <span class="hv" onClick=${() => send('panel_fold', { group: g.title })}
           title=${g.open ? 'fold this box away' : 'unfold'}
@@ -941,7 +952,7 @@ function PanelBox({ g, busy }) {
             style="${btn.acc}font-size:10.5px;padding:2px 9px;border-radius:4px;cursor:${busy ? 'default' : 'pointer'};opacity:${busy ? 0.5 : 1}">Read</span>`}
       </div>
       ${g.open && html`
-        <div style="display:grid;grid-template-columns:repeat(${g.cols}, minmax(0,1fr));gap:2px 18px;padding:8px 12px 10px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px">
           ${g.fields.map(cell)}
         </div>`}
     </div>`;
@@ -1081,12 +1092,15 @@ function ObjectsPage({ s, ui, setUi }) {
           style="${btn.acc}font-size:10.5px;padding:3px 10px;border-radius:5px;cursor:${panel.busy ? 'default' : 'pointer'};opacity:${panel.busy ? 0.5 : 1}">${panel.busy ? '⟳ reading…' : '⟳ Read all open'}</span>
       </div>`,
     html`
-      ${''/* grid-auto-columns, for the window narrow enough that only one
-             column fits: a box asking for two then spans into an implicit
-             track, and without this that track sizes to its content and
-             takes the page sideways instead of letting the box shrink */}
-      <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));grid-auto-columns:minmax(0,1fr);gap:12px;align-content:start">
-        ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy} />`)}
+      ${''/* Columns, not a grid. A grid puts the boxes in rows and makes
+             every row as tall as the tallest box in it, so one long box
+             leaves a hole beside it the same height — which on a wide
+             screen is most of the screen. Columns have no rows to align:
+             each box starts where the one above it ended. */}
+      <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px">
+        <div style="columns:${PANEL_COL}px;column-gap:12px">
+          ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy} />`)}
+        </div>
       </div>`,
   ];
 
@@ -1213,14 +1227,19 @@ function ObjectsPage({ s, ui, setUi }) {
       </div>
     </div>
 
+    ${''/* Favorites are the table's companion — a shortlist pulled out of a
+           long list. The panel is already a shortlist somebody wrote down,
+           and on this page width is what the boxes are short of. */}
+    ${view !== 'panel' && html`
     <div class="vdrag" onMouseDown=${dragFav} title="drag to resize the favorites panel"
-      style="flex:none;width:5px;cursor:col-resize;background:var(--bd)"></div>
+      style="flex:none;width:5px;cursor:col-resize;background:var(--bd)"></div>`}
+    ${view !== 'panel' && html`
     <div style="width:${favW}px;flex:none;background:var(--panel);overflow:auto;padding:14px 14px;display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:600;font-size:13px">Favorites</span><span style="font-size:10px;color:var(--faint)">auto-saved in the workspace</span></div>
       <div style="font:10px ${MONO};color:var(--faint);line-height:1.5">${favNote}</div>
       ${favPanel}
       <span class="hv-b" onClick=${() => send('fav_read_all')} style="text-align:center;${btn.acc}font-size:11.5px;padding:7px 0;border-radius:6px;cursor:pointer">⟳ Read all favorites</span>
-    </div>
+    </div>`}
   </div>`;
 }
 

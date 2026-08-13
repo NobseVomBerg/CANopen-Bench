@@ -11,7 +11,7 @@ import asyncio
 import time
 
 import pytest
-from conftest import connect_and_scan, write_seed_eds_files
+from conftest import SEED_EDS, connect_and_scan, seed_test_registry, write_seed_eds_files
 
 import canopen_bench.core as core_mod
 from canopen_bench.core import Bench
@@ -537,3 +537,106 @@ def test_a_text_object_is_not_learned_from_an_expedited_frame(tmp_path):
 
     assert (1, "0x2004:00") not in bench.seen_vals
     assert bench._panel_value("0x2004:00", 1)[0] == "DemoDevice"
+
+
+# -- what the EDS says about an object --------------------------------------
+
+TEXT_EDS = SEED_EDS + """
+[1008]
+ParameterName=Manufacturer device name
+ObjectType=0x7
+DataType=0x0009
+AccessType=ro
+DefaultValue=SEED_DEV
+
+[2060]
+ParameterName=Start the motor test
+ObjectType=0x7
+DataType=0x0007
+AccessType=wo
+DefaultValue=0
+"""
+
+TEXT_PANEL = """
+name: Sample Feeder
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Identity
+    fields:
+      - {label: Device name, obj: "0x1008:00"}
+      - {label: Counter,     obj: "0x2000:00"}
+      - {label: Motor test,  obj: "0x2060:00", rw: true}
+"""
+
+
+def _bench_with_text_eds(tmp_path) -> Bench:
+    file = tmp_path / "vendor.panel.yaml"
+    file.write_text(TEXT_PANEL, encoding="utf-8")
+
+    class PanelPlugin(BenchPlugin):
+        name = "sample"
+
+        def object_panels(self):
+            return [file]
+
+    bench = Bench(Db(tmp_path / "test.db"), plugins=[PanelPlugin()])
+    seed_test_registry(bench)
+    for entry in bench.db.eds_list():
+        if entry["enabled"]:
+            bench.db.eds_write_file(entry["file"], TEXT_EDS)
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_view", {"view": "panel"})
+    return bench
+
+
+def test_the_bytes_of_a_word_are_read_back_the_way_they_were_sent(tmp_path):
+    """The bus formats a payload little-endian, which is right for the
+    integers that are most of an object dictionary and puts the last byte
+    of a string first. Read straight, a name comes out backwards — which
+    looks enough like a name that nobody checks it twice."""
+    assert Bench._as_text("0x726564656546") == "Feeder"
+    assert Bench._as_text("0x00726564656546") == "Feeder"   # trailing NUL
+    assert Bench._as_text("DemoDevice") == "DemoDevice"     # already a word
+    assert Bench._as_text("0xABC") == "0xABC"               # not whole bytes
+
+
+def test_a_device_name_is_a_word_not_nineteen_digits(tmp_path):
+    """The bus carries a name as bytes like everything else, and a box that
+    reads those bytes as a number prints 3472900244173440512 where the
+    device said its name. The EDS is what knows the difference."""
+    bench = _bench_with_text_eds(tmp_path)
+    bench.obj_vals["0x1008:00"] = "0x726564656546"        # "Feeder", as the bus spells it
+    bench.obj_vals["0x2000:00"] = "0x2A"
+    name, counter, _ = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
+    assert name["val"] == "Feeder"
+    assert counter["val"] == "42", "a number must not be run through the decoder"
+
+
+def test_a_unit_on_a_word_is_dropped_rather_than_printed(tmp_path):
+    """`unit` and `scale` are a number's, and a panel written against a
+    device's documentation may well carry one by accident. "Feeder mV" would
+    be the one reading nobody can correct from the screen."""
+    bench = _bench_with_text_eds(tmp_path)
+    bench.obj_vals["0x1008:00"] = "0x726564656546"
+    assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["unit"] == ""
+
+
+def test_a_page_read_leaves_the_write_only_objects_alone(tmp_path):
+    """The SDO could only abort, and a row of aborts in the log reads as a
+    fault when it is the EDS telling the truth. The ⟳ at the field still
+    asks — that one is somebody deciding to."""
+    bench = _bench_with_text_eds(tmp_path)
+    asked: list[str] = []
+    real = bench.bus.sdo_read
+    bench.bus.sdo_read = lambda node, idx, sub, *a, **kw: (
+        asked.append(f"{idx}:{sub}") or real(node, idx, sub, *a, **kw))
+
+    async def go():
+        bench.dispatch("panel_read", {})
+        if bench._tasks:
+            await asyncio.wait(set(bench._tasks), timeout=5)
+
+    asyncio.run(go())
+    assert "0x1008:00" in asked and "0x2000:00" in asked
+    assert "0x2060:00" not in asked
