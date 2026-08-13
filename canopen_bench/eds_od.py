@@ -90,13 +90,13 @@ TEXT_TYPES = frozenset({odlib.VISIBLE_STRING, odlib.UNICODE_STRING})
 #: widened to its declared length is a different value — but guessing an
 #: encoding for them would invent one, so they stay the bytes they are.
 BYTE_TYPES = frozenset({odlib.OCTET_STRING, odlib.DOMAIN})
+#: neither kind is a number: never widened to a declared length, never
+#: read as an integer, never plotted
+RAW_TYPES = TEXT_TYPES | BYTE_TYPES
 #: the signed integers and how wide each is. A word carries no sign of
 #: its own, so this is the only thing that can tell -500 from 65036.
 SIGNED_BITS = {odlib.INTEGER8: 8, odlib.INTEGER16: 16,
                odlib.INTEGER32: 32, odlib.INTEGER64: 64}
-#: neither of those is a number: never widened to a declared length,
-#: never read as an integer, never plotted
-RAW_TYPES = TEXT_TYPES | BYTE_TYPES
 
 #: short names for the type column of the object table
 TYPE_NAMES = {
@@ -152,9 +152,7 @@ class ObjectInfo:
     def width(self) -> int:
         """Byte width for padding a written value, 0 where padding would
         change the value: a string, an octet string, a domain."""
-        if self.data_type in TEXT_TYPES or self.data_type in BYTE_TYPES:
-            return 0
-        return max(self.bits // 8, 1)
+        return 0 if self.data_type in RAW_TYPES else max(self.bits // 8, 1)
 
     def signed(self, value: int, bits: int = 0) -> int:
         """One word read with its sign. ``bits`` overrides the declared
