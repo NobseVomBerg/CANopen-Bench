@@ -4158,7 +4158,7 @@ def test_select_all_takes_only_what_the_list_shows(tmp_path, monkeypatch):
     from its own idea of "shown" therefore selected cases that were not on
     screen: with the category set to `automated`, a semi-automated case
     joined the run and stopped it at a question nobody was expecting."""
-    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda: [])
+    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda **kw: [])
     tc_dir = tmp_path / "tcs"
     tc_dir.mkdir()
     for tid, grade in (("4646", "automated"), ("4647", "semi")):

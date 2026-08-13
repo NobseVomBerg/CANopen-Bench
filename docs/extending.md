@@ -29,6 +29,16 @@ entry-point name for a stable order) and reads their hooks once. A
 plugin that raises during load is logged and skipped — it can never
 take the bench down.
 
+An entry-point name that appears twice is loaded once, and the state log
+says so. Two installations of the same package both register it — a wheel
+uploaded under Setup > Extensions plus the same package installed into
+the environment is how it happens — and reading both would give one bench
+two of every hook. Which of the two the import resolves to is decided by
+`sys.path`, so the message names both places and the file the code came
+from: the version shown under Extensions belongs to one of them, and the
+running code may be the other. That looks exactly like a change that did
+not arrive.
+
 Every hook is optional and defaults to "contributes nothing"; override
 only what you provide.
 

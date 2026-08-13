@@ -13,7 +13,7 @@ from canopen_bench.core import Bench
 def _no_installed_plugins(monkeypatch):
     """Keep the suite hermetic: Bench(plugins=None) must not discover
     whatever bench plugins happen to be installed in this environment."""
-    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda: [])
+    monkeypatch.setattr("canopen_bench.core.load_plugins", lambda **kw: [])
 
 
 # Registry rows the suite historically relied on being seeded (used to come
