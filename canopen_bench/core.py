@@ -42,10 +42,20 @@ from .eds_od import (
     object_info,
     pdo_mapping,
 )
-from .panelspec import PanelError, load_panels
+from .panelspec import load_panels
 from .plugin import BenchPlugin, SwdlStrategy, load_plugins
 from .symbols import SymbolTables, load_symbols
-from .values import BASES, Field, alternatives, base_of, describe, format_number, parse_value
+from .values import (
+    BASES,
+    Field,
+    Quantity,
+    ValueError_,
+    alternatives,
+    base_of,
+    describe,
+    format_number,
+    parse_value,
+)
 
 VERSION = __version__  # single source: canopen_bench/__init__.py
 
@@ -875,6 +885,12 @@ class Bench:
         self._object_fields: dict[str, list[Field]] = {}
         for p in self.plugins:
             self._object_fields.update(p.object_fields(self.symbols))
+        # and what it means physically — the one thing about an object that
+        # no EDS answers, so the only source is the device's documentation
+        # by way of a plugin. Same key, and used wherever a value is shown
+        self._object_units: dict[str, Quantity] = {}
+        for p in self.plugins:
+            self._object_units.update(p.object_units(self.symbols))
         # CiA-301 EMCY texts with vendor codes merged over them (plugin wins)
         self._emcy_codes = dict(data.EMCY_CODES)
         for p in self.plugins:
@@ -1653,12 +1669,22 @@ class Bench:
     def _value_note(self, idx: str, sub: str, value: object, like: object = None) -> str:
         """A value as the report should show it: what came back, and what
         it means where the device's own headers say so."""
-        fields = self._object_fields.get(f"{idx}:{sub}", [])
+        key = f"{idx}:{sub}"
+        fields = self._object_fields.get(key, [])
         number = _as_int(value)
         if fields and number is not None:
             meaning = describe(number, fields, self.symbols)
             if meaning:
                 return f"{value} — {meaning}"
+        # "160 — 16.0 cN". A report is read by somebody who wants to know
+        # what the machine did, and 160 is the number the bus carried
+        # rather than the quantity anybody set
+        quantity = self._object_units.get(key)
+        if quantity is not None and number is not None:
+            info = self._sel_info(idx, sub)
+            reading = quantity.with_unit(f"0x{number:X}", info.signed_bits if info else 0)
+            if reading:
+                return f"{_in_base_of(value, like)} — {reading}"
         # an object the EDS calls a string is one somebody wants to read,
         # not decode: 0x0000003332315F4F4D4544 is "DEMO_123" written back
         # to front, and nobody recognises their device name in that
@@ -3269,9 +3295,23 @@ class Bench:
         # the signed half of the range: with the table in hex, 0xFE0C is
         # what the box *shows* for -500, and a field that will not accept
         # back what it just printed is worse than one that is strict
-        width = (bits // 4) or len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
-        self.obj_vals[key] = f"0x{value:0{width}X}"
+        self.obj_vals[key] = f"0x{value:0{self._staged_width(key, info, bits)}X}"
         self.obj_vals_at[key] = time.monotonic()
+
+    def _staged_width(self, key: str, info: ObjectInfo | None, bits: int) -> int:
+        """How many hex digits a staged value is written with.
+
+        The object's own width wherever it is known, because that is what
+        the download will carry and because a two's complement is only
+        itself at its own width. What was read last is the fallback and
+        was once the only rule, which made the spelling of a staged value
+        depend on whether anybody had read the object first.
+        """
+        if bits:
+            return bits // 4
+        if info is not None and info.width:
+            return info.width * 2
+        return len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
 
     @staticmethod
     def _pad_hex(value: str, width_bytes: int) -> str:
@@ -3421,6 +3461,19 @@ class Bench:
             return None, "", 0.0
         return mine, "read", (now - mine_at if mine_at else 0.0)
 
+    def _quantity(self, key: str, own: Quantity | None = None) -> Quantity:
+        """What a value at this address means physically.
+
+        What the caller states itself where it states anything — a panel
+        field's own ``unit``/``scale`` is written for that box. Otherwise
+        what a plugin declared for the address, which is a fact about the
+        device rather than about one view of it: a panel that repeated it
+        would be the same fact written down twice, kept in step by hand.
+        """
+        if own is not None and own.stated:
+            return own
+        return self._object_units.get(key) or own or Quantity()
+
     def _panel_field_view(self, f, node: int) -> dict:
         raw, src, age = self._panel_value(f.key, node)
         info = self._object_info(node, f.idx, f.sub)
@@ -3433,8 +3486,12 @@ class Bench:
             return {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": "",
                     "rw": f.rw, "widget": "number", "val": _hex_to_text(raw) or str(raw),
                     "src": src, "age": round(age, 1)}
-        out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
-               "rw": f.rw, "widget": f.widget, "val": f.show(raw, bits),
+        # a unit and a scale belong to a number; the widgets that mean a
+        # name or a bit reject them in the file, and must not pick one up
+        # from a plugin's declaration either
+        q = self._quantity(f.key, f.quantity) if f.widget == "number" else f.quantity
+        out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": q.unit,
+               "rw": f.rw, "widget": f.widget, "val": q.show(raw, bits),
                # where the number comes from and how old it is: a value a
                # PDO carried past three minutes ago must not look like a
                # reading taken just now
@@ -3468,9 +3525,13 @@ class Bench:
                               for sym in table.values()]
             out["val"] = str(field.extract(value, self.symbols)) if field else out["val"]
             # a value no symbol names is still a fact about the device, so
-            # it is shown rather than snapped to the nearest name
-            if out["val"] not in {o[0] for o in out["options"]}:
-                out["options"] = [*out["options"], [out["val"], f"?0x{int(out['val']):X}"]]
+            # it is shown rather than snapped to the nearest name. Nothing
+            # read yet is not such a value — there is no number to offer,
+            # and asking for the hex of an empty box used to take the whole
+            # snapshot down with a ValueError
+            current = _typed_number(out["val"] or "")
+            if current is not None and out["val"] not in {o[0] for o in out["options"]}:
+                out["options"] = [*out["options"], [out["val"], f"?0x{current:X}"]]
             out["shift"] = shift
         return out
 
@@ -3534,27 +3595,28 @@ class Bench:
         info = (self._object_info(node, p.get("idx", ""), p.get("sub", ""))
                 if fld is not None else None)
         bits = info.signed_bits if info is not None else 0
+        key = f"{p['idx']}:{p['sub']}"
+        quantity = self._quantity(key, fld.quantity) if fld is not None else Quantity()
         # an unscaled field goes through the object table's own parsing,
         # which knows hex, binary and symbol names. A signed one does not:
         # that path stages the digits as an unsigned word, and -500 leaves
         # the box as a number no width can hold
-        if fld is None or (fld.scale == 1.0 and not bits):
+        if fld is None or (quantity.scale == 1.0 and not bits):
             self.act_obj_set(p)
             return
-        key = f"{p['idx']}:{p['sub']}"
         text = str(p.get("val", ""))
         if not text.strip():
             self.obj_vals[key] = ""
             return
         try:
-            raw = fld.to_raw(text, bits)
-        except PanelError as exc:
+            raw = quantity.to_raw(text, bits)
+        except ValueError_ as exc:
             self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
             return
         # a two's complement is only itself at the object's own width, so
         # the EDS decides it here rather than the digits of whatever the
         # last read happened to answer
-        width = (bits // 4) or len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
+        width = self._staged_width(key, info, bits)
         self.obj_vals[key] = f"0x{raw:0{width}X}"
         self.obj_vals_at[key] = time.monotonic()
 
@@ -5707,11 +5769,20 @@ class Bench:
             # reading the EDS declares: 0xFE0C is -500 on an INTEGER16 and
             # 65036 on a UNSIGNED16, and only the file can say which
             dec = info.signed(value) if info is not None else value
+            # what the number means beside the number itself: the symbolic
+            # reading where a plugin declared fields, the physical one
+            # where it declared a unit. Never both — a mode word is not
+            # measured in anything, and a tension is not an enum
+            quantity = self._object_units.get(key)
+            meaning = describe(value, fields, self.symbols) if fields else ""
+            if not meaning and quantity is not None:
+                meaning = quantity.with_unit(raw, info.signed_bits if info else 0)
             out[key] = {
                 "txt": format_number(value, "hex", width) if self.num_base == "hex"
                 else str(dec),
-                "alt": alternatives(value, fields, self.symbols, width, dec),
-                "sym": describe(value, fields, self.symbols) if fields else "",
+                "alt": alternatives(value, fields, self.symbols, width, dec)
+                + (f" · {meaning}" if quantity is not None and meaning else ""),
+                "sym": meaning,
                 # the EDS's own limits, checked against that same reading.
                 # It used to be checked in the browser, against the text on
                 # screen parsed as hex — so with the table in decimal a 500

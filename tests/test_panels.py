@@ -18,6 +18,7 @@ from canopen_bench.core import Bench, _hex_to_text
 from canopen_bench.db import Db
 from canopen_bench.panelspec import PanelError, load_panels, parse_panel
 from canopen_bench.plugin import BenchPlugin
+from canopen_bench.values import ValueError_
 
 SAMPLE = """
 name: Sample Feeder
@@ -50,24 +51,25 @@ def test_a_panel_reads_addresses_the_way_the_object_dictionary_is_written():
 
 def test_the_decimals_follow_the_scale_without_being_written_out():
     panel = parse_panel(SAMPLE)
-    working = panel.groups[0].fields[0]
-    assert working.digits == 1
+    working = panel.groups[0].fields[0].quantity
+    assert working.places == 1
     assert working.show("0x00A0") == "16.0"          # 160 tenths of a cN
     assert working.show(None) == ""                  # not read yet
     assert working.show("DemoDevice") == "DemoDevice"  # a name is not a number
+    assert working.with_unit("0x00A0") == "16.0 cN"  # the unit labels, beside it
 
 
 def test_what_the_box_shows_is_what_a_write_sends_back():
     """The one arithmetic error a panel can make: showing tenths and
     staging them as units, so a Write puts a tenth of the displayed
     number into the device."""
-    working = parse_panel(SAMPLE).groups[0].fields[0]
+    working = parse_panel(SAMPLE).groups[0].fields[0].quantity
     assert working.to_raw("16.0") == 160
     assert working.to_raw("16") == 160
     assert working.to_raw("0x10") == 160             # hex is hex, then scaled
-    with pytest.raises(PanelError):
+    with pytest.raises(ValueError_):
         working.to_raw("-1")             # the EDS says this one is unsigned
-    with pytest.raises(PanelError):
+    with pytest.raises(ValueError_):
         working.to_raw("later")
 
 
@@ -194,11 +196,12 @@ def test_a_staged_value_is_scaled_back_to_what_the_device_stores(tmp_path):
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
     bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "16.0"})
-    assert bench.obj_vals["0x2040:01"] == "0xA0"
+    # at the object's own width, not the digits of whatever was read last
+    assert bench.obj_vals["0x2040:01"] == "0x000000A0"
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["val"] == "16.0"
 
     bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "nope"})
-    assert bench.obj_vals["0x2040:01"] == "0xA0"      # refused, not silently cleared
+    assert bench.obj_vals["0x2040:01"] == "0x000000A0"   # refused, not cleared
     assert "rejected" in bench.logs[-1]["msg"]
 
 
@@ -663,7 +666,7 @@ def test_a_word_the_eds_calls_signed_is_read_as_one():
     as 65036 unless something says how wide the object is — the worst kind
     of wrong number, because it is in range and it moves when the device
     moves."""
-    field = parse_panel(SAMPLE).groups[0].fields[1]     # scale 0.1, no rw
+    field = parse_panel(SAMPLE).groups[0].fields[1].quantity   # scale 0.1, no rw
     assert field.show("0xFE0C", 16) == "-50.0"          # -500 tenths
     assert field.show("0xFE0C") == "6503.6"             # unsigned, as before
     assert field.show("0x7FFF", 16) == "3276.7"         # the top of the range
@@ -671,13 +674,13 @@ def test_a_word_the_eds_calls_signed_is_read_as_one():
 
 
 def test_a_box_that_shows_a_negative_can_send_one():
-    field = parse_panel(SAMPLE).groups[0].fields[0]     # scale 0.1, rw
+    field = parse_panel(SAMPLE).groups[0].fields[0].quantity   # scale 0.1, rw
     assert field.to_raw("-50.0", 16) == 0xFE0C
     assert field.to_raw("50.0", 16) == 500
-    with pytest.raises(PanelError):                     # unsigned, as before
+    with pytest.raises(ValueError_):                    # unsigned, as before
         field.to_raw("-50.0")
     for text in ("-3276.9", "3276.8"):                  # outside 16 signed bits
-        with pytest.raises(PanelError):
+        with pytest.raises(ValueError_):
             field.to_raw(text, 16)
 
 
