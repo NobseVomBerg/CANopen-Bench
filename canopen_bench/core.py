@@ -3245,7 +3245,7 @@ class Bench:
     def _eds_is_text(self, node: int, idx: str, sub: str) -> bool:
         """Whether the EDS declares this object as text rather than a
         number — a device name, a version string. Those bytes are read as
-        a number nowhere: 0x4546533200 is "EFS2", not 297 billion."""
+        a number nowhere: 0x466565646572 is "Feeder", not 77 billion."""
         eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
         od = self._ods.load(eds) if eds and eds != "—" else None
         try:
@@ -3391,8 +3391,8 @@ class Bench:
             field = self._panel_enum(f.key)
             table = self.symbols.tables.get(field.table, {}) if field else {}
             shift = field.resolved_shift(self.symbols) if field else 0
-            # every choice sheds the prefix it shares with its table:
-            # "eTensionMode_" on all four of them says nothing that the one
+            # every choice sheds the prefix it shares with its table: a
+            # table name repeated on all four of them says nothing the one
             # open dropdown does not already say, and costs the width the
             # word itself needs — the same reason describe_object drops it
             # from an object's name. removeprefix, so a table whose members
