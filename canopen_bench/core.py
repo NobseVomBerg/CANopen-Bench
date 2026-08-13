@@ -3209,6 +3209,9 @@ class Bench:
     #: as the word they are. OCTET_STRING and DOMAIN are bytes that happen
     #: not to be padded, and guessing an encoding for them would invent one
     _TEXT_TYPES = {0x09, 0x0B}                # VISIBLE_STRING, UNICODE_STRING
+    #: INTEGER8/16/32 and how wide each is. A word carries no sign of its
+    #: own, so this is the only thing that can tell -500 from 65036
+    _SIGNED_BITS = {0x02: 8, 0x03: 16, 0x04: 32}
 
     @staticmethod
     def _pad_hex(value: str, width_bytes: int) -> str:
@@ -3242,17 +3245,31 @@ class Bench:
             return 0
         return max(len(var) // 8, 1)
 
-    def _eds_is_text(self, node: int, idx: str, sub: str) -> bool:
-        """Whether the EDS declares this object as text rather than a
-        number — a device name, a version string. Those bytes are read as
-        a number nowhere: 0x726564656546 is "Feeder", not 126 billion."""
+    def _eds_data_type(self, node: int, idx: str, sub: str) -> int | None:
+        """What the EDS assigned to this node says this object is. None
+        where there is no EDS, or no such object in it — the panel then
+        treats the value as the plain unsigned word it always was."""
         eds = next((d["eds"] for d in self.devices if d["node"] == node), "")
         od = self._ods.load(eds) if eds and eds != "—" else None
         try:
             var = find_var(od, int(idx, 16), int(sub or "0", 16)) if od else None
         except ValueError:
-            return False
-        return var is not None and var.data_type in self._TEXT_TYPES
+            return None
+        return None if var is None else var.data_type
+
+    def _eds_is_text(self, node: int, idx: str, sub: str) -> bool:
+        """Whether the EDS declares this object as text rather than a
+        number — a device name, a version string. Those bytes are read as
+        a number nowhere: 0x726564656546 is "Feeder", not 126 billion."""
+        return self._eds_data_type(node, idx, sub) in self._TEXT_TYPES
+
+    def _panel_signed_bits(self, node: int, idx: str, sub: str) -> int:
+        """The width of a signed object, 0 for everything else — what
+        ``PanelField.show``/``to_raw`` need to read and write a negative
+        number. Unknown counts as unsigned: that is what the panel did
+        before anything asked, and a guessed sign bit turns half a range
+        into negatives."""
+        return self._SIGNED_BITS.get(self._eds_data_type(node, idx, sub), 0)
 
     def act_obj_write(self, p: dict) -> None:
         idx, sub = p["idx"], p["sub"]
@@ -3373,6 +3390,7 @@ class Bench:
 
     def _panel_field_view(self, f, node: int) -> dict:
         raw, src, age = self._panel_value(f.key, node)
+        bits = self._panel_signed_bits(node, f.idx, f.sub) if f.widget == "number" else 0
         # a text object is a word, whatever the wire carried it as; the
         # widgets below all mean numbers, so this is the whole of it
         if raw and f.widget == "number" and self._eds_is_text(node, f.idx, f.sub):
@@ -3380,7 +3398,7 @@ class Bench:
                     "rw": f.rw, "widget": "number", "val": self._as_text(raw),
                     "src": src, "age": round(age, 1)}
         out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": f.unit,
-               "rw": f.rw, "widget": f.widget, "val": f.show(raw),
+               "rw": f.rw, "widget": f.widget, "val": f.show(raw, bits),
                # where the number comes from and how old it is: a value a
                # PDO carried past three minutes ago must not look like a
                # reading taken just now
@@ -3475,7 +3493,14 @@ class Bench:
         if fld is not None and fld.widget in ("enum", "flag"):
             self._panel_stage_part(fld, p)
             return
-        if fld is None or fld.scale == 1.0:
+        node = self._target_node()
+        bits = (self._panel_signed_bits(node, p.get("idx", ""), p.get("sub", ""))
+                if fld is not None else 0)
+        # an unscaled field goes through the object table's own parsing,
+        # which knows hex, binary and symbol names. A signed one does not:
+        # that path stages the digits as an unsigned word, and -500 leaves
+        # the box as a number no width can hold
+        if fld is None or (fld.scale == 1.0 and not bits):
             self.act_obj_set(p)
             return
         key = f"{p['idx']}:{p['sub']}"
@@ -3484,11 +3509,14 @@ class Bench:
             self.obj_vals[key] = ""
             return
         try:
-            raw = fld.to_raw(text)
+            raw = fld.to_raw(text, bits)
         except PanelError as exc:
             self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
             return
-        width = len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
+        # a two's complement is only itself at the object's own width, so
+        # the EDS decides it here rather than the digits of whatever the
+        # last read happened to answer
+        width = (bits // 4) or len(self.obj_vals.get(key, "").removeprefix("0x")) or 2
         self.obj_vals[key] = f"0x{raw:0{width}X}"
         self.obj_vals_at[key] = time.monotonic()
 

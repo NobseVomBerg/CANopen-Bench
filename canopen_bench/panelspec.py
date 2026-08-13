@@ -110,24 +110,40 @@ class PanelField:
     def key(self) -> str:
         return f"{self.idx}:{self.sub}"
 
-    def show(self, raw: str | None) -> str:
+    def show(self, raw: str | None, signed_bits: int = 0) -> str:
         """The value as the box prints it. ``raw`` is what the bus answered
         (a hex string) or None for "not read yet"; a value that is not a
-        number — a device name, a serial — is passed through untouched."""
+        number — a device name, a serial — is passed through untouched.
+
+        ``signed_bits`` is the object's width where the EDS declares it a
+        signed integer, and 0 where it does not. A word is bits on the
+        wire and says nothing about its own sign, so a motor turning
+        backwards reads as 65036 rather than -500 unless somebody says
+        how wide it is. That is the worst kind of wrong number: it is in
+        range, it moves when the device moves, and it is not the value.
+        """
         if raw in (None, "", "—"):
             return ""
         try:
             value = int(str(raw), 16)
         except ValueError:
             return str(raw)
+        if signed_bits and value >= 1 << (signed_bits - 1):
+            value -= 1 << signed_bits
         scaled = value * self.scale
         return f"{scaled:.{self.digits}f}" if self.digits else f"{round(scaled)}"
 
-    def to_raw(self, text: str) -> int:
+    def to_raw(self, text: str, signed_bits: int = 0) -> int:
         """What somebody typed into the box, back to the number the device
         stores. Reads the way the rest of the bench reads typed values:
         ``0x…`` is hex, anything else decimal — a scaled field is decimal
-        by its nature ("16.0 cN"), and the two must not disagree."""
+        by its nature ("16.0 cN"), and the two must not disagree.
+
+        A minus sign is only accepted where the EDS says the object is
+        signed, and comes back as the two's complement of that width: a
+        box that shows -500 has to be able to send it, and one that does
+        not know the width cannot tell -500 from a very large number.
+        """
         text = str(text).strip()
         if not text:
             raise PanelError("empty")
@@ -137,7 +153,14 @@ class PanelField:
             raise PanelError(f"{text!r} is not a number") from None
         raw = round(value / self.scale) if self.scale != 1.0 else round(value)
         if raw < 0:
-            raise PanelError(f"{text!r} is negative — a panel writes unsigned values")
+            if not signed_bits:
+                raise PanelError(f"{text!r} is negative — the EDS declares this "
+                                 f"object unsigned")
+            if raw < -(1 << (signed_bits - 1)):
+                raise PanelError(f"{text!r} does not fit in {signed_bits} signed bits")
+            raw += 1 << signed_bits
+        elif signed_bits and raw >= 1 << (signed_bits - 1):
+            raise PanelError(f"{text!r} does not fit in {signed_bits} signed bits")
         return raw
 
 

@@ -66,7 +66,7 @@ def test_what_the_box_shows_is_what_a_write_sends_back():
     assert working.to_raw("16") == 160
     assert working.to_raw("0x10") == 160             # hex is hex, then scaled
     with pytest.raises(PanelError):
-        working.to_raw("-1")
+        working.to_raw("-1")             # the EDS says this one is unsigned
     with pytest.raises(PanelError):
         working.to_raw("later")
 
@@ -555,6 +555,13 @@ ObjectType=0x7
 DataType=0x0007
 AccessType=wo
 DefaultValue=0
+
+[2061]
+ParameterName=Velocity actual value
+ObjectType=0x7
+DataType=0x0003
+AccessType=rw
+DefaultValue=0
 """
 
 TEXT_PANEL = """
@@ -566,6 +573,7 @@ groups:
       - {label: Device name, obj: "0x1008:00"}
       - {label: Counter,     obj: "0x2000:00"}
       - {label: Motor test,  obj: "0x2060:00", rw: true}
+      - {label: Velocity,    obj: "0x2061:00", unit: rpm, rw: true}
 """
 
 
@@ -608,7 +616,7 @@ def test_a_device_name_is_a_word_not_nineteen_digits(tmp_path):
     bench = _bench_with_text_eds(tmp_path)
     bench.obj_vals["0x1008:00"] = "0x726564656546"        # "Feeder", as the bus spells it
     bench.obj_vals["0x2000:00"] = "0x2A"
-    name, counter, _ = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
+    name, counter, *_ = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
     assert name["val"] == "Feeder"
     assert counter["val"] == "42", "a number must not be run through the decoder"
 
@@ -640,3 +648,41 @@ def test_a_page_read_leaves_the_write_only_objects_alone(tmp_path):
     asyncio.run(go())
     assert "0x1008:00" in asked and "0x2000:00" in asked
     assert "0x2060:00" not in asked
+
+
+# -- numbers that carry a sign ----------------------------------------------
+
+def test_a_word_the_eds_calls_signed_is_read_as_one():
+    """A word carries no sign of its own. A motor turning backwards reads
+    as 65036 unless something says how wide the object is — the worst kind
+    of wrong number, because it is in range and it moves when the device
+    moves."""
+    field = parse_panel(SAMPLE).groups[0].fields[1]     # scale 0.1, no rw
+    assert field.show("0xFE0C", 16) == "-50.0"          # -500 tenths
+    assert field.show("0xFE0C") == "6503.6"             # unsigned, as before
+    assert field.show("0x7FFF", 16) == "3276.7"         # the top of the range
+    assert field.show("0xFFFFFE0C", 32) == "-50.0"
+
+
+def test_a_box_that_shows_a_negative_can_send_one():
+    field = parse_panel(SAMPLE).groups[0].fields[0]     # scale 0.1, rw
+    assert field.to_raw("-50.0", 16) == 0xFE0C
+    assert field.to_raw("50.0", 16) == 500
+    with pytest.raises(PanelError):                     # unsigned, as before
+        field.to_raw("-50.0")
+    for text in ("-3276.9", "3276.8"):                  # outside 16 signed bits
+        with pytest.raises(PanelError):
+            field.to_raw(text, 16)
+
+
+def test_the_panel_takes_the_width_from_the_eds(tmp_path):
+    """Both directions, through the page: the EDS says INTEGER16, so a
+    device answering 0xFE0C shows -500 and typing -500 stages 0xFE0C —
+    at the object's own width, because a two's complement is only itself
+    there."""
+    bench = _bench_with_text_eds(tmp_path)
+    bench.obj_vals["0x2061:00"] = "0xFE0C"
+    assert _fields(bench)[3]["val"] == "-500"
+
+    bench.dispatch("panel_set", {"idx": "0x2061", "sub": "00", "val": "-500"})
+    assert bench.obj_vals["0x2061:00"] == "0xFE0C"

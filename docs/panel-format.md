@@ -132,6 +132,13 @@ labels. A device storing tenths of a centinewton shows 16.0 with
 `{unit: cN, scale: 0.1}`, and what a Write sends is the raw 160 again,
 padded to the width the EDS declares for that object.
 
+Signedness comes from the EDS too, and nothing in the file says it: a
+word carries no sign of its own, so an object the EDS calls INTEGER16
+shows -500 where an unsigned one shows 65036. A box that shows a negative
+can also send one — typed with its minus, stored as the two's complement
+of that object's width. Where the EDS says unsigned, a minus is refused
+rather than wrapped.
+
 ## Reading and writing
 
 Nothing polls. A value arrives when somebody asks for it:
