@@ -174,3 +174,19 @@ def test_the_trace_table_places_rows_by_the_same_height_it_draws_them():
     assert "top:${start * ROW_H}px" in app      # where it is put
     assert "height:${total * ROW_H}px" in app   # how long the scrollbar is
     assert "/api/trace/rows" in app             # and where rows past the snapshot come from
+
+
+def test_a_two_column_box_takes_two_of_the_pages_columns():
+    """Both halves of the layout, or neither. Splitting one page column in
+    two gave each cell half the width a one-column box gives it, and a flex
+    row gives up the label first: a box of "Pr...", "S...", "Ya..." over
+    inputs that still looked right, and Write buttons reading "Writ".
+
+    grid-auto-columns is the other half. On a window narrow enough for one
+    column, a box asking for two spans into an implicit track; sized to its
+    content that track takes the page sideways, and the point of the span
+    was to give the box room, not to take it from the page.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "grid-column:span ${g.cols}" in app
+    assert "grid-auto-columns:minmax(0,1fr)" in app
