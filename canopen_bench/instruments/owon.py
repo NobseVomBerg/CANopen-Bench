@@ -67,7 +67,7 @@ being a number rather than for being non-empty.
 """
 from __future__ import annotations
 
-from . import Channel, PowerSupply, SerialLink, SupplyState
+from . import Channel, PowerSupply, SerialLink, SupplyState, split_idn
 
 #: first field of *IDN? for every badge this driver recognises
 _VENDORS = ("OWON", "KIPRIM")
@@ -102,7 +102,7 @@ class OwonSpe(PowerSupply):
             self.idn = self.link.ask("*IDN?")
         st = SupplyState()
         st.port = self.link.port
-        st.model, st.serial, st.firmware = _split_idn(self.idn)
+        st.vendor, st.model, st.serial, st.firmware = split_idn(self.idn)
 
         # one output, always: this is the single-channel series. The base
         # class carries a list because the Töllner has two, not because
@@ -150,13 +150,6 @@ class OwonSpe(PowerSupply):
         # as a log of what came back
         self.link.write(f"OUTP {'ON' if on else 'OFF'}")
 
-
-def _split_idn(idn: str) -> tuple[str, str, str]:
-    """"KIPRIM,DC605S,23090539,FV:V4.1.0" -> model, serial, firmware."""
-    parts = [p.strip() for p in idn.split(",")]
-    while len(parts) < 4:
-        parts.append("")
-    return parts[1], parts[2], parts[3]
 
 
 def _number(text: str) -> float | None:

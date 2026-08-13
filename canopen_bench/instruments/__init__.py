@@ -54,10 +54,27 @@ class Channel:
     extra: dict[str, str] = field(default_factory=dict)  # driver-specific, shown raw
 
 
+def split_idn(idn: str) -> tuple[str, str, str, str]:
+    """``*IDN?`` into vendor, model, serial, firmware.
+
+    SCPI's four comma-separated fields, in that order:
+    ``KIPRIM,DC605S,23090539,FV:V4.1.0``. Here rather than in each driver
+    because every one of them asks the same question and gets the same
+    shape back — and because both copies of this used to drop the vendor
+    on the floor, which left the box calling a supply "DC605S" where the
+    label on its front says who built it.
+    """
+    parts = [p.strip() for p in idn.split(",")]
+    while len(parts) < 4:
+        parts.append("")
+    return parts[0], parts[1], parts[2], parts[3]
+
+
 @dataclass
 class SupplyState:
     """What the box shows. ``output`` is tri-state: True/False, or None
     when the instrument does not report it — never guessed as off."""
+    vendor: str = ""
     model: str = ""
     serial: str = ""
     firmware: str = ""
