@@ -67,14 +67,16 @@ general-purpose one rather than competing with it.
 
 `when` and `collapsed` answer different questions. Folding says "not
 interested right now" and belongs to the operator; `when` says "this
-machine does not have that part" and belongs to the device — a backwinder
-the device does not carry has no box, rather than an empty one to open.
+machine does not have that part" and belongs to the device — a second
+axis the device does not carry has no box, rather than an empty one to
+open.
 
-`value` also takes a list — `{obj: "0x2102:10", value: [920, 922]}` —
-because a device family is numbered rather than flagged: the part is on
-the 920 and the 922 and on nothing else, and the variant object says 920
-or 922. There is no bit anywhere that says "has a backwinder", and the
-alternative is the same box written out twice, once per number.
+`value` also takes a list — `{obj: "0x2001:00", value: [3, 4]}` — because
+a device family is usually numbered rather than flagged: the part is on
+two of the variants and on none of the others, and the variant object
+answers one number or the other. Object dictionaries rarely carry a bit
+that says "has that part", and the alternative is the same box written
+out twice, once per number.
 
 Unknown counts as yes: a condition may take a box away once the device has
 answered, never keep one hidden before anything was asked — the object
