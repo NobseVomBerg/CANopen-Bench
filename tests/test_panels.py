@@ -593,21 +593,21 @@ def _bench_with_text_eds(tmp_path) -> Bench:
 def test_a_device_name_is_a_word_not_nineteen_digits(tmp_path):
     """The bus carries a name as bytes like everything else, and a box that
     reads those bytes as a number prints 3472900244173440512 where the
-    device said EFS2. The EDS is what knows the difference."""
+    device said its name. The EDS is what knows the difference."""
     bench = _bench_with_text_eds(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x4546533220"          # "EFS2 "
+    bench.obj_vals["0x1008:00"] = "0x466565646572"        # "Feeder"
     bench.obj_vals["0x2000:00"] = "0x2A"
     name, counter, _ = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
-    assert name["val"] == "EFS2"
+    assert name["val"] == "Feeder"
     assert counter["val"] == "42", "a number must not be run through the decoder"
 
 
 def test_a_unit_on_a_word_is_dropped_rather_than_printed(tmp_path):
     """`unit` and `scale` are a number's, and a panel written against a
-    device's documentation may well carry one by accident. "EFS2 mV" would
+    device's documentation may well carry one by accident. "Feeder mV" would
     be the one reading nobody can correct from the screen."""
     bench = _bench_with_text_eds(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x4546533220"
+    bench.obj_vals["0x1008:00"] = "0x466565646572"
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["unit"] == ""
 
 
