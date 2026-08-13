@@ -413,7 +413,7 @@ match: {eds: "dut_alpha*"}
 groups:
   - title: Always
     fields: [{obj: "0x2040:01"}]
-  - title: Backwinder
+  - title: Second axis
     when: {obj: "0x2050:00", bit: 3}
     fields: [{obj: "0x2040:02"}]
 """
@@ -429,11 +429,11 @@ def test_a_box_is_there_until_the_device_says_otherwise(tmp_path):
     the object that settles it would sit behind the box it is hiding."""
     bench = _bench_with_panel(tmp_path, CONDITIONAL)
     bench.dispatch("obj_view", {"view": "panel"})
-    assert _titles(bench) == ["Always", "Backwinder"]
+    assert _titles(bench) == ["Always", "Second axis"]
 
     bench.obj_vals["0x2050:00"] = "0x08"          # bit 3: this one has one
     bench.obj_vals_at["0x2050:00"] = time.monotonic()
-    assert _titles(bench) == ["Always", "Backwinder"]
+    assert _titles(bench) == ["Always", "Second axis"]
 
     bench.obj_vals["0x2050:00"] = "0x04"          # and this one does not
     bench.obj_vals_at["0x2050:00"] = time.monotonic()
@@ -465,23 +465,24 @@ match: {eds: "dut_alpha*"}
 groups:
   - title: Always
     fields: [{obj: "0x2040:01"}]
-  - title: Backwinder
-    when: {obj: "0x2050:00", value: [920, 922]}
+  - title: Second axis
+    when: {obj: "0x2050:00", value: [3, 4]}
     fields: [{obj: "0x2040:02"}]
 """
 
 
 def test_a_part_two_variants_carry_is_one_box_not_two(tmp_path):
-    """A device family is numbered, not flagged: the backwinder is on the
-    920 and the 922 and on nothing else, and the variant object answers
-    920 or 922. Without a list that box has to be written out twice, with
-    every field in it duplicated, to express one "or"."""
+    """A device family is usually numbered, not flagged: the part is on
+    two of the variants and on none of the others, and the variant object
+    answers one number or the other. Without a list that box has to be
+    written out twice, with every field in it duplicated, to express one
+    "or"."""
     bench = _bench_with_panel(tmp_path, VARIANTS)
     bench.dispatch("obj_view", {"view": "panel"})
 
-    for variant, expected in ((920, ["Always", "Backwinder"]),
-                              (922, ["Always", "Backwinder"]),
-                              (800, ["Always"])):
+    for variant, expected in ((3, ["Always", "Second axis"]),
+                              (4, ["Always", "Second axis"]),
+                              (7, ["Always"])):
         bench.obj_vals["0x2050:00"] = f"0x{variant:04X}"
         bench.obj_vals_at["0x2050:00"] = time.monotonic()
         assert _titles(bench) == expected, variant

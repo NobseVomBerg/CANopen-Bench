@@ -5,10 +5,43 @@ interpreter (object names for SDO frames).
 """
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from canopen.objectdictionary import ObjectDictionary, ODVariable
 from canopen.objectdictionary.eds import import_eds
+
+#: How to read the bytes of an EDS. CiA 306 calls the file ASCII, and the
+#: ones vendors actually ship are INI files written on Windows: a
+#: ParameterName with an umlaut in it, a CreatedBy with a name in it, and
+#: a byte no UTF-8 decoder accepts. canopen's own importer opens the path
+#: in the platform default, which on a Linux bench is UTF-8 and raises —
+#: and the failure lands where nothing shows it: OdCache swallows it and
+#: every object width, PDO signal name and data type is quietly gone.
+#:
+#: utf-8-sig first, so a BOM and a genuinely UTF-8 file are read as
+#: themselves; cp1252 second, because that is what wrote the other kind.
+_ENCODINGS = ("utf-8-sig", "cp1252")
+
+
+def eds_text(raw: bytes) -> str:
+    """The text of an EDS, whatever it was written in. Never raises: a
+    file that decodes as nothing recognisable still parses far enough to
+    give the object dictionary, and one unreadable character in a
+    device's name is worth more than no object dictionary at all."""
+    for encoding in _ENCODINGS:
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("cp1252", "replace")
+
+
+def load_eds(source: Path | str | bytes) -> ObjectDictionary:
+    """An EDS from a path or from its bytes, read the way EDS files are
+    actually written. The one place canopen's importer is called from."""
+    raw = source if isinstance(source, bytes) else Path(source).read_bytes()
+    return import_eds(io.StringIO(eds_text(raw)), None)
 
 
 class OdCache:
@@ -33,7 +66,7 @@ class OdCache:
         if cached and cached[0] == mtime:
             return cached[1]
         try:
-            od = import_eds(str(path), None)
+            od = load_eds(path)
         except Exception:  # unparsable file -> cache the failure until it changes
             od = None
         self._cache[file] = (mtime, od)
