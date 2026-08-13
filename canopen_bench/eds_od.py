@@ -1,13 +1,17 @@
-"""Shared EDS object-dictionary access: mtime-cached loading + variable lookup.
+"""Shared EDS object-dictionary access: mtime-cached loading, variable
+lookup, and the one description of what an object *is*.
 
-Used by the demo bus (serving SDO from EDS content) and by the trace
-interpreter (object names for SDO frames).
+Used by the demo bus (serving SDO from EDS content), by the trace
+interpreter (object names for SDO frames), and by every view that has to
+know whether a word carries a sign, spells a word, or may be padded.
 """
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 from pathlib import Path
 
+from canopen import objectdictionary as odlib
 from canopen.objectdictionary import ObjectDictionary, ODVariable
 from canopen.objectdictionary.eds import import_eds
 
@@ -71,6 +75,124 @@ class OdCache:
             od = None
         self._cache[file] = (mtime, od)
         return od
+
+
+#: What the bench needs to know about a CiA-301 data type, in three
+#: tables and no more. Each of these used to be written out in two or
+#: three places with two or three different memberships — the object
+#: table read every value as an unsigned word while the panel read the
+#: same object as signed, and one of the two was wrong on every screen.
+#:
+#: text: bytes that are characters, so a device name prints as the word
+#: it is rather than as nineteen digits.
+TEXT_TYPES = frozenset({odlib.VISIBLE_STRING, odlib.UNICODE_STRING})
+#: bytes that are not characters. Not padded either — an OCTET_STRING
+#: widened to its declared length is a different value — but guessing an
+#: encoding for them would invent one, so they stay the bytes they are.
+BYTE_TYPES = frozenset({odlib.OCTET_STRING, odlib.DOMAIN})
+#: the signed integers and how wide each is. A word carries no sign of
+#: its own, so this is the only thing that can tell -500 from 65036.
+SIGNED_BITS = {odlib.INTEGER8: 8, odlib.INTEGER16: 16,
+               odlib.INTEGER32: 32, odlib.INTEGER64: 64}
+#: neither of those is a number: never widened to a declared length,
+#: never read as an integer, never plotted
+RAW_TYPES = TEXT_TYPES | BYTE_TYPES
+
+#: short names for the type column of the object table
+TYPE_NAMES = {
+    odlib.BOOLEAN: "BOOL", odlib.INTEGER8: "I8", odlib.INTEGER16: "I16",
+    odlib.INTEGER32: "I32", odlib.INTEGER64: "I64", odlib.UNSIGNED8: "U8",
+    odlib.UNSIGNED16: "U16", odlib.UNSIGNED32: "U32", odlib.UNSIGNED64: "U64",
+    odlib.REAL32: "F32", odlib.REAL64: "F64", odlib.VISIBLE_STRING: "STR",
+    odlib.OCTET_STRING: "OCT", odlib.UNICODE_STRING: "USTR", odlib.DOMAIN: "DOM",
+}
+
+
+@dataclass(frozen=True)
+class ObjectInfo:
+    """Everything the EDS says about one object, in the terms the bench
+    asks in.
+
+    One place to ask, because the questions are not independent: whether
+    a value may be zero-padded on write, whether it is signed, and
+    whether it is text are three readings of the same declared type, and
+    answering them apart is how a table and a panel ended up showing one
+    device two different numbers.
+
+    ``lo``/``hi`` are the EDS's own limits where it states them, and the
+    only thing that can say a value is outside the range the device
+    accepts — nothing else on a bench knows.
+    """
+
+    index: int
+    sub: int
+    name: str
+    data_type: int
+    bits: int
+    access: str
+    lo: int | None = None
+    hi: int | None = None
+
+    @property
+    def type_name(self) -> str:
+        return TYPE_NAMES.get(self.data_type, f"0x{self.data_type:02X}")
+
+    @property
+    def is_text(self) -> bool:
+        return self.data_type in TEXT_TYPES
+
+    @property
+    def signed_bits(self) -> int:
+        """The width a negative number of this object is written at, or 0
+        where it has no sign. ``PanelField.show``/``to_raw`` and the
+        table's own formatting both need exactly this."""
+        return SIGNED_BITS.get(self.data_type, 0)
+
+    @property
+    def width(self) -> int:
+        """Byte width for padding a written value, 0 where padding would
+        change the value: a string, an octet string, a domain."""
+        if self.data_type in TEXT_TYPES or self.data_type in BYTE_TYPES:
+            return 0
+        return max(self.bits // 8, 1)
+
+    def signed(self, value: int, bits: int = 0) -> int:
+        """One word read with its sign. ``bits`` overrides the declared
+        width for a value that arrived narrower than the object is — a
+        PDO carries whatever the mapping said, which need not be the
+        whole object."""
+        width = bits or self.signed_bits
+        if not self.signed_bits or not width:
+            return value
+        return value - (1 << width) if value >= 1 << (width - 1) else value
+
+
+def object_info(od: ObjectDictionary | None, idx: int, sub: int) -> ObjectInfo | None:
+    """What the EDS says about one address, or None where it says
+    nothing — no EDS, or no such object in it. Every caller treats that
+    as "the plain unsigned word it always was": a guessed sign bit turns
+    half a range into negatives, and a guessed width truncates a write."""
+    var = find_var(od, idx, sub) if od is not None else None
+    return None if var is None else info_of(var)
+
+
+def info_of(var: ODVariable) -> ObjectInfo:
+    """The same, for a caller that already has the variable in hand —
+    the trace decodes thousands of frames and must not look one up twice.
+
+    The name is qualified the way the bench writes an address everywhere
+    else: canopen joins a record member to its object with a dot, and
+    this tool separates index from sub-index with a slash, in a step's
+    report line and in the object table alike.
+    """
+    parent = getattr(var, "parent", None)
+    name = (f"{parent.name}/{var.name}"
+            if parent is not None and hasattr(parent, "subindices") else var.name)
+    access = var.access_type if var.access_type in ("ro", "rw", "wo") else \
+        ("ro" if not var.writable else "rw")
+    return ObjectInfo(index=var.index, sub=var.subindex, name=name or "",
+                      data_type=var.data_type or 0, bits=len(var) or 0,
+                      access=access, lo=var.min, hi=var.max)
 
 
 def find_var(od: ObjectDictionary, idx: int, sub: int) -> ODVariable | None:

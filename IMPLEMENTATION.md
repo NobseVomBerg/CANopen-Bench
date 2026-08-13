@@ -53,7 +53,20 @@ browser):
 - **Objects** — EDS object tree by group, SDO read/write per object:
   writable objects show an inline value input in the table and in the
   favorites panel — typing stages the value (`act_obj_set`, no bus
-  traffic), Write sends it. Favorites panel (one auto-saved list per
+  traffic), Write sends it. What each object *is* comes from one place:
+  `eds_od.ObjectInfo` reads the EDS's declared type once and answers
+  every question about it — the sign a word carries (0xFE0C is -500 on
+  an INTEGER16 and 65036 on a UNSIGNED16, and nothing but the file can
+  say which), whether its bytes are characters rather than a number,
+  the width a write is padded to, the access type, and the LowLimit/
+  HighLimit an out-of-range value is measured against. The table, the
+  panel, the trace decoder and a step's report line all read that one
+  description, so a value cannot be shown one way in one box and
+  another way in the next. Names follow the same rule
+  (`Bench._label`): the firmware's own name wins wherever a plugin can
+  give one (`describe_object`), and the EDS name stands in — object
+  dictionaries are historical documents, headers are what the device's
+  authors call the thing today. Favorites panel (one auto-saved list per
   workspace, width user-resizable via the drag divider), typed RAW
   rows —
   SDO read/write, PDO send, NMT send, each with its own node-id, up to

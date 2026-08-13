@@ -14,7 +14,7 @@ import pytest
 from conftest import SEED_EDS, connect_and_scan, seed_test_registry, write_seed_eds_files
 
 import canopen_bench.core as core_mod
-from canopen_bench.core import Bench
+from canopen_bench.core import Bench, _hex_to_text
 from canopen_bench.db import Db
 from canopen_bench.panelspec import PanelError, load_panels, parse_panel
 from canopen_bench.plugin import BenchPlugin
@@ -603,11 +603,16 @@ def test_the_bytes_of_a_word_are_read_back_the_way_they_were_sent(tmp_path):
     """The bus formats a payload little-endian, which is right for the
     integers that are most of an object dictionary and puts the last byte
     of a string first. Read straight, a name comes out backwards — which
-    looks enough like a name that nobody checks it twice."""
-    assert Bench._as_text("0x726564656546") == "Feeder"
-    assert Bench._as_text("0x00726564656546") == "Feeder"   # trailing NUL
-    assert Bench._as_text("DemoDevice") == "DemoDevice"     # already a word
-    assert Bench._as_text("0xABC") == "0xABC"               # not whole bytes
+    looks enough like a name that nobody checks it twice.
+
+    One decoder, shared with the report and the object table: the panel
+    had a second one that decoded UTF-8 with replacement, so bytes that
+    were never characters came out as a word of question marks instead of
+    saying they were not text."""
+    assert _hex_to_text("0x726564656546") == "Feeder"
+    assert _hex_to_text("0x00726564656546") == "Feeder"   # trailing NUL
+    assert _hex_to_text("DemoDevice") is None             # already a word
+    assert _hex_to_text("0xABC") is None                  # not whole bytes
 
 
 def test_a_device_name_is_a_word_not_nineteen_digits(tmp_path):

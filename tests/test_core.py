@@ -287,7 +287,10 @@ def test_trace_annotation_names_object_and_decodes_decimal(connected_bench):
     assert row["val"] == "42"
     req = _trace_row("0x601", "40 40 20 01 00 00 00 00")  # upload request, record member
     bench._annotate_sdo(req)
-    assert req["obj"] == "0x2040:01 Product code"
+    # a record member carries its record's name, the way it does in the
+    # object table and in a step's report line — "Product code" alone is
+    # the half of a name that says which record it is not
+    assert req["obj"] == "0x2040:01 Product identification/Product code"
     assert req["val"] == ""  # a read request carries no value
 
 
