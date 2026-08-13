@@ -157,11 +157,19 @@ def format_number(value: int, base: str, width: int = 0) -> str:
     return f"0x{value:0{width or 2}X}"
 
 
-def alternatives(value: int, fields: list[Field], symbols, width: int = 0) -> str:
+def alternatives(value: int, fields: list[Field], symbols, width: int = 0,
+                 dec: int | None = None) -> str:
     """Every reading of one value, for a tooltip: both bases, then the
     symbolic one. This is what makes the base switch safe to use — the
-    other representation is always one hover away."""
-    parts = [format_number(value, "hex", width), str(value)]
+    other representation is always one hover away.
+
+    ``dec`` is the decimal reading where it is not the number itself: a
+    signed object is 0xFE0C and -500 at the same time, and a tooltip that
+    offered 65036 beside the hex would be offering the same reading twice.
+    Passed in rather than worked out here, because what carries a sign is
+    something only the EDS knows (``eds_od.ObjectInfo``).
+    """
+    parts = [format_number(value, "hex", width), str(value if dec is None else dec)]
     text = describe(value, fields, symbols) if fields else ""
     if text:
         parts.append(text)

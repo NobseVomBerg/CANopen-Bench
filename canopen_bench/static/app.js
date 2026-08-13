@@ -830,16 +830,15 @@ function SetupPage({ s }) {
 }
 
 // ---------------------------------------------------------------- objects --
-// EDS LowLimit/HighLimit is a hint, not an enforced bound — real hardware is
-// the one that gets to accept or abort a write, so this only ever colors the
-// displayed value, never blocks Read/Write.
-function outOfRange(display, min, max) {
-  if (min == null && max == null) return false;
-  if (display == null) return false;
-  const n = parseInt(display, 16);
-  if (!Number.isFinite(n)) return false;
-  return (min != null && n < min) || (max != null && n > max);
-}
+// Whether a value is outside the EDS's LowLimit/HighLimit is decided
+// core-side and arrives as `oor` (canopen_bench/core.py, _value_view) — the
+// same place that decides what the number *is*. This used to be worked out
+// here, by parsing the text on screen as hex: with the table switched to
+// decimal a 500 was read as 0x500, and the warning was about 1280.
+//
+// It is a hint either way, not an enforced bound: real hardware is the one
+// that gets to accept or abort a write, so it only ever colors the displayed
+// value and never blocks Read/Write.
 
 // Panel view of the object area: a device's values as named boxes instead
 // of a numeric table, described by a file a plugin ships
@@ -1017,7 +1016,8 @@ function ObjectsPage({ s, ui, setUi }) {
   // below changes what the *table* shows and nothing about that — it
   // used to decide both, so with the table in hex a typed 12345678 came
   // back as 0x12345678: the same digits, a different number.
-  const numberHint = ' · a number (0x… for hex, 0b… for binary, otherwise decimal) or a symbol name';
+  const numberHint = ' · a number (0x… for hex, 0b… for binary, otherwise decimal) or a symbol name'
+    + ' — a minus where the EDS declares the object signed';
   const baseChip = html`
     <span class="hv-chip" onClick=${() => send('num_base')}
       title="show values as hex or decimal — the other reading stays in the tooltip. Typing is unaffected: 0x… is hex, bare digits are decimal"
@@ -1150,7 +1150,7 @@ function ObjectsPage({ s, ui, setUi }) {
           const cur = vals[key];
           const shown = shownValue(key, cur ?? val);
           const sym = (fmt[key] || {}).sym;
-          const oor = outOfRange(cur ?? val, min, max);
+          const oor = !!(fmt[key] || {}).oor;
           const rangeHint = (min != null || max != null) ? ` (EDS range ${min ?? '−∞'}…${max ?? '∞'})` : '';
           return html`
           <div style="display:grid;grid-template-columns:${cols};align-items:center;padding:5px 0 5px 14px;border-bottom:1px solid var(--bd2)">
