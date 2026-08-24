@@ -3415,13 +3415,16 @@ class Bench:
         time; what the operator folded away afterwards outranks it."""
         return self.panel_open.get(f"{panel.name}/{group.title}", not group.collapsed)
 
-    def _panel_field(self, idx: str, sub: str, bit=None, flag: bool = False):
+    def _panel_field(self, idx: str, sub: str, bit=None, flag: bool = False,
+                     lane: str = ""):
         """The field a click came from.
 
         Address alone does not name one: a status word is exactly the case
-        where several fields sit on the same object — a mode lane and the
-        flags beside it — so what kind of control it was, and which bit,
-        decide between them.
+        where several fields sit on the same object — a mode lane, the
+        selection beside it, the flags beside that — so what kind of
+        control it was, which bit, and which lane decide between them. A
+        click that names no lane takes the first, which is every object
+        with only one.
         """
         panel = self._panel()
         if panel is None:
@@ -3431,18 +3434,37 @@ class Bench:
         if flag:
             return next((f for f in want if f.widget == "flag"
                          and (bit is None or f.bit == int(bit))), None)
-        return next((f for f in want if f.widget != "flag"), None)
+        rest = [f for f in want if f.widget != "flag"]
+        if lane:
+            return next((f for f in rest if f.lane == lane), None)
+        return next(iter(rest), None)
 
-    def _panel_enum(self, key: str):
-        """The symbol table behind an enum field: the first non-flag field
-        a plugin declared for this object (``object_fields``), or None.
+    def _panel_enum(self, key: str, lane: str = ""):
+        """The symbol table behind an enum field: the field a plugin
+        declared for this object (``object_fields``), or None.
 
         The names come from the device's own headers that way, so a panel
         says ``widget: enum`` and gets whatever the firmware calls those
         values — a list written into the panel file instead would be a
         second copy to keep in step with the first.
+
+        ``lane`` picks one of them, for the objects that carry several: a
+        status word assembled out of a mode, a selection and a keylock is
+        one object with three names in it, and a box that could only ever
+        show the first of them showed a third of the word and said nothing
+        about the rest. Without a name the first non-flag field wins,
+        which is what a single-lane object wants.
+
+        The name is the field's table, or its label where it has one. A
+        table name is the firmware's own word for what the lane holds and
+        needs nothing invented alongside it; a label is what tells three
+        lanes of the same table apart, which is the case a table name
+        cannot cover — three colours of one LED enum.
         """
-        return next((f for f in self._object_fields.get(key, []) if not f.flags), None)
+        fields = [f for f in self._object_fields.get(key, []) if not f.flags]
+        if lane:
+            return next((f for f in fields if lane in (f.label, f.table)), None)
+        return next(iter(fields), None)
 
     def _panel_value(self, key: str, node: int) -> tuple[str | None, str, float]:
         """The freshest thing known about an object: what was read or
@@ -3514,7 +3536,10 @@ class Bench:
             out["on"] = bool(value >> f.bit & 1)
             out["bit"] = f.bit
         elif f.widget == "enum":
-            field = self._panel_enum(f.key)
+            field = self._panel_enum(f.key, f.lane)
+            # sent back on a pick: several lanes can sit on one object, and
+            # the address alone would stage whichever the core listed first
+            out["lane"] = f.lane
             table = self.symbols.tables.get(field.table, {}) if field else {}
             shift = field.resolved_shift(self.symbols) if field else 0
             # every choice sheds the prefix it shares with its table: a
@@ -3593,7 +3618,7 @@ class Bench:
         physical quantity has any use for.
         """
         fld = self._panel_field(p.get("idx", ""), p.get("sub", ""), p.get("bit"),
-                                flag="on" in p)
+                                flag="on" in p, lane=str(p.get("lane") or ""))
         if fld is not None and fld.widget in ("enum", "flag"):
             self._panel_stage_part(fld, p)
             return
@@ -3648,7 +3673,7 @@ class Bench:
             bit = 1 << fld.bit
             value = current | bit if p.get("on") else current & ~bit
         else:
-            field = self._panel_enum(key)
+            field = self._panel_enum(key, fld.lane)
             if field is None:
                 return
             shift = field.resolved_shift(self.symbols)

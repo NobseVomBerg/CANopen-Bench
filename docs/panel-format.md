@@ -95,6 +95,7 @@ read asks for the condition objects too, so one Read settles them.
 | `rw` | optional | `true` gives the field an input and a Write button. Default read-only: a panel is written from a device's documentation, and a typo that only displays is cheaper than one that writes |
 | `widget` | optional | `number` (default), `enum` or `flag` — see below |
 | `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
+| `lane` | enum only | Which of the object's declared fields this one shows, named by its symbol table or its label. Omitted takes the first |
 
 A field that gives neither `unit` nor `scale` takes whatever the plugin
 declared for that address (`BenchPlugin.object_units`,
@@ -129,6 +130,31 @@ it only says the bench has nothing to add.
 
 A `flag` says which bit it is and needs no table for that; a status word
 has bit 3 whether or not a header names it.
+
+An `enum` on a read-only field is printed as the name, not offered as a
+dropdown. A select on a value nobody can write opens, lists the device's
+other states and changes neither the device nor the page.
+
+`lane` is for the objects that carry more than one named field. A status
+word assembled out of a mode, a speed and a lock bit is one object with
+several names in it, and a box that could only ever show the first showed
+a quarter of the word without saying so. One row per lane, and a `flag`
+for the bit beside them:
+
+```yaml
+      - {label: Mode,   obj: "0x2011:00", widget: enum, lane: eMode}
+      - {label: Speed,  obj: "0x2011:00", widget: enum, lane: eSpeed}
+      - {label: Locked, obj: "0x2011:00", widget: flag, bit: 24}
+```
+
+A lane is named by the symbol table behind it — the firmware's own word
+for what those bits hold, so nothing has to be invented to point at it.
+Where several lanes share one table, which is what three colours of one
+LED enum look like, the plugin's `label` tells them apart and `lane`
+takes that instead.
+
+Where a lane is writable, staging one changes its bits and leaves the
+rest of the word alone — the same read-modify-write a flag does.
 
 Both write the whole object, so both fold the change into the value last
 read and leave the rest of it alone. A part of a value nobody has read is
