@@ -236,6 +236,15 @@ def test_a_value_nobody_can_write_is_not_offered_as_a_dropdown():
     assert "lane: f.lane" in app
 
 
+def test_a_write_only_field_has_no_read_button():
+    """The SDO could only abort. A button whose one outcome is an error in
+    the log is worse than no button — and the column it sat in stays, so
+    the labels of a box still line up."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "f.wo" in app, "the panel row does not ask whether the object can be read"
+    assert "write-only, nothing to read" in app
+
+
 def test_a_value_is_not_dimmed_for_being_a_minute_old():
     """Age belongs in the tooltip, which says it in words. Fading the
     number instead makes every box that has not just been read look like
