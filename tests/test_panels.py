@@ -84,6 +84,19 @@ def test_what_the_box_shows_is_what_a_write_sends_back():
     ("groups: [{title: A, fields: [{obj: '0x2000', scale: 0}]}]", "zero"),
     ("groups: [{title: A, fields: []}, {title: A, fields: []}]", "share a title"),
     ("groups: [{title: A, flow: sideways, fields: []}]", "flow is rows or columns"),
+    # a part is a slice of the value above it: no address, no parts of its
+    # own, and something other than a plain number to show
+    ("""groups: [{title: A, fields: [{obj: "0x2000", parts:
+        [{obj: "0x2001", widget: flag, bit: 1}]}]}]""", "field, not a part"),
+    ("""groups: [{title: A, fields: [{obj: "0x2000", parts:
+        [{label: x, widget: flag, bit: 1, parts: [{label: y}]}]}]}]""",
+     "a part has no parts"),
+    ("""groups: [{title: A, fields: [{obj: "0x2000", parts:
+        [{label: Plain}]}]}]""", "Plain is neither"),
+    ("""groups: [{title: A, fields: [{obj: "0x2000", parts: []}]}]""",
+     "at least one"),
+    ("""groups: [{title: A, fields: [{obj: "0x2000", widget: enum, parts:
+        [{label: x, widget: flag, bit: 1}]}]}]""", "parts belong to the row"),
     ("[1, 2]", "mapping"),
     ("groups: [{title: A, fields: [{obj: '0x2000'}]}]\nmatch: {edss: x}", "unknown"),
 ])
@@ -273,10 +286,10 @@ class _FieldPlugin(BenchPlugin):
                               Field(table="eSpeed", mask=0xF00)]}
 
 
-def _bench_with_widgets(tmp_path) -> Bench:
-    file = tmp_path / "widgets.panel.yaml"
-    file.write_text(WIDGETS, encoding="utf-8")
-    bench = Bench(Db(tmp_path / "test.db"), plugins=[_FieldPlugin(file)])
+def _bench_with_widgets(tmp_path, panel: str = WIDGETS, name: str = "widgets") -> Bench:
+    file = tmp_path / f"{name}.panel.yaml"
+    file.write_text(panel, encoding="utf-8")
+    bench = Bench(Db(tmp_path / f"{name}.db"), plugins=[_FieldPlugin(file)])
     # one directory per origin, which is how the workspace keeps two
     # vendors' identically named tables apart
     (bench.symbols_dir / "fieldy").mkdir(parents=True, exist_ok=True)
@@ -723,6 +736,67 @@ def test_a_row_carries_the_name_the_device_gives_the_object(tmp_path):
     # the label stays what the file called it — the name is beside it, not
     # instead of it
     assert [f["label"] for f in _fields(bench)][:2] == ["Device name", "Counter"]
+
+
+# -- a value assembled out of several ----------------------------------------
+
+PARTS_PANEL = """
+name: Sample Feeder
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Identity
+    fields:
+      - label: Status
+        obj: "0x2040:01"
+        base: hex
+        parts:
+          - {label: Locked, widget: flag, bit: 24}
+          - {label: Mode,   widget: enum, lane: eMode}
+          - {label: Speed,  widget: enum, lane: eSpeed}
+"""
+
+
+def test_the_parts_of_a_value_take_the_object_of_the_row_above_them():
+    """Written once instead of once per part — which is also what says
+    they are parts rather than four rows that happen to share an
+    address."""
+    (group,) = parse_panel(PARTS_PANEL).groups
+    (status,) = group.fields
+    assert [p.key for p in status.parts] == ["0x2040:01"] * 3
+    assert [p.widget for p in status.parts] == ["flag", "enum", "enum"]
+    assert [p.lane for p in status.parts] == ["", "eMode", "eSpeed"]
+    # and the row itself is still the whole value
+    assert (status.widget, status.base, status.key) == ("number", "hex", "0x2040:01")
+    assert [f.label for f in status.every] == ["Status", "Locked", "Mode", "Speed"]
+
+
+def test_a_part_is_drawn_under_the_value_it_reads(tmp_path):
+    """The page gets them nested, not as siblings: one ⟳, one address and
+    one Read for the group, and the parts hang off the row that owns the
+    object."""
+    bench = _bench_with_widgets(tmp_path, PARTS_PANEL, "parts")
+    bench.obj_vals["0x2040:01"] = "0x01000012"
+    (status,) = _fields(bench)
+    assert status["val"] == "0x01000012"           # the word itself, base: hex
+    assert [p["label"] for p in status["parts"]] == ["Locked", "Mode", "Speed"]
+    locked, mode, speed = status["parts"]
+    assert locked["on"] is True                    # bit 24
+    assert mode["val"] == "2"                      # lane 0x0F  → eMode_Run
+    assert speed["val"] == "0"                     # lane 0xF00 → nothing set
+    # a part carries no address of its own to show: it is the row above it
+    assert {p["idx"] for p in status["parts"]} == {"0x2040"}
+
+
+def test_staging_a_part_leaves_the_rest_of_the_word_alone(tmp_path):
+    """Read-modify-write against the value last read, the same as a flag
+    or a lane written as its own row — nesting them changed where they are
+    drawn and nothing about what they write."""
+    bench = _bench_with_widgets(tmp_path, PARTS_PANEL, "parts")
+    bench.obj_vals["0x2040:01"] = "0x01000012"
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "lane": "eSpeed", "val": "1"})
+    assert bench.obj_vals["0x2040:01"] == "0x01000112"
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 24, "on": False})
+    assert bench.obj_vals["0x2040:01"] == "0x00000112"
 
 
 # -- which way a box fills its columns ---------------------------------------

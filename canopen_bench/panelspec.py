@@ -56,7 +56,7 @@ from .values import Quantity, _digits_for
 
 #: what a field may say — anything else is a typo, and typos are loud here
 _FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit",
-               "lane", "base"}
+               "lane", "base", "parts"}
 _WIDGETS = {"number", "enum", "flag"}
 _BASES = {"dec", "hex"}
 _GROUP_KEYS = {"title", "fields", "cols", "flow", "collapsed", "when"}
@@ -135,10 +135,21 @@ class PanelField:
     #: nobody can check. The ``0x`` the box prints is what closes the
     #: loop: type back what it shows and it means what it showed.
     base: str = "dec"
+    #: the readings of this value, where it is a word assembled out of
+    #: several: a mode, a selection, a lock bit. They carry no address of
+    #: their own — they are bits of this one — which is what lets a box
+    #: draw them as parts of one object rather than as objects of their
+    #: own. One ⟳ and one Read serve the whole group.
+    parts: list[PanelField] = field(default_factory=list)
 
     @property
     def key(self) -> str:
         return f"{self.idx}:{self.sub}"
+
+    @property
+    def every(self) -> list[PanelField]:
+        """This value and its parts — everything with a row of its own."""
+        return [self, *self.parts]
 
 
 @dataclass
@@ -221,20 +232,34 @@ class Panel:
         return True
 
 
-def _fields(raw, where: str) -> list[PanelField]:
+def _fields(raw, where: str, owner: tuple[str, str] | None = None) -> list[PanelField]:
+    """The values of a box, or — with ``owner`` — the parts of one of them.
+
+    A part is a slice of the value above it and inherits its object, so
+    the address is written once instead of once per part. That is what
+    makes the parts of a status word a group rather than four rows that
+    happen to share an address.
+    """
     if not isinstance(raw, list):
-        raise PanelError(f"{where}: fields must be a list")
+        raise PanelError(f"{where}: {'parts' if owner else 'fields'} must be a list")
     out: list[PanelField] = []
     for i, item in enumerate(raw, start=1):
-        at = f"{where}, field {i}"
+        at = f"{where}, {'part' if owner else 'field'} {i}"
         if not isinstance(item, dict):
             raise PanelError(f"{at}: must be a mapping")
         unknown = set(item) - _FIELD_KEYS
         if unknown:
             raise PanelError(f"{at}: unknown key(s) {', '.join(sorted(unknown))}")
-        if "obj" not in item:
-            raise PanelError(f"{at}: needs an obj")
-        idx, sub = _addr(item["obj"])
+        if owner is not None:
+            if "obj" in item:
+                raise PanelError(f"{at}: a part reads the value above it and takes "
+                                 f"that object; one with an obj of its own is a "
+                                 f"field, not a part")
+            idx, sub = owner
+        else:
+            if "obj" not in item:
+                raise PanelError(f"{at}: needs an obj")
+            idx, sub = _addr(item["obj"])
         try:
             scale = float(item.get("scale", 1.0))
         except (TypeError, ValueError):
@@ -275,6 +300,25 @@ def _fields(raw, where: str) -> list[PanelField]:
         if base == "hex" and (scale != 1.0 or "digits" in item or item.get("unit")):
             raise PanelError(f"{at}: base: hex is a bit pattern, not a quantity — "
                              f"scale, digits and unit have nothing to say beside it")
+        # the parts of a value. The row that owns them shows the value
+        # whole; each part shows one reading of it and no address of its
+        # own, because it has none — it is bits of the row above it
+        parts: list[PanelField] = []
+        if item.get("parts") is not None:
+            if owner is not None:
+                raise PanelError(f"{at}: a part has no parts — a value is a word "
+                                 f"and its readings, and nothing below that")
+            if widget != "number":
+                raise PanelError(f"{at}: parts belong to the row that shows the "
+                                 f"whole value, and a {widget} shows one reading "
+                                 f"of it rather than the value")
+            parts = _fields(item["parts"], at, (idx, sub))
+            if not parts:
+                raise PanelError(f"{at}: parts must name at least one")
+            wrong = [p.label for p in parts if p.widget == "number"]
+            if wrong:
+                raise PanelError(f"{at}: a part is one reading of the value — an "
+                                 f"enum or a flag. {', '.join(wrong)} is neither")
         out.append(PanelField(
             label=str(item.get("label") or f"{idx}:{sub}"),
             idx=idx, sub=sub,
@@ -285,6 +329,7 @@ def _fields(raw, where: str) -> list[PanelField]:
             bit=bit if widget == "flag" else None,
             lane=lane,
             base=base,
+            parts=parts,
         ))
     return out
 

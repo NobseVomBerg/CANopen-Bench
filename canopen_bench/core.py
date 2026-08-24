@@ -3430,7 +3430,10 @@ class Bench:
         if panel is None:
             return None
         key = f"{idx}:{sub}"
-        want = [f for g in panel.groups for f in g.fields if f.key == key]
+        # parts included: a part is a row somebody can click, and it sits
+        # on the object of the row above it rather than on one of its own
+        want = [f for g in panel.groups for p in g.fields
+                for f in p.every if f.key == key]
         if flag:
             return next((f for f in want if f.widget == "flag"
                          and (bit is None or f.bit == int(bit))), None)
@@ -3586,6 +3589,11 @@ class Bench:
             if current is not None and out["val"] not in {o[0] for o in out["options"]}:
                 out["options"] = [*out["options"], [out["val"], f"0x{current:X}"]]
             out["shift"] = shift
+        # the readings of this value, drawn under it. They are the same
+        # object, so they need no ⟳ of their own and no second read — the
+        # page draws them as parts of the row above rather than as rows
+        if f.parts:
+            out["parts"] = [self._panel_field_view(p, node) for p in f.parts]
         return out
 
     def _panel_view(self) -> dict | None:
