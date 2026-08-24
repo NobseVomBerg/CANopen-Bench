@@ -3515,8 +3515,22 @@ class Bench:
         # name or a bit reject them in the file, and must not pick one up
         # from a plugin's declaration either
         q = self._quantity(f.key, f.quantity) if f.widget == "number" else f.quantity
+        # a field the file calls a register is shown as one: the bit
+        # pattern written the way its documentation writes it, padded to
+        # the object's own width so a byte stays two digits. Display only —
+        # what is typed back is read by the one rule the whole bench reads
+        # typed numbers by, and 20 is twenty in this box like in every
+        # other. The 0x the box prints is what makes that round-trip: type
+        # back what you see and it means what it showed
+        register = _typed_number(raw or "") if f.base == "hex" else None
         out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": q.unit,
-               "rw": f.rw, "widget": f.widget, "val": q.show(raw, bits),
+               "rw": f.rw, "widget": f.widget, "base": f.base,
+               # an object the EDS says is write-only has nothing to fetch:
+               # the SDO could only abort, and a ⟳ that can only fail is a
+               # button offering to break something
+               "wo": info is not None and info.access == "wo",
+               "val": (format_number(register, "hex", (info.width * 2) if info else 0)
+                       if register is not None else q.show(raw, bits)),
                # where the number comes from and how old it is: a value a
                # PDO carried past three minutes ago must not look like a
                # reading taken just now

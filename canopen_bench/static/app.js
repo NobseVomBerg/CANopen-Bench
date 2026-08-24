@@ -957,9 +957,17 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
     const unit = anyUnit
       ? html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`
       : '';
+    // No ⟳ where the EDS says write-only: that read can only abort, and a
+    // button whose one outcome is an error in the log is worse than no
+    // button. The column stays, empty, so the labels of a box still line
+    // up — and it keeps the address in reach, since the hover is what
+    // says which object a row is.
     const head = html`
-      <span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
-        title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>
+      ${f.wo
+        ? html`<span title=${`${f.idx}:${f.sub} — write-only, nothing to read`}
+            style="width:9px;flex:none"></span>`
+        : html`<span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
+            title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>`}
       <span title=${`${f.idx}:${f.sub}`}
         style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
     const writeBtn = f.rw ? html`

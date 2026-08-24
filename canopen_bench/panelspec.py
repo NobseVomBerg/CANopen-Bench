@@ -13,9 +13,12 @@ means physically is a fact about the device rather than about this view
 of it, and a fact written down in two places is a fact that drifts apart
 in two places.
 
-Values are shown in decimal, always. The object table's hex/dec chip is a
-developer's reading habit; a box that says "mA" is read by someone who
-wants 167, not 0xA7.
+Values are shown in decimal unless the field says ``base: hex``. The
+object table's hex/dec chip is a developer's reading habit and a box that
+says "mA" is read by someone who wants 167, not 0xA7 — but an object that
+is a bit pattern rather than a quantity is documented in hex and only
+made harder to read by being converted. That is about the display; typed
+input is hex only where it says ``0x``, here as everywhere else.
 
 The format, at a glance::
 
@@ -52,8 +55,10 @@ import yaml
 from .values import Quantity, _digits_for
 
 #: what a field may say — anything else is a typo, and typos are loud here
-_FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit", "lane"}
+_FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit",
+               "lane", "base"}
 _WIDGETS = {"number", "enum", "flag"}
+_BASES = {"dec", "hex"}
 _GROUP_KEYS = {"title", "fields", "cols", "collapsed", "when"}
 _WHEN_KEYS = {"obj", "bit", "value"}
 _PANEL_KEYS = {"name", "match", "groups"}
@@ -114,6 +119,19 @@ class PanelField:
     #: the first of them. Empty means the first, which is every object
     #: that has just one.
     lane: str = ""
+    #: which base this number is *shown* in. ``dec`` for everything a box
+    #: normally holds — a tension, a temperature, a count. ``hex`` for an
+    #: object that is a bit pattern rather than a quantity: a command word
+    #: where each bit asks the device for something else is documented in
+    #: hex, and decimal only makes its reader convert it back.
+    #:
+    #: Display only. What is typed is read the way typed numbers are read
+    #: everywhere in this bench — ``0x`` for hex, and bare digits are
+    #: decimal — because a field where the same digits mean different
+    #: things depending on a key in a file is the one number on the page
+    #: nobody can check. The ``0x`` the box prints is what closes the
+    #: loop: type back what it shows and it means what it showed.
+    base: str = "dec"
 
     @property
     def key(self) -> str:
@@ -238,6 +256,19 @@ def _fields(raw, where: str) -> list[PanelField]:
         if widget != "number" and (scale != 1.0 or "digits" in item or item.get("unit")):
             raise PanelError(f"{at}: scale, digits and unit belong to a number, "
                              f"not to a {widget}")
+        base = str(item.get("base", "dec"))
+        if base not in _BASES:
+            raise PanelError(f"{at}: unknown base {base!r} "
+                             f"(one of {', '.join(sorted(_BASES))})")
+        if base != "dec" and widget != "number":
+            raise PanelError(f"{at}: base says how a number is written, and a "
+                             f"{widget} shows no number to write")
+        # hex says "this is a register"; a scale, a unit and a decimal
+        # place say "this is a quantity". A field cannot be both, and one
+        # that claimed to be would have to pick which of the two to obey
+        if base == "hex" and (scale != 1.0 or "digits" in item or item.get("unit")):
+            raise PanelError(f"{at}: base: hex is a bit pattern, not a quantity — "
+                             f"scale, digits and unit have nothing to say beside it")
         out.append(PanelField(
             label=str(item.get("label") or f"{idx}:{sub}"),
             idx=idx, sub=sub,
@@ -247,6 +278,7 @@ def _fields(raw, where: str) -> list[PanelField]:
             widget=widget,
             bit=bit if widget == "flag" else None,
             lane=lane,
+            base=base,
         ))
     return out
 
