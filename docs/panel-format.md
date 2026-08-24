@@ -62,8 +62,20 @@ general-purpose one rather than competing with it.
 | `title` | required | Box heading, and the key the folded state is remembered under — two groups may not share one |
 | `fields` | required | The values in the box |
 | `cols` | optional | At most this many columns of values inside the box, 1…4 (default 1). Fewer where the page is too narrow to give each one room — the label is the first thing a squeezed row drops, and a box of `Pr…` is worse than a longer box |
+| `flow` | optional | `rows` (default) fills across and then down: first value top left, second top right. `columns` fills down and then across: the first half of the values in the left column, the rest in the right |
 | `collapsed` | optional | How the box opens the first time. What the operator folds afterwards outranks it, per workspace |
 | `when` | optional | `{obj: <address>, bit: N}` or `{obj: <address>, value: N}` — the box exists only where that holds |
+
+`flow` is worth setting where the order of the values means something.
+Filling across puts consecutive values side by side, so a box read
+top-to-bottom is read in the order they were written — but inserting one
+moves every value after it to the other side of the box, and a list that
+belongs together ends up split across the fold. `columns` keeps each half
+in its own column: an insertion moves the values below it and leaves the
+other column where it was.
+
+Both narrow the same way. A page too narrow for two columns gets one, and
+the values are then in the order they are written either way.
 
 `when` and `collapsed` answer different questions. Folding says "not
 interested right now" and belongs to the operator; `when` says "this

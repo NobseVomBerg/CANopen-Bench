@@ -83,6 +83,7 @@ def test_what_the_box_shows_is_what_a_write_sends_back():
     ("groups: [{title: A, fields: [{obj: 'nonsense'}]}]", "address"),
     ("groups: [{title: A, fields: [{obj: '0x2000', scale: 0}]}]", "zero"),
     ("groups: [{title: A, fields: []}, {title: A, fields: []}]", "share a title"),
+    ("groups: [{title: A, flow: sideways, fields: []}]", "flow is rows or columns"),
     ("[1, 2]", "mapping"),
     ("groups: [{title: A, fields: [{obj: '0x2000'}]}]\nmatch: {edss: x}", "unknown"),
 ])
@@ -148,6 +149,9 @@ def test_the_panel_reaches_the_page_for_the_device_it_matches(tmp_path):
     assert [g["open"] for g in panel["groups"]] == [True, False]  # collapsed: true
     assert panel["groups"][0]["fields"][0] == {
         "idx": "0x2040", "sub": "01", "label": "Working", "unit": "cN",
+        # what the device calls it, for the hover — the label is what this
+        # box calls it, and the two are different sentences
+        "name": "Product identification/Product code",
         "rw": True, "widget": "number", "base": "dec", "wo": False,
         "val": "", "src": "", "age": 0.0,
     }
@@ -618,9 +622,9 @@ groups:
 """
 
 
-def _bench_with_text_eds(tmp_path) -> Bench:
-    file = tmp_path / "vendor.panel.yaml"
-    file.write_text(TEXT_PANEL, encoding="utf-8")
+def _bench_with_text_eds(tmp_path, panel: str = TEXT_PANEL, db: str = "test.db") -> Bench:
+    file = tmp_path / f"vendor{db}.panel.yaml"
+    file.write_text(panel, encoding="utf-8")
 
     class PanelPlugin(BenchPlugin):
         name = "sample"
@@ -628,7 +632,7 @@ def _bench_with_text_eds(tmp_path) -> Bench:
         def object_panels(self):
             return [file]
 
-    bench = Bench(Db(tmp_path / "test.db"), plugins=[PanelPlugin()])
+    bench = Bench(Db(tmp_path / db), plugins=[PanelPlugin()])
     seed_test_registry(bench)
     for entry in bench.db.eds_list():
         if entry["enabled"]:
@@ -705,6 +709,50 @@ def test_a_write_only_field_is_marked_so_the_page_offers_no_read(tmp_path):
     name, counter, motor, velocity = _fields(bench)
     assert motor["wo"] is True
     assert [f["wo"] for f in (name, counter, velocity)] == [False, False, False]
+
+
+def test_a_row_carries_the_name_the_device_gives_the_object(tmp_path):
+    """The label is the file author's word for the row and the first thing
+    a narrow window cuts off, so the hover has to be able to say what the
+    row is without it. The name follows the rule every other view uses —
+    the firmware's word where a plugin has one, the EDS's otherwise."""
+    bench = _bench_with_text_eds(tmp_path)
+    assert [f["name"] for f in _fields(bench)] == [
+        "Manufacturer device name", "Writable counter", "Start the motor test",
+        "Velocity actual value"]
+    # the label stays what the file called it — the name is beside it, not
+    # instead of it
+    assert [f["label"] for f in _fields(bench)][:2] == ["Device name", "Counter"]
+
+
+# -- which way a box fills its columns ---------------------------------------
+
+def test_a_box_says_which_way_its_values_fill_the_columns():
+    """Across is the default and what every panel written so far meant.
+    Down is for the boxes where inserting a value should move the ones
+    below it and leave the other column alone."""
+    panel = parse_panel("""
+groups:
+  - title: Across
+    cols: 2
+    fields: [{obj: "0x2000"}]
+  - title: Down
+    cols: 2
+    flow: columns
+    fields: [{obj: "0x2001"}]
+""")
+    assert [g.flow for g in panel.groups] == ["rows", "columns"]
+
+
+def test_the_way_a_box_fills_reaches_the_page(tmp_path):
+    """It is a layout the browser does, so the only thing the core owes it
+    is the word — and a box that never says it still says "rows"."""
+    down = _bench_with_text_eds(
+        tmp_path, TEXT_PANEL.replace("    fields:", "    flow: columns\n    fields:"),
+        db="down.db")
+    assert down.snapshot()["objects"]["panel"]["groups"][0]["flow"] == "columns"
+    across = _bench_with_text_eds(tmp_path)
+    assert across.snapshot()["objects"]["panel"]["groups"][0]["flow"] == "rows"
 
 
 # -- an object that is a bit pattern, not a quantity -------------------------
