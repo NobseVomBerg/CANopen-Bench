@@ -975,12 +975,27 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
     // further left — it has to hold the firmware's own names — but its
     // right edge is the others'.
     if (f.widget === 'enum') {
+      // A dropdown on a value nobody can write is a control that does
+      // nothing: it opens, it offers the device's other states, and
+      // picking one changes neither the device nor the page. Read-only
+      // shows the name the same way a read-only number shows its number.
+      const chosen = (f.options || []).find((o) => o[0] === f.val);
+      if (!f.rw) {
+        return html`
+          <div style=${CELL}>
+            ${head}
+            <span title=${panelWhen(f)}
+              style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 7px;border-radius:4px;min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;box-sizing:border-box;text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosen ? chosen[1] : (f.val || '—')}</span>
+            ${unit}
+            ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}
+          </div>`;
+      }
       return html`
         <div style=${CELL}>
           ${head}
           <${OptionSelect} value=${f.val} options=${f.options}
             style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;outline:none;flex:none`}
-            onPick=${(v) => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, val: v })} />
+            onPick=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, lane: f.lane, val: v })} />
           ${unit}
           ${writeBtn}
         </div>`;
