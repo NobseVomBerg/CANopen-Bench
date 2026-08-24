@@ -224,6 +224,18 @@ def test_the_panel_view_leaves_the_favorites_out():
     assert app.count("view !== 'panel' && html`") == 2   # divider and column
 
 
+def test_a_value_nobody_can_write_is_not_offered_as_a_dropdown():
+    """A select on a read-only object opens, offers the device's other
+    states, and picking one changes neither the device nor the page. The
+    name is shown the way a read-only number shows its number."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "if (!f.rw) {" in app, "the enum branch does not split on writability"
+    # …and a pick from the one that is writable says which lane it was:
+    # several can sit on one object, and the address alone would stage
+    # whichever the core happened to list first
+    assert "lane: f.lane" in app
+
+
 def test_a_value_is_not_dimmed_for_being_a_minute_old():
     """Age belongs in the tooltip, which says it in words. Fading the
     number instead makes every box that has not just been read look like

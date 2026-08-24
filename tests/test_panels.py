@@ -243,6 +243,8 @@ groups:
     fields:
       - {label: Mode,   obj: "0x2040:01", widget: enum, rw: true}
       - {label: Locked, obj: "0x2040:01", widget: flag, bit: 4, rw: true}
+      - {label: Speed,  obj: "0x2040:01", widget: enum, lane: eSpeed, rw: true}
+      - {label: Shown,  obj: "0x2040:01", widget: enum}
 """
 
 
@@ -260,7 +262,10 @@ class _FieldPlugin(BenchPlugin):
 
     def object_fields(self, symbols):
         from canopen_bench.values import Field
-        return {"0x2040:01": [Field(table="eMode", mask=0x0F)]}
+        # two lanes of one word, the way a status assembled out of a mode
+        # and a selection is one object with two names in it
+        return {"0x2040:01": [Field(table="eMode", mask=0x0F),
+                              Field(table="eSpeed", mask=0xF00)]}
 
 
 def _bench_with_widgets(tmp_path) -> Bench:
@@ -271,7 +276,9 @@ def _bench_with_widgets(tmp_path) -> Bench:
     # vendors' identically named tables apart
     (bench.symbols_dir / "fieldy").mkdir(parents=True, exist_ok=True)
     (bench.symbols_dir / "fieldy" / "modes.h").write_text(
-        "typedef enum eMode { eMode_Off = 0, eMode_Run = 2 } eMode;\n", encoding="utf-8")
+        "typedef enum eMode { eMode_Off = 0, eMode_Run = 2 } eMode;\n"
+        "typedef enum eSpeed { eSpeed_Slow = 1, eSpeed_Fast = 3 } eSpeed;\n",
+        encoding="utf-8")
     bench.dispatch("symbols_reload", {})
     write_seed_eds_files(bench)
     connect_and_scan(bench)
@@ -305,6 +312,32 @@ def test_a_value_no_symbol_names_is_shown_rather_than_snapped_to_one(tmp_path):
     mode = _fields(bench)[0]
     assert mode["val"] == "7"
     assert ["7", "0x7"] in mode["options"]
+
+
+def test_a_second_lane_of_one_word_is_its_own_box_row(tmp_path):
+    """A status word is a mode, a selection and a keylock packed into one
+    object. Without a way to name the lane, a box could only ever show the
+    first of them — a third of the word, saying nothing about the rest.
+
+    The name is the symbol table behind the lane: the firmware's own word
+    for what those bits hold, so a panel points at one without anybody
+    inventing a second name for it."""
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x312"      # mode 2, bit 4, speed lane 3
+    mode, _locked, speed, _shown = _fields(bench)
+    assert mode["val"] == "2" and ["2", "Run"] in mode["options"]
+    assert speed["val"] == "3" and ["3", "Fast"] in speed["options"]
+    assert speed["lane"] == "eSpeed", "the pick has to say which lane it was"
+
+
+def test_a_lane_stages_only_its_own_bits(tmp_path):
+    """Two enums on one object, and the address alone does not say which.
+    Staging the wrong one would write the speed into the mode."""
+    bench = _bench_with_widgets(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x312"
+    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01",
+                                 "lane": "eSpeed", "val": "1"})
+    assert bench.obj_vals["0x2040:01"] == "0x112"   # speed 3 -> 1, rest untouched
 
 
 def test_picking_a_name_keeps_the_bits_it_does_not_own(tmp_path):
@@ -346,6 +379,9 @@ def test_part_of_a_value_nobody_has_read_is_refused_not_guessed(tmp_path):
     ("groups: [{title: A, fields: [{obj: '0x2000', widget: flag, bit: 44}]}]", "0…31"),
     ("groups: [{title: A, fields: [{obj: '0x2000', bit: 3}]}]", "belongs to a flag"),
     ("groups: [{title: A, fields: [{obj: '0x2000', widget: enum, unit: mA}]}]", "belong to a number"),
+    ("groups: [{title: A, fields: [{obj: '0x2000', lane: x}]}]", "belongs to an enum"),
+    ("groups: [{title: A, fields: [{obj: '0x2000', widget: flag, bit: 1, lane: x}]}]",
+     "belongs to an enum"),
 ])
 def test_a_widget_that_cannot_mean_what_it_says_is_an_error(text, complaint):
     with pytest.raises(PanelError) as caught:
