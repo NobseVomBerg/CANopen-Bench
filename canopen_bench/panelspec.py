@@ -52,7 +52,7 @@ import yaml
 from .values import Quantity, _digits_for
 
 #: what a field may say — anything else is a typo, and typos are loud here
-_FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit"}
+_FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit", "lane"}
 _WIDGETS = {"number", "enum", "flag"}
 _GROUP_KEYS = {"title", "fields", "cols", "collapsed", "when"}
 _WHEN_KEYS = {"obj", "bit", "value"}
@@ -107,6 +107,13 @@ class PanelField:
     #: bit itself — a status word does not need a table to have bit 3.
     widget: str = "number"
     bit: int | None = None
+    #: which of the object's declared fields this dropdown shows
+    #: (``BenchPlugin.object_fields``), named by its symbol table or by
+    #: its label. A status word can be a mode, a selection and a keylock
+    #: packed into one object; without a name a box can only ever show
+    #: the first of them. Empty means the first, which is every object
+    #: that has just one.
+    lane: str = ""
 
     @property
     def key(self) -> str:
@@ -222,6 +229,10 @@ def _fields(raw, where: str) -> list[PanelField]:
                 raise PanelError(f"{at}: bit must be 0…31")
         elif bit is not None:
             raise PanelError(f"{at}: bit belongs to a flag, not to a {widget}")
+        lane = str(item.get("lane", ""))
+        if lane and widget != "enum":
+            raise PanelError(f"{at}: lane names one of an object's declared "
+                             f"fields and belongs to an enum, not to a {widget}")
         # a scale on a name or a bit would have to mean something, and there
         # is nothing it could mean
         if widget != "number" and (scale != 1.0 or "digits" in item or item.get("unit")):
@@ -235,6 +246,7 @@ def _fields(raw, where: str) -> list[PanelField]:
             rw=bool(item.get("rw", False)),
             widget=widget,
             bit=bit if widget == "flag" else None,
+            lane=lane,
         ))
     return out
 
