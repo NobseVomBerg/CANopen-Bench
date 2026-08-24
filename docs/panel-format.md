@@ -108,6 +108,7 @@ read asks for the condition objects too, so one Read settles them.
 | `widget` | optional | `number` (default), `enum` or `flag` — see below |
 | `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
 | `lane` | enum only | Which of the object's declared fields this one shows, named by its symbol table or its label. Omitted takes the first |
+| `parts` | number only | The readings of this value, where it is a word assembled out of several — each an `enum` or a `flag`, each without an `obj` of its own. Drawn under the row that owns the object |
 | `base` | number only | `dec` (default) or `hex` — which base the value is shown in. Display only; typed input is hex only where it says `0x` |
 
 A field that gives neither `unit` nor `scale` takes whatever the plugin
@@ -152,13 +153,33 @@ other states and changes neither the device nor the page.
 word assembled out of a mode, a speed and a lock bit is one object with
 several names in it, and a box that could only ever show the first showed
 a quarter of the word without saying so. One row per lane, and a `flag`
-for the bit beside them:
+for the bit beside them — written as `parts` of the value they read:
 
 ```yaml
-      - {label: Mode,   obj: "0x2011:00", widget: enum, lane: eMode}
-      - {label: Speed,  obj: "0x2011:00", widget: enum, lane: eSpeed}
-      - {label: Locked, obj: "0x2011:00", widget: flag, bit: 24}
+      - label: Status
+        obj: "0x2011:00"
+        base: hex
+        parts:
+          - {label: Locked, widget: flag, bit: 24}
+          - {label: Mode,   widget: enum, lane: eMode}
+          - {label: Speed,  widget: enum, lane: eSpeed}
 ```
+
+A part carries no `obj`: it reads the value of the row above it, and one
+that pointed somewhere else would be a field rather than a part. Writing
+the address once is also what makes them a group — four rows that happen
+to repeat one address are four objects as far as anything reading the
+file can tell.
+
+The box draws them as one: the row that owns the object keeps the ⟳ and
+the address, and the parts hang under it, indented against a hairline,
+without a ⟳ of their own. One Read fetches the word and every reading of
+it, because there is one object underneath.
+
+A part is `enum` or `flag` — one reading of a value. A plain number as a
+part would be the whole value again, which is the row it is already under.
+The row that owns them shows the value itself, and `base: hex` is usually
+right there: a word that has parts is a bit pattern.
 
 A lane is named by the symbol table behind it — the firmware's own word
 for what those bits hold, so nothing has to be invented to point at it.
@@ -167,15 +188,14 @@ LED enum look like, the plugin's `label` tells them apart and `lane`
 takes that instead.
 
 Where a lane is writable, staging one changes its bits and leaves the
-rest of the word alone — the same read-modify-write a flag does.
-
-Both write the whole object, so both fold the change into the value last
-read and leave the rest of it alone. A part of a value nobody has read is
+rest of the word alone — the same read-modify-write a flag does. Both
+write the whole object, so both fold the change into the value last read
+and leave the rest of it alone. A part of a value nobody has read is
 refused rather than guessed — a checkbox that assumed zeros would clear
 every other flag in the register.
 
-Several fields may sit on the same object: a mode lane and the flags
-beside it are the normal case.
+Fields may still sit on the same object without being parts of one, which
+is what to write where they are not readings of one word.
 
 Values are shown in decimal unless the field says otherwise. The object
 table's hex/dec chip is a developer's reading habit; a box that says `mA`
