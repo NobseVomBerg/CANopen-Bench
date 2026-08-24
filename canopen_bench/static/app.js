@@ -945,6 +945,10 @@ const VALUE_W = 92;
 //: takes comes off the label beside it
 const ENUM_MAX = 170;
 
+//: every row a box draws — its values, and the readings hung under the
+//: ones that are a word assembled out of several
+const everyRow = (g) => g.fields.flatMap((f) => [f, ...(f.parts || [])]);
+
 function PanelBox({ g, busy, anyUnit, anyWrite }) {
   // The unit and Write columns are reserved for the whole panel, not per
   // box: a page where the boxes with a unit end 40px short of the boxes
@@ -958,7 +962,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
   // a cell is never split across the fold
   const down = g.flow === 'columns';
   const cellStyle = down ? `${CELL};break-inside:avoid;margin-bottom:2px` : CELL;
-  const cell = (f) => {
+  const cell = (f, part, style) => {
     const unit = anyUnit
       ? html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`
       : '';
@@ -970,17 +974,18 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
       .filter(Boolean).join(' · ');
     // No ⟳ where the EDS says write-only: that read can only abort, and a
     // button whose one outcome is an error in the log is worse than no
-    // button. The column stays, empty, so the labels of a box still line
-    // up — and it keeps the hover in reach, since that is what says which
-    // object a row is.
+    // button. A part has none either — it is bits of the row above it, and
+    // that row's ⟳ already fetches them. The column stays, empty, so the
+    // labels of a box still line up — and it keeps the hover in reach,
+    // since that is what says which object a row is.
     const head = html`
-      ${f.wo
-        ? html`<span title=${`${who} — write-only, nothing to read`}
+      ${part || f.wo
+        ? html`<span title=${part ? who : `${who} — write-only, nothing to read`}
             style="width:9px;flex:none"></span>`
         : html`<span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
             title=${`read ${who} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>`}
       <span title=${who}
-        style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
+        style="flex:1;min-width:0;color:${part ? 'var(--dim)' : 'var(--mid)'};font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
     const writeBtn = f.rw ? html`
       <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
         style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
@@ -1001,7 +1006,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
       const chosen = (f.options || []).find((o) => o[0] === f.val);
       if (!f.rw) {
         return html`
-          <div style=${cellStyle}>
+          <div style=${style || cellStyle}>
             ${head}
             <span title=${panelWhen(f)}
               style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 7px;border-radius:4px;min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;box-sizing:border-box;text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosen ? chosen[1] : (f.val || '—')}</span>
@@ -1010,7 +1015,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
           </div>`;
       }
       return html`
-        <div style=${cellStyle}>
+        <div style=${style || cellStyle}>
           ${head}
           <${OptionSelect} value=${f.val} options=${f.options}
             style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;outline:none;flex:none`}
@@ -1021,7 +1026,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
     }
     if (f.widget === 'flag') {
       return html`
-        <div style=${cellStyle}>
+        <div style=${style || cellStyle}>
           ${head}
           <span onClick=${() => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, bit: f.bit, on: !f.on })}
             title=${`bit ${f.bit} of ${f.idx}:${f.sub}`}
@@ -1033,7 +1038,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
         </div>`;
     }
     return html`
-      <div style=${cellStyle}>
+      <div style=${style || cellStyle}>
         ${head}
         ${f.rw ? html`
           <${SyncInput} value=${f.val} title=${panelWhen(f) + ' · type to stage a new one, Write sends it'}
@@ -1054,6 +1059,19 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
           ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}`}
       </div>`;
   };
+  // A value assembled out of several is one cell, not several: the row
+  // that owns the object, then its readings under it, indented and hung
+  // off a hairline. The indent is the weakest signal that says "these
+  // belong to that" — which is the point. A second border inside a box
+  // that already sits in a column inside a border reads as a mistake in
+  // the layout, and the parts' values would leave the edge every other
+  // value in the box ends at.
+  const block = (f) => (f.parts && f.parts.length ? html`
+    <div style="${down ? 'break-inside:avoid;margin-bottom:2px;' : ''}display:flex;flex-direction:column;gap:2px;min-width:0;max-width:${FIELD_MAX}px">
+      ${cell(f, false, CELL)}
+      ${f.parts.map((p) => cell(p, true,
+        `${CELL};padding-left:15px;margin-left:4px;border-left:1px solid var(--bd)`))}
+    </div>` : cell(f));
   // break-inside, because the page is a column layout rather than a grid:
   // a grid aligns rows, so one tall box leaves a hole beside it as high as
   // itself. Columns pack top to bottom and have no rows to align.
@@ -1065,7 +1083,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
           style="cursor:pointer;font-weight:600;font-size:12px;flex:1;min-width:0;display:flex;align-items:center;gap:7px">
           <span style="color:var(--faint);font-size:10px">${g.open ? '▾' : '▸'}</span>${g.title}
         </span>
-        <span style="font:10px ${MONO};color:var(--faint)">${g.fields.length}</span>
+        <span style="font:10px ${MONO};color:var(--faint)">${everyRow(g).length}</span>
         ${g.open && html`
           <span class="hv-b" onClick=${() => !busy && send('panel_read', { group: g.title })}
             title="read every value in this box"
@@ -1090,7 +1108,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
         <div style=${down
             ? `column-count:${g.cols};column-width:${FIELD_MIN}px;column-gap:18px;padding:8px 12px 8px`
             : `display:grid;grid-template-columns:repeat(auto-fill,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px`}>
-          ${g.fields.map(cell)}
+          ${g.fields.map(block)}
         </div>`}
     </div>`;
 }
@@ -1237,9 +1255,12 @@ function ObjectsPage({ s, ui, setUi }) {
              each box starts where the one above it ended. */}
       <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px">
         <div style="columns:${PANEL_COL}px;column-gap:12px">
+          ${''/* the reserved columns count the parts too: a Write button
+                or a unit inside one is a column every other row in every
+                other box has to leave room for, the same as any row's */}
           ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy}
-            anyUnit=${panel.groups.some((x) => x.fields.some((f) => f.unit))}
-            anyWrite=${panel.groups.some((x) => x.fields.some((f) => f.rw))} />`)}
+            anyUnit=${panel.groups.some((x) => everyRow(x).some((f) => f.unit))}
+            anyWrite=${panel.groups.some((x) => everyRow(x).some((f) => f.rw))} />`)}
         </div>
       </div>`,
   ];
@@ -1254,7 +1275,7 @@ function ObjectsPage({ s, ui, setUi }) {
           style="display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:${g.open ? 'var(--tx)' : 'var(--faint)'}">
           <span style="color:var(--faint);font-size:10px">${g.open ? '▾' : '▸'}</span>
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.title}</span>
-          <span style="font:10px ${MONO};color:var(--faint)">${g.fields.length}</span>
+          <span style="font:10px ${MONO};color:var(--faint)">${everyRow(g).length}</span>
         </div>`)}
       ${view !== 'panel' && !s.objects.groups.length && html`
         <div style="font-size:11px;color:var(--faint);line-height:1.5;padding:4px">${s.objects.hint}</div>`}
