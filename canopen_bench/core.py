@@ -3507,8 +3507,15 @@ class Bench:
         # widgets below all mean numbers, so this is the whole of it. A
         # value that is already a word — the trace decodes SDO answers and
         # stores one — passes through, since it does not parse as hex
+        # what the device itself calls this object, for the hover: a box
+        # labels a row the way the file's author reads it, and at a narrow
+        # window that label is the first thing the row cuts off. The name
+        # rule is the one every other view uses — the firmware's word for
+        # it, the EDS's where no plugin has one (_label)
+        name = self._label(f.idx, f.sub, info.name if info is not None else "")
         if raw and f.widget == "number" and info is not None and info.is_text:
             return {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": "",
+                    "name": name, "wo": info.access == "wo",
                     "rw": f.rw, "widget": "number", "val": _hex_to_text(raw) or str(raw),
                     "src": src, "age": round(age, 1)}
         # a unit and a scale belong to a number; the widgets that mean a
@@ -3524,6 +3531,7 @@ class Bench:
         # back what you see and it means what it showed
         register = _typed_number(raw or "") if f.base == "hex" else None
         out = {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": q.unit,
+               "name": name,
                "rw": f.rw, "widget": f.widget, "base": f.base,
                # an object the EDS says is write-only has nothing to fetch:
                # the SDO could only abort, and a ⟳ that can only fail is a
@@ -3594,6 +3602,7 @@ class Bench:
             "groups": [{
                 "title": g.title,
                 "cols": g.cols,
+                "flow": g.flow,
                 "open": self._panel_open(panel, g),
                 "fields": [self._panel_field_view(f, node) for f in g.fields],
             } for g in self._panel_groups(panel, node)],

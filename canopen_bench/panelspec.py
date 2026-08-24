@@ -59,7 +59,10 @@ _FIELD_KEYS = {"label", "obj", "unit", "scale", "digits", "rw", "widget", "bit",
                "lane", "base"}
 _WIDGETS = {"number", "enum", "flag"}
 _BASES = {"dec", "hex"}
-_GROUP_KEYS = {"title", "fields", "cols", "collapsed", "when"}
+_GROUP_KEYS = {"title", "fields", "cols", "flow", "collapsed", "when"}
+
+#: how the values of a box fill its columns
+_FLOWS = ("rows", "columns")
 _WHEN_KEYS = {"obj", "bit", "value"}
 _PANEL_KEYS = {"name", "match", "groups"}
 _MATCH_KEYS = {"eds", "name"}
@@ -192,6 +195,9 @@ class PanelGroup:
     title: str
     fields: list[PanelField] = field(default_factory=list)
     cols: int = 1
+    #: which way the values fill the columns — ``rows`` across, then down;
+    #: ``columns`` down the first, then the next
+    flow: str = "rows"
     collapsed: bool = False
     when: PanelCondition | None = None
 
@@ -352,10 +358,14 @@ def parse_panel(text: str, source: str = "") -> Panel:
         if not title:
             raise PanelError(f"{at}: needs a title")
         at = f"group {title!r}"
+        flow = str(item.get("flow", "rows")).strip().lower()
+        if flow not in _FLOWS:
+            raise PanelError(f"{at}: flow is {' or '.join(_FLOWS)}, not {flow!r}")
         groups.append(PanelGroup(
             title=title,
             fields=_fields(item.get("fields") or [], at),
             cols=max(1, min(4, int(item.get("cols", 1)))),
+            flow=flow,
             collapsed=bool(item.get("collapsed", False)),
             when=_when(item.get("when"), at),
         ))

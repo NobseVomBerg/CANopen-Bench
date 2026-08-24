@@ -953,22 +953,33 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
   // label in the worst case, out of a cell that is a fixed 520px wide, so
   // there is room for it now. There was not when the cells sized
   // themselves and this was per box.
+  // a box that fills its columns downwards is a column layout rather than
+  // a grid, and there a row gap is the cell's own margin. break-inside so
+  // a cell is never split across the fold
+  const down = g.flow === 'columns';
+  const cellStyle = down ? `${CELL};break-inside:avoid;margin-bottom:2px` : CELL;
   const cell = (f) => {
     const unit = anyUnit
       ? html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`
       : '';
+    // The address, then what the device calls the object, then what this
+    // box calls the row. A label is the first thing a narrow window cuts
+    // off — and the row it cut is often one of several on one object, so
+    // the address alone does not say which one it was.
+    const who = [`${f.idx}:${f.sub}`, f.name, f.name === f.label ? '' : f.label]
+      .filter(Boolean).join(' · ');
     // No ⟳ where the EDS says write-only: that read can only abort, and a
     // button whose one outcome is an error in the log is worse than no
     // button. The column stays, empty, so the labels of a box still line
-    // up — and it keeps the address in reach, since the hover is what
-    // says which object a row is.
+    // up — and it keeps the hover in reach, since that is what says which
+    // object a row is.
     const head = html`
       ${f.wo
-        ? html`<span title=${`${f.idx}:${f.sub} — write-only, nothing to read`}
+        ? html`<span title=${`${who} — write-only, nothing to read`}
             style="width:9px;flex:none"></span>`
         : html`<span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
-            title=${`read ${f.idx}:${f.sub} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>`}
-      <span title=${`${f.idx}:${f.sub}`}
+            title=${`read ${who} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>`}
+      <span title=${who}
         style="flex:1;min-width:0;color:var(--mid);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
     const writeBtn = f.rw ? html`
       <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
@@ -990,7 +1001,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
       const chosen = (f.options || []).find((o) => o[0] === f.val);
       if (!f.rw) {
         return html`
-          <div style=${CELL}>
+          <div style=${cellStyle}>
             ${head}
             <span title=${panelWhen(f)}
               style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 7px;border-radius:4px;min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;box-sizing:border-box;text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosen ? chosen[1] : (f.val || '—')}</span>
@@ -999,7 +1010,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
           </div>`;
       }
       return html`
-        <div style=${CELL}>
+        <div style=${cellStyle}>
           ${head}
           <${OptionSelect} value=${f.val} options=${f.options}
             style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;outline:none;flex:none`}
@@ -1010,7 +1021,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
     }
     if (f.widget === 'flag') {
       return html`
-        <div style=${CELL}>
+        <div style=${cellStyle}>
           ${head}
           <span onClick=${() => f.rw && send('panel_set', { idx: f.idx, sub: f.sub, bit: f.bit, on: !f.on })}
             title=${`bit ${f.bit} of ${f.idx}:${f.sub}`}
@@ -1022,7 +1033,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
         </div>`;
     }
     return html`
-      <div style=${CELL}>
+      <div style=${cellStyle}>
         ${head}
         ${f.rw ? html`
           <${SyncInput} value=${f.val} title=${panelWhen(f) + ' · type to stage a new one, Write sends it'}
@@ -1061,13 +1072,24 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
             style="${btn.acc}font-size:10.5px;padding:2px 9px;border-radius:4px;cursor:${busy ? 'default' : 'pointer'};opacity:${busy ? 0.5 : 1}">Read</span>`}
       </div>
       ${g.open && html`
-        ${''/* auto-fill, not auto-fit: auto-fit collapses a track nothing
-              lands in, so the last row of an odd-numbered box — and every
-              row of a one-field box — stretched to the full width and put
-              its value a hundred pixels right of the value above it. The
-              empty track stays, and every cell in every box is the same
-              width. */}
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px">
+        ${''/* Two ways to fill the same columns, and the file says which.
+              Across (the default) is a grid: auto-fill, not auto-fit —
+              auto-fit collapses a track nothing lands in, so the last row
+              of an odd-numbered box, and every row of a one-field box,
+              stretched to the full width and put its value a hundred
+              pixels right of the value above it. The empty track stays,
+              and every cell in every box is the same width.
+
+              Downwards is a column layout, which is the only one that
+              actually balances: the first half of the values goes down
+              the left column and the rest down the right, so inserting a
+              value moves the ones below it and leaves the other column
+              alone. Both narrow the same way — column-width is the same
+              floor the grid's minmax has, so a page too narrow for two
+              columns gets one either way. */}
+        <div style=${down
+            ? `column-count:${g.cols};column-width:${FIELD_MIN}px;column-gap:18px;padding:8px 12px 8px`
+            : `display:grid;grid-template-columns:repeat(auto-fill,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px`}>
           ${g.fields.map(cell)}
         </div>`}
     </div>`;
