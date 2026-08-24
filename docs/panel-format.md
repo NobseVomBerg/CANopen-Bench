@@ -96,6 +96,7 @@ read asks for the condition objects too, so one Read settles them.
 | `widget` | optional | `number` (default), `enum` or `flag` — see below |
 | `bit` | flag only | Which bit of the value the checkbox stands for, 0…31 |
 | `lane` | enum only | Which of the object's declared fields this one shows, named by its symbol table or its label. Omitted takes the first |
+| `base` | number only | `dec` (default) or `hex` — which base the value is shown in. Display only; typed input is hex only where it says `0x` |
 
 A field that gives neither `unit` nor `scale` takes whatever the plugin
 declared for that address (`BenchPlugin.object_units`,
@@ -164,10 +165,40 @@ every other flag in the register.
 Several fields may sit on the same object: a mode lane and the flags
 beside it are the normal case.
 
-Values are shown in decimal, always. The object table's hex/dec chip is a
-developer's reading habit; a box that says `mA` is read by someone who
-wants 167, not 0xA7. A value that is not a number — a device name, a
-version string — is passed through as it is.
+Values are shown in decimal unless the field says otherwise. The object
+table's hex/dec chip is a developer's reading habit; a box that says `mA`
+is read by someone who wants 167, not 0xA7. A value that is not a
+number — a device name, a version string — is passed through as it is.
+
+### base
+
+Some objects are not quantities. A command word where each bit asks the
+device for something else is written in hex in its documentation, thought
+about in hex, and made harder to read by being converted:
+
+```yaml
+      - {label: Command, obj: "0x2012:00", base: hex, rw: true}
+```
+
+`base: hex` shows the value as `0x0208`, padded to the width the EDS
+declares. It says nothing about what is typed back: hex is written `0x20`
+here exactly as everywhere else in the bench, and bare digits are
+decimal, always. A field where the same digits meant different things
+depending on a key in a file would be the one number on the page nobody
+could check — and the `0x` the box prints is what closes the loop anyway:
+type back what it shows and it means what it showed.
+
+It belongs to a `number`; an `enum` and a `flag` show no number to write.
+`scale`, `digits` and `unit` are refused beside it: hex says "this is a
+bit pattern" and they say "this is a quantity", and a field cannot be
+both.
+
+Not every device documents such a word as bits somebody can name. Where
+it does — and where the plugin declares the tables — `widget: enum` with
+one `lane` per part is the better box, because it says what the bits mean
+instead of what they are. `base: hex` is for the rest: the command word
+whose bits are a table in a manual, sent as a pattern and answered in a
+status object rather than read back.
 
 `scale` and `unit` are separate on purpose: `scale` computes, `unit`
 labels. A device storing tenths of a centinewton shows 16.0 with
@@ -225,8 +256,15 @@ those bytes are nineteen digits of nothing.
 
 Write-only objects are skipped by a box read and a page read — the SDO
 could only abort, and a row of aborts in the log reads as a fault when it
-is the EDS telling the truth. The ⟳ at the field still asks, because that
-one is somebody deciding to.
+is the EDS telling the truth. They have no ⟳ of their own either: a
+button whose only possible outcome is an error in the log is worse than
+no button. The column it sat in stays empty rather than closing up, so
+the labels in a box still line up.
+
+A command word is read by watching what it does. A device that acts on
+each bit differently answers in its status, and the status is usually the
+object next door and usually in a PDO — so the box shows the result a
+frame later without anybody reading the object that caused it.
 
 ## What a panel does not do
 

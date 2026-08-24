@@ -148,7 +148,8 @@ def test_the_panel_reaches_the_page_for_the_device_it_matches(tmp_path):
     assert [g["open"] for g in panel["groups"]] == [True, False]  # collapsed: true
     assert panel["groups"][0]["fields"][0] == {
         "idx": "0x2040", "sub": "01", "label": "Working", "unit": "cN",
-        "rw": True, "widget": "number", "val": "", "src": "", "age": 0.0,
+        "rw": True, "widget": "number", "base": "dec", "wo": False,
+        "val": "", "src": "", "age": 0.0,
     }
 
 
@@ -612,7 +613,7 @@ groups:
     fields:
       - {label: Device name, obj: "0x1008:00"}
       - {label: Counter,     obj: "0x2000:00"}
-      - {label: Motor test,  obj: "0x2060:00", rw: true}
+      - {label: Motor test,  obj: "0x2060:00", base: hex, rw: true}
       - {label: Velocity,    obj: "0x2061:00", unit: rpm, rw: true}
 """
 
@@ -677,8 +678,7 @@ def test_a_unit_on_a_word_is_dropped_rather_than_printed(tmp_path):
 
 def test_a_page_read_leaves_the_write_only_objects_alone(tmp_path):
     """The SDO could only abort, and a row of aborts in the log reads as a
-    fault when it is the EDS telling the truth. The ⟳ at the field still
-    asks — that one is somebody deciding to."""
+    fault when it is the EDS telling the truth."""
     bench = _bench_with_text_eds(tmp_path)
     asked: list[str] = []
     real = bench.bus.sdo_read
@@ -693,6 +693,61 @@ def test_a_page_read_leaves_the_write_only_objects_alone(tmp_path):
     asyncio.run(go())
     assert "0x1008:00" in asked and "0x2000:00" in asked
     assert "0x2060:00" not in asked
+
+
+def test_a_write_only_field_is_marked_so_the_page_offers_no_read(tmp_path):
+    """A page read already skips it; the ⟳ beside the field used to ask
+    anyway, on the grounds that this one is somebody deciding to. What
+    they decide is an abort — the EDS says the object cannot be read at
+    all — so the button is gone and the page is told which fields those
+    are."""
+    bench = _bench_with_text_eds(tmp_path)
+    name, counter, motor, velocity = _fields(bench)
+    assert motor["wo"] is True
+    assert [f["wo"] for f in (name, counter, velocity)] == [False, False, False]
+
+
+# -- an object that is a bit pattern, not a quantity -------------------------
+
+def test_a_register_is_shown_in_the_base_its_documentation_uses(tmp_path):
+    """A command word is a table of bits in a manual. Shown in decimal it
+    is a number nobody wrote down anywhere, and every reading of it starts
+    by converting it back."""
+    bench = _bench_with_text_eds(tmp_path)
+    bench.obj_vals["0x2060:00"] = "0x00000208"
+    assert _fields(bench)[2]["val"] == "0x00000208"
+    # padded to the width the EDS declares, so the bits keep their places
+    bench.obj_vals["0x2060:00"] = "0x08"
+    assert _fields(bench)[2]["val"] == "0x00000008"
+
+
+def test_showing_a_value_in_hex_does_not_change_what_typing_one_means(tmp_path):
+    """`base` is the display and nothing else. Hex is written 0x20 in this
+    box like in every other, and bare digits are decimal — a field where
+    the same digits mean different things depending on a key in a file is
+    the one number on a page nobody can check.
+
+    The 0x the box prints closes the loop by itself: typing back what it
+    shows means what it showed."""
+    bench = _bench_with_text_eds(tmp_path)
+    bench.dispatch("panel_set", {"idx": "0x2060", "sub": "00", "val": "20"})
+    assert bench.obj_vals["0x2060:00"] == "0x00000014", "20 is twenty, here too"
+
+    bench.dispatch("panel_set", {"idx": "0x2060", "sub": "00", "val": "0x20"})
+    assert bench.obj_vals["0x2060:00"] == "0x00000020"
+    assert _fields(bench)[2]["val"] == "0x00000020"
+
+
+@pytest.mark.parametrize("field_line, message", [
+    ('- {obj: "0x2007:01", base: octal}', "unknown base"),
+    ('- {obj: "0x2007:01", base: hex, widget: enum}', "shows no number"),
+    ('- {obj: "0x2007:01", base: hex, unit: cN}', "bit pattern, not a quantity"),
+    ('- {obj: "0x2007:01", base: hex, scale: 0.1}', "bit pattern, not a quantity"),
+])
+def test_a_base_that_cannot_mean_anything_is_refused(field_line, message):
+    text = ("name: X\ngroups:\n  - title: G\n    fields:\n      " + field_line + "\n")
+    with pytest.raises(PanelError, match=message):
+        parse_panel(text)
 
 
 # -- numbers that carry a sign ----------------------------------------------
