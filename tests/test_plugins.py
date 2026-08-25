@@ -35,8 +35,9 @@ from canopen_bench.testcases import parse_testcase
 class FakePlugin(BenchPlugin):
     name = "fake"
 
-    def __init__(self, flow_dir: Path | None = None):
+    def __init__(self, flow_dir: Path | None = None, tc_dir: Path | None = None):
         self._flow_dir = flow_dir
+        self._tc_dir = tc_dir
 
     def adapters(self) -> list[dict]:
         return [{"key": "fake", "label": "Fake adapter", "sub": "test double",
@@ -55,6 +56,9 @@ class FakePlugin(BenchPlugin):
 
     def flow_dirs(self) -> list[Path]:
         return [self._flow_dir] if self._flow_dir else []
+
+    def testcase_dirs(self) -> list[Path]:
+        return [self._tc_dir] if self._tc_dir else []
 
 
 def test_plugin_adapter_card_listed_first(tmp_path):
@@ -1113,3 +1117,42 @@ def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
 
     assert not any("efs2_920" in entry["msg"] for entry in bench.logs), \
         "an existing name is left alone, whatever it is"
+
+
+# -- packaged test cases -----------------------------------------------------
+
+def _case(where: Path, name: str, ident: str) -> Path:
+    where.mkdir(parents=True, exist_ok=True)
+    path = where / name
+    path.write_text(f'id: "{ident}"\nname: from the plugin\n'
+                    f'steps: [{{nmt: start}}]\n', encoding="utf-8")
+    return path
+
+
+def test_a_plugins_test_cases_reach_the_catalog(tmp_path):
+    """A device family's cases belong with the plugin that knows the
+    family, the same as its panels and its headers: a bench that has the
+    plugin has the cases, without copying a folder or running a
+    converter."""
+    packaged = _case(tmp_path / "packaged", "TC7_from_plugin.yaml", "7")
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin(tc_dir=packaged.parent)])
+    assert (Path(bench.paths["tc"]) / "TC7_from_plugin.yaml").exists()
+    assert "7" in bench.testcases        # the catalog is keyed by id
+
+
+def test_a_packaged_case_is_refreshed_and_a_local_one_is_left_alone(tmp_path):
+    """Same rule as the headers, and for the same reason: the plugin is
+    where an edit to its own file belongs, and a bench whose cases are the
+    snapshot of the day the workspace was made is a bench running last
+    month's tests."""
+    packaged = _case(tmp_path / "packaged", "TC7_from_plugin.yaml", "7")
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin(tc_dir=packaged.parent)])
+    folder = Path(bench.paths["tc"])
+    mine = _case(folder, "TC8_mine.yaml", "8")
+
+    packaged.write_text(packaged.read_text().replace("from the plugin", "changed"),
+                        encoding="utf-8")
+    again = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin(tc_dir=packaged.parent)])
+    assert "changed" in (folder / "TC7_from_plugin.yaml").read_text()
+    assert mine.read_text().endswith("steps: [{nmt: start}]\n"), "a case nobody ships"
+    assert {"7", "8"} <= set(again.testcases)
