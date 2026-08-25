@@ -319,6 +319,17 @@ def _fields(raw, where: str, owner: tuple[str, str] | None = None) -> list[Panel
             if wrong:
                 raise PanelError(f"{at}: a part is one reading of the value — an "
                                  f"enum or a flag. {', '.join(wrong)} is neither")
+            # the object goes out whole, so the row that owns it carries
+            # the one Write that sends it. A writable part under a row
+            # that is not writable would be a control with no way to send
+            # what it stages
+            if not bool(item.get("rw", False)):
+                stranded = [p.label for p in parts if p.rw]
+                if stranded:
+                    raise PanelError(
+                        f"{at}: {', '.join(stranded)} can be changed but this row "
+                        f"cannot be written — a part is sent by the row that owns "
+                        f"the object, so that row needs rw as well")
         out.append(PanelField(
             label=str(item.get("label") or f"{idx}:{sub}"),
             idx=idx, sub=sub,
