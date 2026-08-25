@@ -978,12 +978,18 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
     // that row's ⟳ already fetches them. The column stays, empty, so the
     // labels of a box still line up — and it keeps the hover in reach,
     // since that is what says which object a row is.
+    // The same glyph either way, invisible where there is nothing to ask:
+    // a placeholder of some guessed width put every row that has no ⟳ four
+    // pixels left of the rows that have one, in a box whose whole point is
+    // that the labels line up. Transparent rather than hidden, so the
+    // hover still says which object the row is.
+    const quiet = part || f.wo;
     const head = html`
-      ${part || f.wo
-        ? html`<span title=${part ? who : `${who} — write-only, nothing to read`}
-            style="width:9px;flex:none"></span>`
-        : html`<span class="hv-acc" onClick=${() => send('obj_read', { idx: f.idx, sub: f.sub })}
-            title=${`read ${who} now`} style="color:var(--faint);cursor:pointer;flex:none">⟳</span>`}
+      <span class=${quiet ? '' : 'hv-acc'}
+        onClick=${quiet ? null : () => send('obj_read', { idx: f.idx, sub: f.sub })}
+        title=${quiet ? (part ? who : `${who} — write-only, nothing to read`)
+                      : `read ${who} now`}
+        style="color:${quiet ? 'transparent' : 'var(--faint)'};flex:none;${quiet ? '' : 'cursor:pointer'}">⟳</span>
       <span title=${who}
         style="flex:1;min-width:0;color:${part ? 'var(--dim)' : 'var(--mid)'};font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
     const writeBtn = f.rw ? html`
@@ -1066,11 +1072,20 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
   // that already sits in a column inside a border reads as a mistake in
   // the layout, and the parts' values would leave the edge every other
   // value in the box ends at.
+  // In a grid it has to say how many rows it is, or it takes one and the
+  // column beside it keeps a hole as tall as the group. `dense` then lets
+  // the values after it fill that column instead of starting below the
+  // group — without it the box balances no better for knowing the height.
   const block = (f) => (f.parts && f.parts.length ? html`
-    <div style="${down ? 'break-inside:avoid;margin-bottom:2px;' : ''}display:flex;flex-direction:column;gap:2px;min-width:0;max-width:${FIELD_MAX}px">
+    <div style="${down ? 'break-inside:avoid;margin-bottom:2px;' : `grid-row:span ${1 + f.parts.length};`}display:flex;flex-direction:column;gap:2px;min-width:0;max-width:${FIELD_MAX}px">
       ${cell(f, false, CELL)}
+      ${''/* 8px in, and the hairline where the ⟳ of the row above it is.
+            Enough to say "these belong to that" and little enough to keep
+            the labels in one flush column. It is not left to the ⟳ alone
+            to say it: the same construction fits a write-only register,
+            and there the row above has no ⟳ to hang the group off. */}
       ${f.parts.map((p) => cell(p, true,
-        `${CELL};padding-left:15px;margin-left:4px;border-left:1px solid var(--bd)`))}
+        `${CELL};padding-left:3px;margin-left:4px;border-left:1px solid var(--bd)`))}
     </div>` : cell(f));
   // break-inside, because the page is a column layout rather than a grid:
   // a grid aligns rows, so one tall box leaves a hole beside it as high as
@@ -1107,7 +1122,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
               columns gets one either way. */}
         <div style=${down
             ? `column-count:${g.cols};column-width:${FIELD_MIN}px;column-gap:18px;padding:8px 12px 8px`
-            : `display:grid;grid-template-columns:repeat(auto-fill,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px`}>
+            : `display:grid;grid-auto-flow:row dense;grid-template-columns:repeat(auto-fill,minmax(max(${FIELD_MIN}px, calc((100% - ${(g.cols - 1) * 18}px) / ${g.cols})),1fr));gap:2px 18px;padding:8px 12px 10px`}>
           ${g.fields.map(block)}
         </div>`}
     </div>`;
