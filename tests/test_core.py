@@ -282,7 +282,9 @@ def test_trace_annotation_abort_and_unknown_node(connected_bench):
     bench = connected_bench
     row = _trace_row("0x581", "80 00 30 00 00 00 02 06")
     bench._annotate_sdo(row)
-    assert row["val"] == "abort 0x06020000"
+    # in words as well as in hex: an abort is the device explaining itself,
+    # and the number explains nothing until somebody has the standard open
+    assert row["val"] == "abort 0x06020000 Object does not exist in the dictionary"
     other = _trace_row("0x62A", "40 00 10 00 00 00 00 00")  # node 42: not scanned
     bench._annotate_sdo(other)
     assert other["obj"] == "0x1000:00"  # index:sub still shown, no EDS name

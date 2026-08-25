@@ -2133,7 +2133,7 @@ function TraceTable({ s, cols, fmtTime }) {
           <div style="display:grid;grid-template-columns:${cols};height:${ROW_H}px;box-sizing:border-box;line-height:${ROW_H - 1}px;padding-left:18px;border-bottom:1px solid var(--bd2);font:11px ${MONO};background:${bg};color:${r.flag === 'red' ? 'var(--red)' : 'var(--mid)'}">
             <span style="color:var(--faint);${cell}">${fmtTime(r.time)}</span><span style=${cell}>${r.dir}</span><span style="color:var(--acc);${cell}">${r.cob}</span><span style=${cell}>${r.len}</span>${r.cls === 'SDO' && r.flag !== 'red' && r.data.length > 12
               ? html`<span style=${cell}>${r.data.slice(0, 12)}<span style="color:var(--hl);font-weight:600">${r.data.slice(12)}</span></span>`
-              : html`<span style=${cell}>${r.data}</span>`}<span style=${cell} title=${r.dec}>${r.dec}</span><span style="color:var(--hl);${cell}" title=${r.obj || ''}>${r.obj || ''}</span><span style="color:${(r.val || '').startsWith('abort') ? 'var(--red)' : 'var(--acc)'};${cell}">${r.val || ''}</span>
+              : html`<span style=${cell}>${r.data}</span>`}<span style=${cell} title=${r.dec}>${r.dec}</span><span style="color:var(--hl);${cell}" title=${r.obj || ''}>${r.obj || ''}</span><span title=${r.val || ''} style="color:${(r.val || '').startsWith('abort') ? 'var(--red)' : 'var(--acc)'};${cell}">${r.val || ''}</span>
           </div>`; })}
       </div>
     </div>
@@ -2148,7 +2148,12 @@ function TracePage({ s }) {
   // rows carry 6 decimals ("HH:MM:SS.ffffff"); ms mode cuts the last three.
   // Older captures may hold ms-only stamps — those render as-is either way.
   const fmtTime = (t) => (!usTime && t && t.length === 15) ? t.slice(0, 12) : t;
-  const cols = `${usTime ? '124px' : '96px'} 38px 60px 32px 200px 200px minmax(260px,420px) 92px`;
+  // The last column takes the slack instead of leaving it at the right
+  // edge of the window: it is where an abort says why it aborted, and
+  // "abort 0x05040000 SDO protocol timed out — no answer" cut to 92px is
+  // the number without the half that explains it. Nothing else on the row
+  // grows, so the columns before it stay where the eye expects them.
+  const cols = `${usTime ? '124px' : '96px'} 38px 60px 32px 200px 200px minmax(260px,420px) minmax(92px,1fr)`;
   const hide = s.trace.hide || [];
   const toggle = (f) => send('trace_filter', { hide: hide.includes(f) ? hide.filter((x) => x !== f) : [...hide, f] });
   const saved = s.trace.saved || [];

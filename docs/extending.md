@@ -63,6 +63,7 @@ only what you provide.
 | `device_panels()` | `list[DevicePanel]` | Sidebar boxes for a device family — front-panel mirror, virtual buttons, status LEDs |
 | `object_panels()` | `list[Path]` | Packaged `*.panel.yaml` files: the Objects page's panel view, where a device's values appear as named boxes with the unit and scaling no EDS carries ([panel-format.md](panel-format.md)). Read from the package, never copied into a workspace |
 | `emcy_codes()` | `dict[int, str]` | Vendor-/profile-specific EMCY error-code texts, merged over the built-in CiA-301 table (plugin wins on conflict) |
+| `emcy_mec_text(mec)` | `str` | What the device calls the manufacturer error code — the number in the five manufacturer bytes of an EMCY, which the standard leaves entirely to the device. The bench reads the frame, this names what it found. `""` for a code the plugin does not know; first plugin with an answer wins |
 | `actions(bench)` | `dict[str, callable]` | Extra API actions, dispatched as `<plugin>.<action>` — collision-free with core actions |
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
 | `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation; first plugin wins |
@@ -85,12 +86,13 @@ test case or flow resolves **at load time**, so a typo makes the file
 invalid in the catalog rather than failing mid-run; and a value read back
 can be rendered as `Running (4)` rather than `0x04`.
 
-Headers are seeded into `<workspace>/symbols/<plugin>/` and never
-overwritten afterwards — the copy there is the firmware actually under
-test, which is regularly newer than the plugin. The per-plugin
-subdirectory is also what keeps two vendors' `eObjIdx` apart;
-where they disagree, the bare name stops resolving and
-`$<plugin>:<NAME>` is the way through.
+Headers are copied into `<workspace>/symbols/<plugin>/` on every start,
+over whatever is there: a header is part of its plugin the way its panels
+are, and both are read from the package. The firmware actually under test
+goes in beside them under a name of its own and is left alone — that is
+what the folder is for besides looking at. The per-plugin subdirectory is
+also what keeps two vendors' `eObjIdx` apart; where they disagree, the
+bare name stops resolving and `$<plugin>:<NAME>` is the way through.
 
 Only a small subset of C is accepted: enums (including implicit
 successors and constant expressions over symbols already parsed, so

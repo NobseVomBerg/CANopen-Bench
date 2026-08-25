@@ -104,6 +104,45 @@ EMCY_CODES = {
 ERROR_REGISTER_BITS = ("generic", "current", "voltage", "temperature",
                        "communication", "device profile", "reserved", "manufacturer")
 
+# CiA-301 SDO abort codes. An abort is the device (or the bench) saying
+# exactly why a transfer failed, and the number is the whole of that
+# message — shown as a bare 0x05040000 it is one more thing to look up in
+# a standard nobody has open, and the two aborts that mean "the device did
+# not answer" and "that object does not exist" read identically.
+ABORT_CODES = {
+    0x05030000: "Toggle bit not alternated",
+    0x05040000: "SDO protocol timed out — no answer",
+    0x05040001: "Command specifier not valid or unknown",
+    0x05040002: "Invalid block size",
+    0x05040003: "Invalid sequence number",
+    0x05040004: "CRC error",
+    0x05040005: "Out of memory",
+    0x06010000: "Unsupported access to an object",
+    0x06010001: "Read access to a write-only object",
+    0x06010002: "Write access to a read-only object",
+    0x06020000: "Object does not exist in the dictionary",
+    0x06040041: "Object cannot be mapped to a PDO",
+    0x06040042: "Mapping would exceed the PDO length",
+    0x06040043: "General parameter incompatibility",
+    0x06040047: "General internal incompatibility in the device",
+    0x06060000: "Access failed due to a hardware error",
+    0x06070010: "Data type does not match, length does not match",
+    0x06070012: "Data type does not match, length too high",
+    0x06070013: "Data type does not match, length too low",
+    0x06090011: "Sub-index does not exist",
+    0x06090030: "Value range of parameter exceeded",
+    0x06090031: "Value of parameter written too high",
+    0x06090032: "Value of parameter written too low",
+    0x06090036: "Maximum value is less than minimum value",
+    0x060A0023: "Resource not available: SDO connection",
+    0x08000000: "General error",
+    0x08000020: "Data cannot be transferred or stored",
+    0x08000021: "Data cannot be transferred — local control",
+    0x08000022: "Data cannot be transferred — device state",
+    0x08000023: "No object dictionary present or generation failed",
+    0x08000024: "No data available",
+}
+
 # Built-in adapter cards: generic COTS hardware plus demo mode. Vendor- or
 # machine-specific adapters are contributed by plugins (BenchPlugin.adapters
 # + adapter_backends) and are listed before these.
