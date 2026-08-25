@@ -5799,6 +5799,13 @@ class Bench:
         before = dict(seeded)
         for plugin in self.plugins:
             for src_dir in plugin.symbol_dirs():
+                # a directory the plugin names and does not have is a
+                # packaging fault, and one that seeds nothing and says
+                # nothing looks exactly like a firmware with no tables in it
+                if not Path(src_dir).is_dir():
+                    self.log(f"SYM  {plugin.name} names {src_dir} and there is no such "
+                             f"directory — nothing to seed from", "emcy0")
+                    continue
                 dst_dir = self.symbols_dir / plugin.name
                 dst_dir.mkdir(parents=True, exist_ok=True)
                 for src in sorted(Path(src_dir).glob("*.h")):
