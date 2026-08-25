@@ -1124,6 +1124,7 @@ class Bench:
                 Path(p).mkdir(parents=True, exist_ok=True)
         self.paths = stored_paths
         self.testcases: dict[str, tclib.TestCase] = {}
+        self._seed_packaged_testcases()
         self._load_testcases(log=False)
         # The demo catalog comes with a few cases ticked, so that the shipped
         # demo shows what a selection looks like rather than an empty list.
@@ -2942,6 +2943,33 @@ class Bench:
             self._changed()
 
     # -- button-teach addressing (A-05) -------------------------------------
+    def _seed_packaged_testcases(self) -> None:
+        """The test cases a plugin ships, into the folder the catalog reads.
+
+        A device family's own cases belong with the plugin that knows the
+        family, the same as its panels and its headers — a bench that has
+        the plugin has the cases, without anyone copying a folder or
+        running a converter. Same rule as the headers: what a plugin ships
+        is written over on every start, and a file no plugin ships is left
+        alone, which is where hand-written cases live.
+
+        A case that has stopped shipping is not deleted. The folder is
+        also somebody's, and guessing which files in it were once ours is
+        exactly the bookkeeping the headers no longer do.
+        """
+        folder = Path(self.paths.get("tc") or "")
+        packaged = [d for p in self.plugins for d in p.testcase_dirs()]
+        if not packaged or not str(folder):
+            return
+        folder.mkdir(parents=True, exist_ok=True)
+        for src_dir in packaged:
+            if not Path(src_dir).is_dir():
+                continue
+            for src in sorted(Path(src_dir).glob("*.yaml")):
+                dst = folder / src.name
+                if not dst.exists() or dst.read_bytes() != src.read_bytes():
+                    shutil.copy2(src, dst)
+
     def _seed_default_flows(self) -> None:
         """Workspace flows dir with the shipped default procedures — from the
         core package and from every plugin's flow_dirs(); existing (possibly

@@ -321,9 +321,25 @@ class BenchPlugin:
     def symbol_dirs(self) -> list[Path]:
         """Directories with the device's own C headers, parsed into symbol
         tables (indices, sub-indices, enum values — see
-        ``canopen_bench/symbols.py``). Seeded into the workspace like flows,
-        so the operator can drop in the headers of the firmware actually
-        under test without waiting for a new plugin release."""
+        ``canopen_bench/symbols.py``).
+
+        Copied into the workspace on every start, over whatever is there:
+        a header belongs to its plugin the way its panels do, and the
+        plugin is where an edit to one belongs. A header no plugin ships —
+        the firmware actually under test, under a name of its own — is
+        left where it was put.
+        """
+        return []
+
+    def testcase_dirs(self) -> list[Path]:
+        """Directories with the family's own system test cases (``*.yaml``,
+        format v2, ``docs/ablaeufe/testfall-format.md``).
+
+        Copied into the folder the test-case catalog reads, by the same
+        rule as the headers: a plugin's own file is written over on every
+        start, one nobody ships is left alone. A bench that has the plugin
+        has the family's cases, without copying a folder around.
+        """
         return []
 
     def flow_dirs(self) -> list[Path]:
