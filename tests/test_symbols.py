@@ -218,10 +218,12 @@ def test_plugin_headers_are_seeded_into_the_workspace(sym_bench):
     assert bench.symbols.value("eObjIdx_Lamp") == 0x2050
 
 
-def test_workspace_copy_wins_and_is_never_overwritten(tmp_path):
-    """The operator drops in the headers of the firmware actually under
-    test; a plugin release must not quietly replace them. Said once in the
-    log, because a difference nobody mentions is one nobody finds."""
+def test_the_packaged_header_wins_over_a_workspace_copy_of_it(tmp_path):
+    """A header is part of its plugin the way its panels and its EDS are,
+    and those are read from the package every start. A copy that outranked
+    the package meant editing a header changed the panel beside it and not
+    the dropdown its symbols fill — and the way out was knowing which of
+    two folders to delete."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
     (packaged / "obj.h").write_text("typedef enum eX { eX_A = 1 } eX;\n")
@@ -230,14 +232,24 @@ def test_workspace_copy_wins_and_is_never_overwritten(tmp_path):
     (ws / "symbols" / "fake").mkdir(parents=True)
     (ws / "symbols" / "fake" / "obj.h").write_text("typedef enum eX { eX_A = 99 } eX;\n")
     bench = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
-    assert bench.symbols.value("eX_A") == 99
-    assert [x for x in bench.logs if "differs from the one fake ships" in x["msg"]]
+    assert bench.symbols.value("eX_A") == 1
 
-    # …and the next start says nothing and still leaves it alone: a bench
-    # that repeats it every time is a bench whose log nobody reads
-    again = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
-    assert again.symbols.value("eX_A") == 99
-    assert not [x for x in again.logs if "differs from the one fake ships" in x["msg"]]
+
+def test_a_header_no_plugin_ships_is_left_where_it_was_put(tmp_path):
+    """Which is what the folder is for besides looking at: the headers of
+    a firmware under test go in beside the packaged ones, under names of
+    their own."""
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "obj.h").write_text("typedef enum eX { eX_A = 1 } eX;\n")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "symbols" / "fake").mkdir(parents=True)
+    (ws / "symbols" / "fake" / "under_test.h").write_text(
+        "typedef enum eStatus { eStatus_Running = 7 } eStatus;\n")
+    bench = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
+    assert bench.symbols.value("eStatus_Running") == 7
+    assert bench.symbols.value("eX_A") == 1
 
 
 def test_a_symbol_directory_that_is_not_there_is_said_out_loud(tmp_path):
@@ -255,10 +267,7 @@ def test_a_header_the_plugin_changes_reaches_a_workspace_that_kept_the_old_one(t
     so it stays the snapshot of the day it was made. A plugin author adds a
     table, the panel beside it updates — panels are read from the package —
     and the dropdown those symbols fill stays empty with nothing on screen
-    saying why.
-
-    A copy nobody has touched follows the package. One that has been
-    touched does not, which is the test above."""
+    saying why."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
     header = packaged / "obj.h"
@@ -282,8 +291,17 @@ def test_symbol_summary_reaches_the_snapshot(sym_bench):
 
 
 def test_reload_action_picks_up_a_changed_header(sym_bench):
-    bench, _ = sym_bench
-    (bench.symbols_dir / "fake" / "obj.h").write_text(
+    """A header dropped into the workspace, which is the one kind the
+    workspace owns — a copy of a packaged file is replaced by the package
+    on the way through, which is the point of the reload as well."""
+    bench, packaged = sym_bench
+    (bench.symbols_dir / "fake" / "under_test.h").write_text(
+        "typedef enum eStatus { eStatus_Running = 0x2222 } eStatus;\n")
+    bench.dispatch("symbols_reload", {})
+    assert bench.symbols.value("eStatus_Running") == 0x2222
+
+    # …and the same for one the plugin ships, without a restart
+    (packaged / "obj.h").write_text(
         "typedef enum eObjIdx { eObjIdx_Lamp = 0x2222 } eObjIdx;\n")
     bench.dispatch("symbols_reload", {})
     assert bench.symbols.value("eObjIdx_Lamp") == 0x2222

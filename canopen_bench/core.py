@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import csv
-import hashlib
 import importlib
 import io
 import json
@@ -658,13 +657,6 @@ def _in_base_of(value: object, like: object) -> str:
     if spelling == "0b":
         return f"0b{number:b}"
     return str(value)                    # hex, and that is how it arrived
-
-
-def _digest(data: bytes) -> str:
-    """What a file held, short enough to keep a record of. Content and not
-    a timestamp: an install rewrites mtimes, and a file whose bytes are the
-    same is the same file whenever it was written."""
-    return hashlib.sha256(data).hexdigest()
 
 
 def _hex_to_text(value: object) -> str | None:
@@ -5775,70 +5767,43 @@ class Bench:
         return built[0], built[1], ""
 
     def _load_symbols(self) -> SymbolTables:
-        """Seed each plugin's packaged headers into ``<workspace>/symbols/
+        """Copy each plugin's packaged headers into ``<workspace>/symbols/
         <plugin>/``, then parse everything found there.
 
-        Seeded once and then kept in step: a copy nobody has touched
-        follows the package, so a plugin that gains a table has it the next
-        time the bench starts. It used to be written once and never again,
-        which made every workspace a snapshot of the day it was created —
-        the plugin's own author edits a header, the panel next to it
-        updates because panels are read from the package, and the dropdown
-        those symbols fill stays empty with nothing on screen saying why.
+        Every start, over whatever is there. A header is part of the plugin
+        the way its panels and its EDS are, and those are read from the
+        package every start too — a copy of one of them that outranked the
+        package meant the plugin's own author could edit a header, watch
+        the panel beside it update, and find the dropdown those symbols
+        fill still empty. That is what this did: seeded once and never
+        again, so every workspace stayed the snapshot of the day it was
+        made, and the way out of it was to know which of two folders to
+        delete.
 
-        A copy that has been changed is left alone and said so in the log:
-        the workspace is where the firmware *under test* goes, and that one
-        outranks whatever the plugin happens to ship. What was seeded is
-        remembered per file, which is what tells the two apart.
+        A file no plugin ships is left alone, which is what the folder is
+        for besides looking at: the headers of a firmware under test go in
+        beside these under names of their own. Editing one of these copies
+        does not survive a start — the plugin is where that edit belongs.
 
         Origins are per plugin directory, so two vendors' identically
         named tables stay apart instead of the winner depending on file
         order.
         """
-        seeded = dict(self.db.get("seeded_symbols") or {})
-        before = dict(seeded)
         for plugin in self.plugins:
             for src_dir in plugin.symbol_dirs():
                 # a directory the plugin names and does not have is a
-                # packaging fault, and one that seeds nothing and says
+                # packaging fault, and one that copies nothing and says
                 # nothing looks exactly like a firmware with no tables in it
                 if not Path(src_dir).is_dir():
                     self.log(f"SYM  {plugin.name} names {src_dir} and there is no such "
-                             f"directory — nothing to seed from", "emcy0")
+                             f"directory — no headers to read", "emcy0")
                     continue
                 dst_dir = self.symbols_dir / plugin.name
                 dst_dir.mkdir(parents=True, exist_ok=True)
                 for src in sorted(Path(src_dir).glob("*.h")):
                     dst = dst_dir / src.name
-                    key = f"{plugin.name}/{src.name}"
-                    packaged = _digest(src.read_bytes())
-                    if not dst.exists():
+                    if not dst.exists() or dst.read_bytes() != src.read_bytes():
                         shutil.copy2(src, dst)
-                        seeded[key] = packaged
-                        continue
-                    # what the record holds is the packaged content this
-                    # copy last matched — proof that the copy is ours. ""
-                    # is the operator's own file, which nothing here writes
-                    # over and which is only mentioned once
-                    here, mine = _digest(dst.read_bytes()), seeded.get(key)
-                    if here == packaged:
-                        seeded[key] = packaged
-                    elif here == mine:
-                        shutil.copy2(src, dst)         # untouched, and the
-                        seeded[key] = packaged         # plugin has moved on
-                        self.log(f"SYM  {key} updated from {plugin.name}")
-                    elif mine is None:
-                        # a workspace from before any of this was recorded:
-                        # adopt what is there rather than overwrite a file
-                        # that may be somebody's firmware, and say so once,
-                        # since a difference nobody mentions is one nobody
-                        # finds
-                        seeded[key] = ""
-                        self.log(f"SYM  {key} differs from the one {plugin.name} ships — "
-                                 f"using the workspace copy; delete it to take the "
-                                 f"packaged one", "emcy0")
-        if seeded != before:
-            self.db.set("seeded_symbols", seeded)
         origins = [(d.name, d) for d in sorted(self.symbols_dir.glob("*"))
                    if d.is_dir()] if self.symbols_dir.is_dir() else []
         tables = load_symbols(origins)
@@ -5856,8 +5821,9 @@ class Bench:
         self.db.set("num_base", self.num_base)
 
     def act_symbols_reload(self, p: dict) -> None:
-        """Re-parse the workspace symbol directory, so dropping in the
-        headers of a newer firmware does not need a restart."""
+        """Take the headers again — the plugins' and whatever else is in the
+        workspace directory — so neither dropping in the headers of a newer
+        firmware nor editing a plugin's needs a restart."""
         self.symbols = self._load_symbols()
         # the names every view shows come from those tables (see _label),
         # so a reload that did not empty this would leave the old firmware
