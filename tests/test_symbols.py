@@ -240,6 +240,16 @@ def test_workspace_copy_wins_and_is_never_overwritten(tmp_path):
     assert not [x for x in again.logs if "differs from the one fake ships" in x["msg"]]
 
 
+def test_a_symbol_directory_that_is_not_there_is_said_out_loud(tmp_path):
+    """Deleting the packaged headers to force a re-seed deletes what the
+    re-seed reads from, and the workspace then has no tables at all —
+    which on screen is indistinguishable from a firmware that declares
+    none."""
+    bench = Bench(Db(tmp_path / "s.db"), plugins=[_SymbolPlugin(tmp_path / "gone")])
+    assert not bench.symbols.by_name
+    assert [x for x in bench.logs if "no such directory" in x["msg"]]
+
+
 def test_a_header_the_plugin_changes_reaches_a_workspace_that_kept_the_old_one(tmp_path):
     """The trap this was: a workspace is seeded once and then never again,
     so it stays the snapshot of the day it was made. A plugin author adds a
