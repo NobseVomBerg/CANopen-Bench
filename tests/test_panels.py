@@ -97,6 +97,9 @@ def test_what_the_box_shows_is_what_a_write_sends_back():
      "at least one"),
     ("""groups: [{title: A, fields: [{obj: "0x2000", widget: enum, parts:
         [{label: x, widget: flag, bit: 1}]}]}]""", "parts belong to the row"),
+    ("""groups: [{title: A, fields: [{obj: "0x2000", parts:
+        [{label: Stranded, widget: flag, bit: 1, rw: true}]}]}]""",
+     "that row needs rw as well"),
     ("[1, 2]", "mapping"),
     ("groups: [{title: A, fields: [{obj: '0x2000'}]}]\nmatch: {edss: x}", "unknown"),
 ])

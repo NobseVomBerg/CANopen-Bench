@@ -949,7 +949,7 @@ const ENUM_MAX = 170;
 //: ones that are a word assembled out of several
 const everyRow = (g) => g.fields.flatMap((f) => [f, ...(f.parts || [])]);
 
-function PanelBox({ g, busy, anyUnit, anyWrite }) {
+function PanelBox({ g, busy, anyWrite }) {
   // The unit and Write columns are reserved for the whole panel, not per
   // box: a page where the boxes with a unit end 40px short of the boxes
   // without one reads as a page of lists that were laid out separately —
@@ -963,9 +963,13 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
   const down = g.flow === 'columns';
   const cellStyle = down ? `${CELL};break-inside:avoid;margin-bottom:2px` : CELL;
   const cell = (f, part, style) => {
-    const unit = anyUnit
-      ? html`<span style="font-size:10.5px;color:var(--faint);width:32px;flex:none">${f.unit}</span>`
-      : '';
+    // The unit rides in the label — "Working (cN)" — rather than in a
+    // column of its own after the value. Reserved for the whole page, that
+    // column was empty in every box that has no unit at all, and there it
+    // read as a gap somebody forgot to close between the value and its
+    // Write button. In the label it costs nothing where there is no unit,
+    // and it is next to the name of the thing it belongs to.
+    const named = f.unit ? `${f.label} (${f.unit})` : f.label;
     // The address, then what the device calls the object, then what this
     // box calls the row. A label is the first thing a narrow window cuts
     // off — and the row it cut is often one of several on one object, so
@@ -991,11 +995,24 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
                       : `read ${who} now`}
         style="color:${quiet ? 'transparent' : 'var(--faint)'};flex:none;${quiet ? '' : 'cursor:pointer'}">⟳</span>
       <span title=${who}
-        style="flex:1;min-width:0;color:${part ? 'var(--dim)' : 'var(--mid)'};font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.label}</span>`;
-    const writeBtn = f.rw ? html`
-      <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
-        style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
-      : anyWrite ? html`<span style="width:44px;flex:none"></span>` : '';
+        style="flex:1;min-width:0;color:${part ? 'var(--dim)' : 'var(--mid)'};font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${named}</span>`;
+    // A part has no Write of its own: the object is written whole, so the
+    // row that owns it carries the one button that sends it. Four Writes
+    // under one register said the bits could go one at a time, and they
+    // cannot. The column stays reserved, so the controls still line up.
+    // The same button either way, hidden where the row does not write:
+    // a placeholder of some guessed width is a guess about a font, and
+    // 44px against the 50.33 "Write" actually measures put every row that
+    // cannot write six pixels right of the rows that can. Hidden rather
+    // than transparent — there is nothing to hover on a button that is
+    // not there.
+    const writes = f.rw && !part;
+    const writeBtn = writes || anyWrite ? html`
+      <span class=${writes ? 'hv' : ''}
+        onClick=${writes ? () => send('obj_write', { idx: f.idx, sub: f.sub }) : null}
+        title=${writes ? 'write the staged value' : ''}
+        style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;flex:none;${writes ? 'cursor:pointer' : 'visibility:hidden'}">Write</span>`
+      : '';
     // A named value and a single bit are the same object underneath, so both
     // stage the way a number does: the change lands in the value, Write
     // sends it. Neither may drop what it does not own — the core folds them
@@ -1016,8 +1033,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
             ${head}
             <span title=${panelWhen(f)}
               style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 7px;border-radius:4px;min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;box-sizing:border-box;text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosen ? chosen[1] : (f.val || '—')}</span>
-            ${unit}
-            ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}
+              ${writeBtn}
           </div>`;
       }
       return html`
@@ -1026,7 +1042,6 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
           <${OptionSelect} value=${f.val} options=${f.options}
             style=${`border:1px solid var(--inp);background:var(--panel);color:var(--acc);border-radius:4px;padding:2px 4px;font:11px ${MONO};min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;outline:none;flex:none`}
             onPick=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, lane: f.lane, val: v })} />
-          ${unit}
           ${writeBtn}
         </div>`;
     }
@@ -1039,7 +1054,6 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
             style="width:${VALUE_W}px;flex:none;display:flex;justify-content:flex-end">
             <span style="width:15px;height:15px;border-radius:4px;display:grid;place-items:center;font-size:10px;cursor:${f.rw ? 'pointer' : 'default'};border:1px solid ${f.on ? 'var(--acc-bd)' : 'var(--inp)'};background:${f.on ? 'var(--acc-soft)' : 'var(--panel)'};color:var(--acc)">${f.on ? '✓' : ''}</span>
           </span>
-          ${unit}
           ${writeBtn}
         </div>`;
     }
@@ -1050,9 +1064,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
           <${SyncInput} value=${f.val} title=${panelWhen(f) + ' · type to stage a new one, Write sends it'}
             onCommit=${(v) => send('panel_set', { idx: f.idx, sub: f.sub, val: v })}
             style="border:1px solid var(--inp);background:var(--panel);color:${f.val ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:${VALUE_W}px;box-sizing:border-box;outline:none;text-align:right;flex:none" />
-          ${unit}
-          <span class="hv" onClick=${() => send('obj_write', { idx: f.idx, sub: f.sub })} title="write the staged value"
-            style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer;flex:none">Write</span>`
+          ${writeBtn}`
         : html`
           ${''/* min-width, not width: a serial number is twelve digits and
                 a device name is a word, and neither fits the width a
@@ -1061,8 +1073,7 @@ function PanelBox({ g, busy, anyUnit, anyWrite }) {
                 for the firmware's own names. */}
           <span title=${panelWhen(f)}
             style="font:600 12px ${MONO};color:${f.val ? 'var(--acc)' : 'var(--faint)'};background:var(--chip);padding:2px 7px;border-radius:4px;min-width:${VALUE_W}px;max-width:${ENUM_MAX}px;box-sizing:border-box;text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.val || '—'}</span>
-          ${unit}
-          ${anyWrite ? html`<span style="width:44px;flex:none"></span>` : ''}`}
+          ${writeBtn}`}
       </div>`;
   };
   // A value assembled out of several is one cell, not several: the row
@@ -1270,11 +1281,10 @@ function ObjectsPage({ s, ui, setUi }) {
              each box starts where the one above it ended. */}
       <div style="flex:1;min-height:0;overflow:auto;padding:12px 14px">
         <div style="columns:${PANEL_COL}px;column-gap:12px">
-          ${''/* the reserved columns count the parts too: a Write button
-                or a unit inside one is a column every other row in every
-                other box has to leave room for, the same as any row's */}
+          ${''/* the reserved Write column counts the parts too: a button
+                inside one is a column every other row in every other box
+                has to leave room for, the same as any row's */}
           ${panel.groups.map((g) => html`<${PanelBox} g=${g} busy=${panel.busy}
-            anyUnit=${panel.groups.some((x) => everyRow(x).some((f) => f.unit))}
             anyWrite=${panel.groups.some((x) => everyRow(x).some((f) => f.rw))} />`)}
         </div>
       </div>`,

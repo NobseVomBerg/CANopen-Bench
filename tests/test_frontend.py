@@ -204,16 +204,24 @@ def test_the_panel_area_is_columns_rather_than_a_grid():
 def test_every_kind_of_value_in_a_box_ends_at_one_edge():
     """A staged number, a value only read, a checkbox and a dropdown are
     four different controls in one column, and they were four different
-    widths — 78, 66, 110 and 126px. The two that are not numbers also
-    skipped the unit column, so a row with a dropdown ended 40px right of
-    the row above it. Reserved for the whole panel rather than per box:
-    every box works out its own width, so per box left the boxes with a
-    unit ending short of the boxes without one."""
+    widths — 78, 66, 110 and 126px. The Write column is reserved for the
+    whole panel rather than per box: every box works out its own width, so
+    per box left the boxes that write ending short of the boxes that do
+    not."""
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "const VALUE_W = " in app
     assert app.count("${VALUE_W}px") >= 4, "input, read-only, flag and enum"
-    assert "anyUnit=${panel.groups.some(" in app
     assert "anyWrite=${panel.groups.some(" in app
+
+
+def test_a_unit_is_part_of_the_name_rather_than_a_column():
+    """A column of its own is reserved for the whole page, so it was empty
+    in every box that has no unit — and there it read as a gap left open
+    between a value and its Write button rather than as a column nothing
+    landed in. In the label it costs nothing where there is no unit."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "`${f.label} (${f.unit})`" in app
+    assert "width:32px;flex:none\">${f.unit}" not in app, "the unit column is back"
 
 
 def test_the_panel_view_leaves_the_favorites_out():
