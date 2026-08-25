@@ -3576,18 +3576,28 @@ class Bench:
             prefix = f"{field.table}_" if field else ""
             out["options"] = [[str(sym.value), sym.name.removeprefix(prefix)]
                               for sym in table.values()]
-            out["val"] = str(field.extract(value, self.symbols)) if field else out["val"]
+            # An object nobody has asked about yet has no reading, and the
+            # zero a missing value falls back to is a state most tables
+            # name: an untouched page claimed the device was in whatever
+            # its table calls 0 — "None", "Off" — with the same confidence
+            # as a value that had actually come back. Empty says the one
+            # true thing about it, and reads as the dash the other widgets
+            # show.
+            known = _typed_number(raw or "") is not None
+            out["val"] = (str(field.extract(value, self.symbols))
+                          if field and known else "" if field else out["val"])
             # a value no symbol names is still a fact about the device, so
             # it is shown rather than snapped to the nearest name — as the
             # bare hex it is. It used to carry a "?", which said only that
             # the bench had nothing to add and left the reader wondering
-            # whether the number itself was in doubt. Nothing read yet is
-            # not such a value: there is no number to offer, and asking for
-            # the hex of an empty box used to take the whole snapshot down
-            # with a ValueError
+            # whether the number itself was in doubt
             current = _typed_number(out["val"] or "")
             if current is not None and out["val"] not in {o[0] for o in out["options"]}:
                 out["options"] = [*out["options"], [out["val"], f"0x{current:X}"]]
+            # …and a dropdown needs something to stand on while it says so,
+            # or the browser shows the first choice as if it were picked
+            if not out["val"]:
+                out["options"] = [["", "—"], *out["options"]]
             out["shift"] = shift
         # the readings of this value, drawn under it. They are the same
         # object, so they need no ⟳ of their own and no second read — the
