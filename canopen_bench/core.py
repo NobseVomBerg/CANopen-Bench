@@ -3691,15 +3691,26 @@ class Bench:
         1 would clear every other flag in the register, which is the kind
         of help nobody asks for twice — so a part that was never read
         refuses rather than guesses.
+
+        Except where reading is not a thing that can happen: an object the
+        EDS declares write-only answers no read, ever, so "read it first"
+        is advice nobody can take and every checkbox on such a register
+        was refused for good. There the unstaged word is zero — which is
+        not a guess about the device but the only thing the bench can
+        mean by a word it is composing rather than editing.
         """
         key = fld.key
         known = self.obj_vals.get(key, "")
         current = _typed_number(known)
         if current is None:
-            self.log(f"OBJ  {key} — read it before writing part of it "
-                     f"({'bit' if fld.widget == 'flag' else 'field'} "
-                     f"{fld.label}): the other bits of that value are unknown", "emcy0")
-            return
+            info = self._object_info(self._target_node(), fld.idx, fld.sub)
+            if info is None or info.access != "wo":
+                self.log(f"OBJ  {key} — read it before writing part of it "
+                         f"({'bit' if fld.widget == 'flag' else 'field'} "
+                         f"{fld.label}): the other bits of that value are "
+                         f"unknown", "emcy0")
+                return
+            current = 0
         if fld.widget == "flag":
             bit = 1 << fld.bit
             value = current | bit if p.get("on") else current & ~bit
@@ -3713,7 +3724,12 @@ class Bench:
             except ValueError:
                 return
             value = (current & ~field.mask) | (chosen << shift & field.mask)
-        width = len(known.removeprefix("0x")) or 2
+        # the digits of what was read, and the EDS's width where nothing
+        # has been: a word composed from scratch on a write-only register
+        # is as wide as the object, not as wide as the two digits a
+        # missing value used to default to
+        width = len(known.removeprefix("0x")) or self._staged_width(
+            key, self._object_info(self._target_node(), fld.idx, fld.sub), 0)
         self.obj_vals[key] = f"0x{value:0{width}X}"
         self.obj_vals_at[key] = time.monotonic()
 
