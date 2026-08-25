@@ -634,6 +634,28 @@ groups:
       - {label: Velocity,    obj: "0x2061:00", unit: rpm, rw: true}
 """
 
+#: 0x2060 is write-only in TEXT_EDS and 0x2061 is not — the two halves of
+#: what a part may assume about a word nobody has read
+WO_PARTS_PANEL = """
+name: Sample Feeder
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Identity
+    fields:
+      - label: Motor test
+        obj: "0x2060:00"
+        base: hex
+        rw: true
+        parts:
+          - {label: Spin,  widget: flag, bit: 5, rw: true}
+          - {label: Brake, widget: flag, bit: 6, rw: true}
+      - label: Velocity
+        obj: "0x2061:00"
+        rw: true
+        parts:
+          - {label: Reverse, widget: flag, bit: 1, rw: true}
+"""
+
 
 def _bench_with_text_eds(tmp_path, panel: str = TEXT_PANEL, db: str = "test.db") -> Bench:
     file = tmp_path / f"vendor{db}.panel.yaml"
@@ -785,6 +807,26 @@ def test_a_part_is_drawn_under_the_value_it_reads(tmp_path):
     assert speed["val"] == "0"                     # lane 0xF00 → nothing set
     # a part carries no address of its own to show: it is the row above it
     assert {p["idx"] for p in status["parts"]} == {"0x2040"}
+
+
+def test_a_bit_of_a_write_only_register_can_be_staged_without_reading_it(tmp_path):
+    """"Read it first" is advice nobody can take on an object the EDS
+    declares write-only: it answers no read, ever, so every checkbox on
+    such a register was refused for good. There the unstaged word is
+    zero — a word being composed rather than edited — and it is as wide
+    as the EDS says, not the two digits a missing value used to default
+    to."""
+    bench = _bench_with_text_eds(tmp_path, WO_PARTS_PANEL, db="wo.db")
+    assert "0x2060:00" not in bench.obj_vals
+    bench.dispatch("panel_set", {"idx": "0x2060", "sub": "00", "bit": 5, "on": True})
+    assert bench.obj_vals["0x2060:00"] == "0x00000020"
+    bench.dispatch("panel_set", {"idx": "0x2060", "sub": "00", "bit": 6, "on": True})
+    assert bench.obj_vals["0x2060:00"] == "0x00000060", "the bit beside it stands"
+    # and a readable object still refuses, because there the rest of the
+    # word is somebody else's and can be asked for
+    bench.dispatch("panel_set", {"idx": "0x2061", "sub": "00", "bit": 1, "on": True})
+    assert "0x2061:00" not in bench.obj_vals
+    assert any("read it before writing part of it" in line["msg"] for line in bench.logs[-3:])
 
 
 def test_staging_a_part_leaves_the_rest_of_the_word_alone(tmp_path):
