@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import csv
+import hashlib
 import importlib
 import io
 import json
@@ -657,6 +658,13 @@ def _in_base_of(value: object, like: object) -> str:
     if spelling == "0b":
         return f"0b{number:b}"
     return str(value)                    # hex, and that is how it arrived
+
+
+def _digest(data: bytes) -> str:
+    """What a file held, short enough to keep a record of. Content and not
+    a timestamp: an install rewrites mtimes, and a file whose bytes are the
+    same is the same file whenever it was written."""
+    return hashlib.sha256(data).hexdigest()
 
 
 def _hex_to_text(value: object) -> str | None:
@@ -5768,21 +5776,62 @@ class Bench:
 
     def _load_symbols(self) -> SymbolTables:
         """Seed each plugin's packaged headers into ``<workspace>/symbols/
-        <plugin>/`` (never overwriting — the operator's copy is the firmware
-        under test), then parse everything found there.
+        <plugin>/``, then parse everything found there.
+
+        Seeded once and then kept in step: a copy nobody has touched
+        follows the package, so a plugin that gains a table has it the next
+        time the bench starts. It used to be written once and never again,
+        which made every workspace a snapshot of the day it was created —
+        the plugin's own author edits a header, the panel next to it
+        updates because panels are read from the package, and the dropdown
+        those symbols fill stays empty with nothing on screen saying why.
+
+        A copy that has been changed is left alone and said so in the log:
+        the workspace is where the firmware *under test* goes, and that one
+        outranks whatever the plugin happens to ship. What was seeded is
+        remembered per file, which is what tells the two apart.
 
         Origins are per plugin directory, so two vendors' identically
         named tables stay apart instead of the winner depending on file
         order.
         """
+        seeded = dict(self.db.get("seeded_symbols") or {})
+        before = dict(seeded)
         for plugin in self.plugins:
             for src_dir in plugin.symbol_dirs():
                 dst_dir = self.symbols_dir / plugin.name
                 dst_dir.mkdir(parents=True, exist_ok=True)
                 for src in sorted(Path(src_dir).glob("*.h")):
                     dst = dst_dir / src.name
+                    key = f"{plugin.name}/{src.name}"
+                    packaged = _digest(src.read_bytes())
                     if not dst.exists():
                         shutil.copy2(src, dst)
+                        seeded[key] = packaged
+                        continue
+                    # what the record holds is the packaged content this
+                    # copy last matched — proof that the copy is ours. ""
+                    # is the operator's own file, which nothing here writes
+                    # over and which is only mentioned once
+                    here, mine = _digest(dst.read_bytes()), seeded.get(key)
+                    if here == packaged:
+                        seeded[key] = packaged
+                    elif here == mine:
+                        shutil.copy2(src, dst)         # untouched, and the
+                        seeded[key] = packaged         # plugin has moved on
+                        self.log(f"SYM  {key} updated from {plugin.name}")
+                    elif mine is None:
+                        # a workspace from before any of this was recorded:
+                        # adopt what is there rather than overwrite a file
+                        # that may be somebody's firmware, and say so once,
+                        # since a difference nobody mentions is one nobody
+                        # finds
+                        seeded[key] = ""
+                        self.log(f"SYM  {key} differs from the one {plugin.name} ships — "
+                                 f"using the workspace copy; delete it to take the "
+                                 f"packaged one", "emcy0")
+        if seeded != before:
+            self.db.set("seeded_symbols", seeded)
         origins = [(d.name, d) for d in sorted(self.symbols_dir.glob("*"))
                    if d.is_dir()] if self.symbols_dir.is_dir() else []
         tables = load_symbols(origins)

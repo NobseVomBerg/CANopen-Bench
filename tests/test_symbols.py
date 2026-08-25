@@ -220,7 +220,8 @@ def test_plugin_headers_are_seeded_into_the_workspace(sym_bench):
 
 def test_workspace_copy_wins_and_is_never_overwritten(tmp_path):
     """The operator drops in the headers of the firmware actually under
-    test; a plugin release must not quietly replace them."""
+    test; a plugin release must not quietly replace them. Said once in the
+    log, because a difference nobody mentions is one nobody finds."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
     (packaged / "obj.h").write_text("typedef enum eX { eX_A = 1 } eX;\n")
@@ -230,6 +231,39 @@ def test_workspace_copy_wins_and_is_never_overwritten(tmp_path):
     (ws / "symbols" / "fake" / "obj.h").write_text("typedef enum eX { eX_A = 99 } eX;\n")
     bench = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
     assert bench.symbols.value("eX_A") == 99
+    assert [x for x in bench.logs if "differs from the one fake ships" in x["msg"]]
+
+    # …and the next start says nothing and still leaves it alone: a bench
+    # that repeats it every time is a bench whose log nobody reads
+    again = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
+    assert again.symbols.value("eX_A") == 99
+    assert not [x for x in again.logs if "differs from the one fake ships" in x["msg"]]
+
+
+def test_a_header_the_plugin_changes_reaches_a_workspace_that_kept_the_old_one(tmp_path):
+    """The trap this was: a workspace is seeded once and then never again,
+    so it stays the snapshot of the day it was made. A plugin author adds a
+    table, the panel beside it updates — panels are read from the package —
+    and the dropdown those symbols fill stays empty with nothing on screen
+    saying why.
+
+    A copy nobody has touched follows the package. One that has been
+    touched does not, which is the test above."""
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    header = packaged / "obj.h"
+    header.write_text("typedef enum eX { eX_A = 1 } eX;\n")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+
+    bench = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
+    assert bench.symbols.value("eX_A") == 1
+    assert "eX_Bad" not in bench.symbols.by_name
+
+    header.write_text("typedef enum eX { eX_A = 1, eX_Bad = 2 } eX;\n")
+    later = Bench(Db(ws / "s.db"), plugins=[_SymbolPlugin(packaged)])
+    assert later.symbols.value("eX_Bad") == 2
+    assert (ws / "symbols" / "fake" / "obj.h").read_text() == header.read_text()
 
 
 def test_symbol_summary_reaches_the_snapshot(sym_bench):
