@@ -101,7 +101,7 @@ read asks for the condition objects too, so one Read settles them.
 |---|---|---|
 | `obj` | required | `"0x2007:01"`, or `"0x2007"` for sub-index 0. Both halves are hex, with or without `0x` |
 | `label` | optional | What to call it (default: the address) |
-| `unit` | optional | Printed after the value — `mA`, `mV`, `%`, `°C`. Display only |
+| `unit` | optional | Printed after the label, in brackets — `Working (cN)`. Display only |
 | `scale` | optional | Raw × scale = what is shown; the reverse on write (default 1) |
 | `digits` | optional | Decimals shown (default: what the scale implies — `0.1` → 1) |
 | `rw` | optional | `true` gives the field an input and a Write button. Default read-only: a panel is written from a device's documentation, and a typo that only displays is cheaper than one that writes |
@@ -123,9 +123,16 @@ documentation is for.
 they are an error, because there is nothing they could mean there.
 
 Every value in a box ends at the same edge, whichever of the four it is —
-a staged number, a value only read, a checkbox, a dropdown — and the unit
-column is reserved for all of them. A dropdown is the one that may reach
-further left, because it has to hold the firmware's own names.
+a staged number, a value only read, a checkbox, a dropdown — and the
+Write column is reserved for all of them, so a row that cannot write ends
+where the rows that can do. A dropdown is the one that may reach further
+left, because it has to hold the firmware's own names.
+
+The unit goes in the label rather than in a column after the value. A
+column of its own is reserved for the whole page, which leaves it empty in
+every box that has no unit at all — and there it reads as a gap somebody
+left open between a value and its button, rather than as a column nothing
+landed in. `Working (cN)` costs nothing where there is no unit.
 
 ### enum and flag
 
@@ -171,10 +178,16 @@ the address once is also what makes them a group — four rows that happen
 to repeat one address are four objects as far as anything reading the
 file can tell.
 
-The box draws them as one: the row that owns the object keeps the ⟳ and
-the address, and the parts hang under it, indented against a hairline,
-without a ⟳ of their own. One Read fetches the word and every reading of
-it, because there is one object underneath.
+The box draws them as one: the row that owns the object keeps the ⟳, the
+address and the one Write, and the parts hang under it, indented against
+a hairline, with neither of their own. One Read fetches the word and
+every reading of it, and one Write sends it, because there is one object
+underneath — a register whose bits could go one at a time would not need
+a group to say so.
+
+A part may therefore only be writable where the row that owns it is:
+`rw` on a part with a read-only owner is a control with no way to send
+what it stages, and is refused rather than drawn.
 
 A part is `enum` or `flag` — one reading of a value. A plain number as a
 part would be the whole value again, which is the row it is already under.
