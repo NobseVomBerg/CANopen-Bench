@@ -331,6 +331,17 @@ class BenchPlugin:
         """
         return []
 
+    def emcy_mec_text(self, mec: int) -> str:
+        """What the device calls this manufacturer error code, or ``""``.
+
+        The five manufacturer bytes of an EMCY are the device's own and
+        the standard says nothing about what is in them, so the bench
+        reads the frame and the plugin names what it found — the same
+        split as an object's address and its name. First plugin with an
+        answer wins.
+        """
+        return ""
+
     def testcase_dirs(self) -> list[Path]:
         """Directories with the family's own system test cases (``*.yaml``,
         format v2, ``docs/ablaeufe/testfall-format.md``).
