@@ -60,6 +60,9 @@ class FakePlugin(BenchPlugin):
     def testcase_dirs(self) -> list[Path]:
         return [self._tc_dir] if self._tc_dir else []
 
+    def emcy_mec_text(self, mec: int) -> str:
+        return "Yarn breakage" if mec == 0x0065 else ""
+
 
 def test_plugin_adapter_card_listed_first(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
@@ -1156,3 +1159,37 @@ def test_a_packaged_case_is_refreshed_and_a_local_one_is_left_alone(tmp_path):
     assert "changed" in (folder / "TC7_from_plugin.yaml").read_text()
     assert mine.read_text().endswith("steps: [{nmt: start}]\n"), "a case nobody ships"
     assert {"7", "8"} <= set(again.testcases)
+
+
+# -- the manufacturer half of an EMCY ----------------------------------------
+
+def _emcy_row(payload: str) -> dict:
+    return {"cls": "EMCY", "node": 1, "data": payload, "obj": "", "val": ""}
+
+
+def test_the_manufacturer_error_code_is_read_and_named(tmp_path):
+    """The EEC is CiA 301 and the core knows it. The five bytes after the
+    error register are the device's own, and the standard says nothing
+    about them — so the frame is read here and named by the plugin, the
+    same split as an object's address and its name."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
+    row = _emcy_row("00 10 01 65 00 00 00 00")
+    bench._annotate_emcy(row, live=False)
+    assert row["obj"] == "0x1000 Generic error · MEC 0x0065 Yarn breakage"
+
+
+def test_a_manufacturer_code_nobody_names_still_shows_its_number(tmp_path):
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
+    row = _emcy_row("00 10 01 02 00 00 00 00")
+    bench._annotate_emcy(row, live=False)
+    assert row["obj"] == "0x1000 Generic error · MEC 0x0002"
+
+
+def test_an_empty_manufacturer_field_says_nothing(tmp_path):
+    """Five zero bytes are what every frame with nothing to say there
+    carries, and a "MEC 0x0000" on all of them would be a column of
+    noise."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
+    row = _emcy_row("00 10 01 00 00 00 00 00")
+    bench._annotate_emcy(row, live=False)
+    assert row["obj"] == "0x1000 Generic error"

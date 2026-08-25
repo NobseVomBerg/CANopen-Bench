@@ -31,6 +31,9 @@ from . import testcases as tclib
 from .bus.canopen_bus import CanopenBus, _decode_cob
 from .bus.demo import EdsDemoBus
 from .bus.interface import NO_SERIAL, BusInterface, SdoResult
+
+# by name, because _annotate_sdo's own `data` is the frame's bytes
+from .data import ABORT_CODES
 from .db import Db
 from .eds_od import (
     ObjectInfo,
@@ -922,6 +925,8 @@ class Bench:
         #: Asked per trace frame and per table row per tick, and answered
         #: from the symbol tables alone — so it is worked out once
         self._sym_labels: dict[tuple[str, str], str] = {}
+        #: manufacturer error codes a plugin has named (_mec_text)
+        self._mec_texts: dict[int, str] = {}
         self._ods = OdCache(db.eds_dir)  # object names for the trace interpreter
         # bus backends report a vanished interface (adapter unplugged) from
         # their worker threads; the captured loop gets us back on the loop
@@ -1983,7 +1988,14 @@ class Bench:
             obj += f" {name}"
         row["obj"] = obj
         if cmd == 0x80 and len(data) >= 8:
-            row["val"] = f"abort 0x{int.from_bytes(data[4:8], 'little'):08X}"
+            # said in words as well as in hex: an abort is the device
+            # explaining itself, and 0x05040000 explains nothing until
+            # somebody has the standard open. "Timed out" and "no such
+            # object" are the two that look alike as numbers and mean
+            # completely different things about the bench in front of you
+            abort = int.from_bytes(data[4:8], "little")
+            text = ABORT_CODES.get(abort, "")
+            row["val"] = f"abort 0x{abort:08X}" + (f" {text}" if text else "")
         elif (n := self._EXPEDITED_LEN.get(cmd)) and len(data) >= 4 + n:
             value = int.from_bytes(data[4:4 + n], "little")
             # what a word means as a number is what the EDS declares it to
@@ -2071,6 +2083,31 @@ class Bench:
                 return self._emcy_codes[key]
         return "Unknown error code"
 
+    def _mec_text(self, mec: int) -> str:
+        """What the device calls this manufacturer error code, or "".
+
+        The five manufacturer bytes of an EMCY are the device's own, and
+        the standard says nothing about what is in them — so the frame is
+        read here and named there, the same split as an object's address
+        and its name (``describe_object``). Memoised per code: a device
+        raising the same error twice a second would otherwise walk every
+        plugin's table per frame.
+        """
+        hit = self._mec_texts.get(mec)
+        if hit is not None:
+            return hit
+        found = ""
+        for plugin in self.plugins:
+            try:
+                name = plugin.emcy_mec_text(mec)
+            except Exception:
+                continue
+            if name:
+                found = name
+                break
+        self._mec_texts[mec] = found
+        return found
+
     def _annotate_emcy(self, row: dict, live: bool = True) -> None:
         """Interpret EMCY frames for the trace: `obj` = error code with its
         CiA-301 (or plugin-supplied vendor) text, `val` = error-register
@@ -2089,6 +2126,14 @@ class Bench:
             return
         code = payload[0] | (payload[1] << 8)
         text = self._emcy_text(code)
+        # the manufacturer field, where the device puts its own error
+        # number. Shown only when there is one: five zero bytes are what
+        # every frame that has nothing to say there carries, and a "MEC
+        # 0x0000" on all of them would be a column of noise
+        mfr = payload[3:8]
+        if any(mfr):
+            named = self._mec_text(_mec(mfr))
+            text += f" · MEC 0x{_mec(mfr):04X}" + (f" {named}" if named else "")
         row["obj"] = f"0x{code:04X} {text}"
         reg = f"reg 0x{payload[2]:02X}"
         bits = [name for i, name in enumerate(data.ERROR_REGISTER_BITS)
