@@ -795,6 +795,27 @@ def test_the_parts_of_a_value_take_the_object_of_the_row_above_them():
     assert [f.label for f in status.every] == ["Status", "Locked", "Mode", "Speed"]
 
 
+def test_an_enum_nobody_has_read_names_no_state(tmp_path):
+    """Zero is a state most tables name — "None", "Off", "Idle" — so a
+    page that fell back to it claimed the device was in that state with
+    the same confidence as a value that had come back. Before anything is
+    asked there is no reading, and the row says so: empty, and a dash for
+    the dropdown to stand on, or the browser shows its first choice as
+    though somebody had picked it."""
+    bench = _bench_with_widgets(tmp_path, PARTS_PANEL, "unread")
+    (status,) = _fields(bench)
+    mode = status["parts"][1]
+    assert mode["val"] == ""
+    assert mode["options"][0] == ["", "—"]
+    # eMode_Off is still a choice — it is just not the answer
+    assert ["0", "Off"] in mode["options"]
+
+    # …and the moment anything is known, it is the value that is shown
+    bench.obj_vals["0x2040:01"] = "0x00000000"
+    mode = _fields(bench)[0]["parts"][1]
+    assert mode["val"] == "0" and mode["options"][0] != ["", "—"]
+
+
 def test_a_part_is_drawn_under_the_value_it_reads(tmp_path):
     """The page gets them nested, not as siblings: one ⟳, one address and
     one Read for the group, and the parts hang off the row that owns the
