@@ -1690,3 +1690,76 @@ def test_loop_steps_read_as_flow_not_as_traffic(tc_bench):
     for step in tc_bench._run_cases[0].steps:
         if step.text.startswith(("LoopBegin", "LoopEnd")):
             assert step.state == "flow", step.text
+
+
+# -- how far back an EMCY check may look -------------------------------------
+
+GAP_TC = """\
+id: "0031"
+name: "the notification arrives before the step that asks about it"
+steps:
+  - wait: {s: 0.5}
+  - expect_emcy: {mec: "0x6C", timeout: 0.2}
+"""
+
+REARM_TC = """\
+id: "0032"
+name: "enter, leave, enter again"
+steps:
+  - expect_emcy: {mec: "0x6C", timeout: 0.5}
+  - expect_emcy: {mec: 0, timeout: 0.5}
+  - expect_emcy: {mec: "0x6C", timeout: 0.5}
+"""
+
+
+def test_an_emcy_from_earlier_in_the_case_still_answers(tc_bench):
+    """The device sends an EMCY when the event happens; the case then
+    checks the consequences — a screen, an error code, an LED — before
+    asking about the frame. A settle and three SDO reads are a normal gap,
+    and a window measured in fractions of a second said "none seen within
+    1s" about a frame it listed in the same message, because only the
+    message was unbounded."""
+    _add_tc(tc_bench, "TC0031_gap.yaml", GAP_TC)
+    run_selected(tc_bench, {"0031"},
+                 during=_once(_emcy_frame, "00 10 01 6C 00 00 00 00"))
+    assert tc_bench.results == {"0031": "PASS"}
+
+
+def test_a_cleared_error_stops_answering_for_the_next_one(tc_bench):
+    """What keeps the window strict, and what such a case is written for:
+    enter a state, leave it, enter it again. The device clears with an
+    EMCY 0, the reset ends the window, and the second `mec 0x6C` is
+    therefore asking about the *fresh* report — a bench that let the first
+    one through would pass the exact regression the case exists to
+    catch."""
+    _add_tc(tc_bench, "TC0032_rearm.yaml", REARM_TC)
+    frames = ["00 10 01 6C 00 00 00 00",     # entered
+              "00 00 00 00 00 00 00 00",     # left: error reset
+              "00 10 01 6C 00 00 00 00"]     # entered again, freshly
+    sent = {"upto": -1}
+
+    def feed(bench: Bench) -> None:
+        # one frame per step, keyed off which step is waiting: each
+        # expectation is answered by its own report and by no other, with
+        # no sleeps to get the order right
+        at = (bench.run_prog or {}).get("step")
+        if at is not None and at - 1 > sent["upto"] and at - 1 < len(frames):
+            sent["upto"] = at - 1
+            _emcy_frame(bench, frames[at - 1])
+
+    run_selected(tc_bench, {"0032"}, during=feed)
+    assert tc_bench.results == {"0032": "PASS"}
+
+
+def test_the_step_that_fails_lists_what_it_actually_looked_at(tc_bench):
+    """The message and the matching share a window now. They did not, and
+    "none seen within 1s; saw 0x1000 ... mec 0x006C" is what that reads
+    like from the outside: the bench naming the frame it was asked about
+    while saying it never arrived."""
+    _add_tc(tc_bench, "TC0033_other.yaml", GAP_TC.replace('"0x6C"', '"0x99"')
+            .replace('id: "0031"', 'id: "0033"'))
+    run_selected(tc_bench, {"0033"},
+                 during=_once(_emcy_frame, "00 10 01 6C 00 00 00 00"))
+    assert tc_bench.results == {"0033": "FAIL"}
+    said = " ".join(ln["msg"] for ln in tc_bench.logs)
+    assert "mec 0x006C" in said, said
