@@ -4935,12 +4935,25 @@ class Bench:
             deadline = loop.time() + timeout
 
             def seen() -> bool:
-                return any(match(e) for e in
-                           self._emcy_window(FRAME_LOOKBACK_S, through_reset=True))
+                return any(match(e) for e in self._emcy_window(through_reset=True))
 
-            # an EMCY that arrived shortly before this step is a hit too:
-            # the device sends it when it feels like it, and a check that
-            # only looks forward turns a timing difference into a failure
+            # An EMCY that arrived before this step is a hit too: the
+            # device sends it when the event happens, and the case then
+            # checks the consequences — a screen, an error code, an LED —
+            # before asking about the frame. Three SDO reads and a 0.4s
+            # settle are a normal gap, so a window measured in fractions of
+            # a second answered "nothing arrived" about a frame it was
+            # listing in the same breath, since the failure message never
+            # had that limit.
+            #
+            # The window is the case, ending at the device's own error
+            # reset, which is what keeps it strict: a cleared error stops
+            # counting, so a case that enters a state, leaves it, and
+            # enters it again is asking about the *fresh* report each time
+            # — the exact regression such a case is usually written for.
+            # That is the same window "did anything go wrong" uses, with
+            # the reset frame itself inside it, because `mec 0` is a step
+            # asking to be shown the clear.
             while True:
                 if seen():
                     return "ok", ""
