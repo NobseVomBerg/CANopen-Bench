@@ -1124,6 +1124,7 @@ class Bench:
                 Path(p).mkdir(parents=True, exist_ok=True)
         self.paths = stored_paths
         self.testcases: dict[str, tclib.TestCase] = {}
+        self._seed_packaged_testcases()
         self._load_testcases(log=False)
         # The demo catalog comes with a few cases ticked, so that the shipped
         # demo shows what a selection looks like rather than an empty list.
@@ -2942,6 +2943,33 @@ class Bench:
             self._changed()
 
     # -- button-teach addressing (A-05) -------------------------------------
+    def _seed_packaged_testcases(self) -> None:
+        """The test cases a plugin ships, into the folder the catalog reads.
+
+        A device family's own cases belong with the plugin that knows the
+        family, the same as its panels and its headers — a bench that has
+        the plugin has the cases, without anyone copying a folder or
+        running a converter. Same rule as the headers: what a plugin ships
+        is written over on every start, and a file no plugin ships is left
+        alone, which is where hand-written cases live.
+
+        A case that has stopped shipping is not deleted. The folder is
+        also somebody's, and guessing which files in it were once ours is
+        exactly the bookkeeping the headers no longer do.
+        """
+        folder = Path(self.paths.get("tc") or "")
+        packaged = [d for p in self.plugins for d in p.testcase_dirs()]
+        if not packaged or not str(folder):
+            return
+        folder.mkdir(parents=True, exist_ok=True)
+        for src_dir in packaged:
+            if not Path(src_dir).is_dir():
+                continue
+            for src in sorted(Path(src_dir).glob("*.yaml")):
+                dst = folder / src.name
+                if not dst.exists() or dst.read_bytes() != src.read_bytes():
+                    shutil.copy2(src, dst)
+
     def _seed_default_flows(self) -> None:
         """Workspace flows dir with the shipped default procedures — from the
         core package and from every plugin's flow_dirs(); existing (possibly
@@ -5767,9 +5795,23 @@ class Bench:
         return built[0], built[1], ""
 
     def _load_symbols(self) -> SymbolTables:
-        """Seed each plugin's packaged headers into ``<workspace>/symbols/
-        <plugin>/`` (never overwriting — the operator's copy is the firmware
-        under test), then parse everything found there.
+        """Copy each plugin's packaged headers into ``<workspace>/symbols/
+        <plugin>/``, then parse everything found there.
+
+        Every start, over whatever is there. A header is part of the plugin
+        the way its panels and its EDS are, and those are read from the
+        package every start too — a copy of one of them that outranked the
+        package meant the plugin's own author could edit a header, watch
+        the panel beside it update, and find the dropdown those symbols
+        fill still empty. That is what this did: seeded once and never
+        again, so every workspace stayed the snapshot of the day it was
+        made, and the way out of it was to know which of two folders to
+        delete.
+
+        A file no plugin ships is left alone, which is what the folder is
+        for besides looking at: the headers of a firmware under test go in
+        beside these under names of their own. Editing one of these copies
+        does not survive a start — the plugin is where that edit belongs.
 
         Origins are per plugin directory, so two vendors' identically
         named tables stay apart instead of the winner depending on file
@@ -5777,11 +5819,18 @@ class Bench:
         """
         for plugin in self.plugins:
             for src_dir in plugin.symbol_dirs():
+                # a directory the plugin names and does not have is a
+                # packaging fault, and one that copies nothing and says
+                # nothing looks exactly like a firmware with no tables in it
+                if not Path(src_dir).is_dir():
+                    self.log(f"SYM  {plugin.name} names {src_dir} and there is no such "
+                             f"directory — no headers to read", "emcy0")
+                    continue
                 dst_dir = self.symbols_dir / plugin.name
                 dst_dir.mkdir(parents=True, exist_ok=True)
                 for src in sorted(Path(src_dir).glob("*.h")):
                     dst = dst_dir / src.name
-                    if not dst.exists():
+                    if not dst.exists() or dst.read_bytes() != src.read_bytes():
                         shutil.copy2(src, dst)
         origins = [(d.name, d) for d in sorted(self.symbols_dir.glob("*"))
                    if d.is_dir()] if self.symbols_dir.is_dir() else []
@@ -5800,8 +5849,9 @@ class Bench:
         self.db.set("num_base", self.num_base)
 
     def act_symbols_reload(self, p: dict) -> None:
-        """Re-parse the workspace symbol directory, so dropping in the
-        headers of a newer firmware does not need a restart."""
+        """Take the headers again — the plugins' and whatever else is in the
+        workspace directory — so neither dropping in the headers of a newer
+        firmware nor editing a plugin's needs a restart."""
         self.symbols = self._load_symbols()
         # the names every view shows come from those tables (see _label),
         # so a reload that did not empty this would leave the old firmware
