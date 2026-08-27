@@ -4524,7 +4524,20 @@ class Bench:
         waiting for. Either way the window stops there — what came before
         a reset does not stand — the flag only says whether the boundary
         frame is inside or outside.
+
+        The record is brought up to date first. What fills it is the trace
+        drain, which the tick does every TICK_S — so an EMCY that arrived
+        half a second ago is on the bus, in the trace the operator is
+        looking at, and not yet in here. A step waiting a second for it
+        then times out and lists everything *except* the frame it was
+        waiting for, which is what a device raising an under-voltage
+        0.8 seconds into a 1 second wait actually did. `expect_frame`
+        drains in its own loop for the same reason and says so; this
+        drains here instead of in each caller, because the next reader of
+        this record would forget too.
         """
+        if self.connected:
+            self._drain_frames()
         out: list[Emcy] = []
         now = time.monotonic()
         for entry in reversed(self.emcy_seen):
