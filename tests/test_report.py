@@ -17,7 +17,9 @@ from conftest import connect_and_scan, write_seed_eds_files
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.report import (
+    FAIL,
     OVERVIEW,
+    PASS,
     STYLESHEET,
     SUMMARY_GLOB,
     CaseRecord,
@@ -26,6 +28,7 @@ from canopen_bench.report import (
     case_html,
     collect_overview,
     default_css,
+    last_verdicts,
     load_runs,
     overview_html,
     summary_html,
@@ -679,3 +682,39 @@ def test_a_wait_for_keeps_its_note_on_its_own_line():
     doc = case_html(_case(steps=[StepRecord(line=1, text="wait for frame 0x181", state="ok",
                                             note="the reply to the write above")]))
     assert "wait for frame 0x181<br />the reply" in doc
+
+
+# -- what the test list's Result filter reads --------------------------------
+
+def _summary(started: str, cases: list[dict]) -> dict:
+    return {"started": started, "cases": cases}
+
+
+def test_the_newest_verdict_per_case_is_what_counts():
+    """A case that failed on Monday and passed on Tuesday is green. The
+    fold is flat, unlike the overview's: the test list asks "is this red
+    right now" about a list of ids, with the variant a filter beside it
+    rather than a grouping."""
+    runs = [_summary("2026-01-01T09:00", [{"id": "7", "verdict": PASS},
+                                      {"id": "8", "verdict": FAIL}]),
+            _summary("2026-01-02T09:00", [{"id": "7", "verdict": FAIL}])]
+    assert last_verdicts(runs) == {"7": FAIL, "8": FAIL}
+
+    runs.append(_summary("2026-01-03T09:00", [{"id": "7", "verdict": PASS}]))
+    assert last_verdicts(runs)["7"] == PASS
+
+
+def test_the_case_carries_its_own_time_where_it_has_one():
+    """A run is not an instant — its cases are minutes apart, and a folder
+    merged from two benches does not come out in file-name order."""
+    runs = [_summary("2026-01-02T09:00", [{"id": "7", "verdict": FAIL,
+                                       "started": "2026-01-02T09:05"}]),
+            _summary("2026-01-02T08:00", [{"id": "7", "verdict": PASS,
+                                       "started": "2026-01-02T09:40"}])]
+    assert last_verdicts(runs)["7"] == PASS
+
+
+def test_a_run_with_nothing_readable_in_it_is_skipped_not_fatal():
+    assert last_verdicts([{"cases": ["not a case", None]},
+                          {"cases": [{"verdict": FAIL}]},        # no id
+                          {"nonsense": 1}]) == {}
