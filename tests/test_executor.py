@@ -7,6 +7,8 @@ through the BusInterface — no simulated verdicts involved.
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -1763,3 +1765,50 @@ def test_the_step_that_fails_lists_what_it_actually_looked_at(tc_bench):
     assert tc_bench.results == {"0033": "FAIL"}
     said = " ".join(ln["msg"] for ln in tc_bench.logs)
     assert "mec 0x006C" in said, said
+
+
+# -- the Result filter's data ------------------------------------------------
+
+def _write_summary(folder: Path, name: str, started: str, cases: list[dict]) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_text(json.dumps({"started": started, "cases": cases}),
+                               encoding="utf-8")
+
+
+def test_the_result_filter_asks_the_folder_for_a_window(tc_bench):
+    """The one thing that remembers a run after a restart is the results
+    folder, and only the server can read it. On request, not in every
+    snapshot: a page that is not filtering by result has no use for it,
+    and folding the whole folder every tick to serve a filter nobody has
+    turned on is the same folder, every tick."""
+    bench = tc_bench
+    today = datetime.now().isoformat(timespec="seconds")
+    _write_summary(Path(bench.paths["res"]), "run_a__summary.json", today,
+                   [{"id": "0001", "verdict": "FAIL"},
+                    {"id": "0002", "verdict": "PASS"},
+                    {"id": "0003", "verdict": "SKIP"}])
+
+    assert bench.snapshot()["tests"]["history"] is None, "not until asked"
+    bench.dispatch("tests_history", {"days": 7})
+    hist = bench.snapshot()["tests"]["history"]
+    assert hist["days"] == 7 and hist["runs"] == 1
+    assert hist["verdicts"] == {"0001": "FAIL", "0002": "PASS", "0003": "SKIP"}
+
+
+def test_a_window_outside_the_range_is_pulled_back_in(tc_bench):
+    """90 days is as far as the overview looks and as far as this does."""
+    tc_bench.dispatch("tests_history", {"days": 900})
+    assert tc_bench.snapshot()["tests"]["history"]["days"] == 90
+    tc_bench.dispatch("tests_history", {"days": 0})
+    assert tc_bench.snapshot()["tests"]["history"]["days"] == 7   # 0 means unset
+
+
+def test_a_run_older_than_the_window_does_not_answer(tc_bench):
+    bench = tc_bench
+    old = (datetime.now() - timedelta(days=40)).isoformat(timespec="seconds")
+    _write_summary(Path(bench.paths["res"]), "run_old__summary.json", old,
+                   [{"id": "0001", "verdict": "FAIL"}])
+    bench.dispatch("tests_history", {"days": 7})
+    assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
+    bench.dispatch("tests_history", {"days": 90})
+    assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "FAIL"}

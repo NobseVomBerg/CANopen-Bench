@@ -260,3 +260,23 @@ def test_a_value_is_not_dimmed_for_being_a_minute_old():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "panelAge" not in app
     assert "panelWhen" in app, "the tooltip is where age is still said"
+
+
+def test_the_result_filter_is_a_chip_and_not_a_third_verb():
+    """The toolbar means "narrow it down, then select what is left" — the
+    chips filter, `all`/`none` select. Red cases are a filter, so `all`
+    after it is the selection, and it composes with Variant and Category
+    instead of a verb deciding for itself which variant's failures it
+    meant."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'label="Result"' in app
+    assert "const RESULT_WINDOWS" in app and "'failed · last run'" in app
+    # …and it asks the server only for the windows the server has to read
+    assert "if (v && v !== 'run') send('tests_history'" in app
+
+
+def test_a_skipped_case_is_not_a_failed_one():
+    """FAIL and ERROR are red; SKIP is not. Selecting a case nobody ran to
+    "run the failures" would put it back for no reason."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "const RED = new Set(['FAIL', 'ERROR'])" in app
