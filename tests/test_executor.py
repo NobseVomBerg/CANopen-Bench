@@ -1142,6 +1142,13 @@ steps:
 """
 
 
+def _bus_frame(cob: str, payload: str):
+    """A frame as the interface hands one over — what the drain turns into
+    a trace row and an EMCY record."""
+    from canopen_bench.bus.interface import Frame
+    return Frame(direction="RX", cob_id=cob, length="8", data=payload, decoded="EMCY")
+
+
 def _emcy_frame(bench: Bench, payload: str, node: int = 1) -> None:
     """Feed one whole EMCY frame in, bytes as they are on the wire."""
     row = {"cls": "EMCY", "node": node, "data": payload, "obj": "", "val": ""}
@@ -1812,3 +1819,33 @@ def test_a_run_older_than_the_window_does_not_answer(tc_bench):
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
     bench.dispatch("tests_history", {"days": 90})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "FAIL"}
+
+
+def test_an_emcy_still_in_the_queue_counts_as_arrived(tc_bench):
+    """What fills the EMCY record is the trace drain, and the tick does
+    that every TICK_S. So an EMCY that reached the bus half a second ago
+    is on the wire, in the trace the operator is looking at, and not yet
+    in the record a waiting step reads — which then times out and lists
+    everything except the frame it was waiting for.
+
+    That is a device raising an under-voltage 0.8s into a 1s wait: seen in
+    the trace, reported as never sent. `expect_frame` drains in its own
+    loop for exactly this reason; the EMCY window does it too now.
+    """
+    bench = tc_bench
+    _add_tc(bench, "TC0034_queued.yaml", """\
+id: "0034"
+name: "the frame is on the bus, not yet in the record"
+steps:
+  - expect_emcy: {mec: "0x71", timeout: 0.5}
+""")
+
+    def queue_only(bench: Bench) -> None:
+        # straight onto the interface, the way a real frame arrives: no
+        # annotation, no record — until somebody drains
+        if not bench.bus._sdo_frames:
+            bench.bus._sdo_frames.append(_bus_frame("0x081", "00 30 01 71 00 00 00 00"))
+
+    run_selected(bench, {"0034"}, during=_once(queue_only))
+    assert bench.results == {"0034": "PASS"}
+    assert any(e.code == 0x3000 for e in bench.emcy_seen), "never made it into the record"
