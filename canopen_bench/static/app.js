@@ -1433,6 +1433,18 @@ function ObjectsPage({ s, ui, setUi }) {
 // A catalog filter, offering only what the folder actually contains — a
 // dropdown listing grades or variants no case has is a filter that can
 // only ever empty the list.
+//: What the Result filter offers. "run" is this session's own run, which
+//: costs nothing — it is in the snapshot already and cleared when the next
+//: run starts. The rest are windows over the results folder, which is the
+//: only thing that remembers a run after a restart.
+const RESULT_WINDOWS = [['run', 'failed · last run'], ['1', 'failed · 1 d'],
+                        ['7', 'failed · 7 d'], ['30', 'failed · 30 d']];
+
+//: FAIL and ERROR are both red; SKIP is not. A case nobody ran is not a
+//: case that went wrong, and selecting it to "run the failures" would put
+//: it back for no reason.
+const RED = new Set(['FAIL', 'ERROR']);
+
 function FilterChip({ label, value, options, empty, onPick }) {
   const active = !!value;
   return html`
@@ -1442,7 +1454,10 @@ function FilterChip({ label, value, options, empty, onPick }) {
         disabled=${!options.length}
         title=${options.length ? '' : `no case in this folder declares a ${label.toLowerCase()}`}
         style=${`background:transparent;color:inherit;border:0;font:600 12px 'IBM Plex Sans';outline:none;cursor:${options.length ? 'pointer' : 'default'}`}
-        options=${[['', empty], ...options.map((o) => [o, o])]} />
+        ${''/* a plain string is its own label, which is what a list of
+              variants or categories is; a [value, label] pair is for the
+              ones whose label says more than the value does */}
+        options=${[['', empty], ...options.map((o) => (Array.isArray(o) ? o : [o, o]))]} />
     </span>`;
 }
 
@@ -1453,7 +1468,16 @@ function TestsPage({ s, ui, setUi }) {
   // "" means no restriction for both dropdowns. A case with no variants
   // declared runs on every variant, so it stays visible under any choice —
   // hiding it would suggest it does not apply, which is the opposite.
+  // Red in the window the chip names. "run" reads this session's results;
+  // a day window reads what the server folded out of the results folder,
+  // and only once that is the window actually loaded — otherwise the list
+  // would show one tick of the previous window's answer, which is a
+  // wrong list rather than a slow one.
+  const history = t.history || {};
+  const verdicts = ui.resultFilter === 'run' ? (t.results || {})
+    : String(history.days || '') === ui.resultFilter ? (history.verdicts || {}) : {};
   const shown = t.catalog
+    .filter(([id]) => !ui.resultFilter || RED.has(verdicts[id]))
     .filter(([, , tools]) => t.toolFilter || tools === '—')
     .filter(([, , , , , grade]) => !ui.gradeFilter || grade === ui.gradeFilter)
     .filter(([, , , , , , variants]) => !ui.variantFilter || !variants.length
@@ -1503,6 +1527,21 @@ function TestsPage({ s, ui, setUi }) {
       empty="all" onPick=${(v) => setUi({ ...ui, variantFilter: v })} />
     <${FilterChip} label="Category" value=${ui.gradeFilter || ''} options=${t.grades || []}
       empty="all" onPick=${(v) => setUi({ ...ui, gradeFilter: v })} />
+    ${''/* Which cases are red, over a window. A filter rather than a
+          third verb beside all/none: this toolbar already means "narrow
+          it down, then select what is left", so `all` after this one is
+          the selection — and it shows what it is about to select before
+          anything is selected. It also composes with Variant and
+          Category, which a verb would have had to decide for itself.
+          Picking a window asks the server for it: the results folder is
+          the only thing that remembers past runs, and reading it in
+          every snapshot to serve a filter nobody has turned on would be
+          the whole folder, every tick. */}
+    <${FilterChip} label="Result" value=${ui.resultFilter || ''} options=${RESULT_WINDOWS}
+      empty="all" onPick=${(v) => {
+        if (v && v !== 'run') send('tests_history', { days: Number(v) });
+        setUi({ ...ui, resultFilter: v });
+      }} />
     <span onClick=${() => send('tool_filter_toggle')}
       style="border:1px solid ${t.toolFilter ? 'var(--acc)' : 'var(--inp)'};background:${t.toolFilter ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:5px 9px;color:${t.toolFilter ? 'var(--acc)' : 'var(--mid)'};font-weight:600;cursor:pointer">Tool: PSU ${t.toolFilter ? '✓' : '✕'}</span>
     <input placeholder="⌕ Filter test cases…" value=${ui.testFilter || ''} onInput=${(e) => setUi({ ...ui, testFilter: e.target.value })}
@@ -2271,6 +2310,7 @@ function App() {
     logOpen: true,
     objGroup: 'manu',
     testFilter: '',
+    resultFilter: '',
   });
   useEffect(() => { localStorage.setItem('cb-theme', ui.theme); }, [ui.theme]);
 

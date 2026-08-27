@@ -359,6 +359,33 @@ def load_runs(folder, days: int, now: datetime | None = None) -> list[dict]:
     return runs
 
 
+def last_verdicts(runs: list[dict]) -> dict[str, str]:
+    """The newest verdict per case id across these runs.
+
+    Flat, unlike ``collect_overview``, which asks the same question per
+    hardware variant. This one answers "is this case red right now" for a
+    list of ids — the test list's own question, where the variant is a
+    filter beside it rather than a grouping.
+
+    Newest by the case's own start, falling back to the run's: a results
+    folder merged from two benches does not come out in file-name order,
+    and a case that failed on Monday and passed on Tuesday is green.
+    """
+    seen: dict[str, tuple[str, str]] = {}
+    for run in runs:
+        run_started = str(run.get("started") or "")
+        for case in run.get("cases") or []:
+            if not isinstance(case, dict):
+                continue
+            cid = str(case.get("id") or "")
+            if not cid:
+                continue
+            started = str(case.get("started") or run_started)
+            if cid not in seen or started >= seen[cid][0]:
+                seen[cid] = (started, str(case.get("verdict") or ""))
+    return {cid: verdict for cid, (_at, verdict) in seen.items()}
+
+
 def collect_overview(runs: list[dict]) -> list[VariantStats]:
     """Fold runs into one entry per hardware variant.
 

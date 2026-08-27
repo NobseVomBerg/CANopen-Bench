@@ -1019,6 +1019,9 @@ class Bench:
         self.reports: list[dict] = []  # demo seeds are injected per snapshot, demo adapter only
         #: the last overview across runs, once one was asked for
         self.overview: dict | None = None
+        #: what the results folder says about each case in some window,
+        #: once the test list has asked — {days, runs, verdicts}
+        self.test_history: dict | None = None
         # expected/found/last/result start empty — they only carry values
         # once a state was adopted and a verify actually ran
         self.mc: dict = {"enabled": False, "session": "", "expected": 0, "found": 0,
@@ -1554,6 +1557,32 @@ class Bench:
 
     def _results_dir(self) -> Path:
         return Path(self.paths.get("res") or (self.db.path.parent / "results"))
+
+    def act_tests_history(self, p: dict) -> None:
+        """What the results folder says about each case over a window, for
+        the test list's Result filter.
+
+        On request rather than in every snapshot: it reads the whole
+        results folder, and a page that is not filtering by result has no
+        use for it. Same reason the overview is a button.
+
+        The window is the whole fold — variant is a filter beside this one
+        in the same toolbar, so a run on another device still counts here
+        and `Variant:` is what narrows it. Which is the honest split: this
+        says what happened, that says which cases are meant.
+        """
+        days = max(1, min(90, int(p.get("days") or 7)))
+        folder = self._results_dir()
+        try:
+            runs = reportlib.load_runs(folder, days)
+        except OSError as exc:
+            self.log(f"RUN  results in {folder} could not be read — {exc}", "emcy0")
+            return
+        verdicts = reportlib.last_verdicts(runs)
+        self.test_history = {"days": days, "runs": len(runs), "verdicts": verdicts}
+        red = sum(1 for v in verdicts.values() if v in (reportlib.FAIL, reportlib.ERROR))
+        self.log(f"RUN  last {days} day(s): {len(runs)} run(s), {len(verdicts)} case(s), "
+                 f"{red} still red")
 
     def act_report_overview(self, p: dict) -> None:
         """Fold the last so many days of runs into one page per hardware
@@ -6153,6 +6182,8 @@ class Bench:
                 "fileCount": len(self.testcases),
                 "reports": self.reports or (list(data.SEED_REPORTS) if demo else []),
                 "overview": self.overview,
+                # only once the Result filter has asked for a window
+                "history": self.test_history,
                 "suites": sorted(self.suites),
                 "activeSuite": self.active_suite,
             },
