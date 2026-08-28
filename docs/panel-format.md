@@ -200,6 +200,12 @@ Where several lanes share one table, which is what three colours of one
 LED enum look like, the plugin's `label` tells them apart and `lane`
 takes that instead.
 
+A lane's dropdown offers the choices that fit inside it, not the whole
+table: where two lanes share one, a neighbour's value would go into these
+bits and come back out masked into something nobody picked. A lane the
+device has not set reads as `none` — zero is a lane nobody wrote, not a
+value nobody can name.
+
 Where a lane is writable, staging one changes its bits and leaves the
 rest of the word alone — the same read-modify-write a flag does. Both
 write the whole object, so both fold the change into the value last read

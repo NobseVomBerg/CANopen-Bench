@@ -3696,8 +3696,14 @@ class Bench:
             # from an object's name. removeprefix, so a table whose members
             # are named otherwise keeps them whole.
             prefix = f"{field.table}_" if field else ""
+            # only what this lane can hold. Several lanes of one register
+            # share a table — the sensor's two bits, the run monitoring's
+            # two, a permanent bit — and offering a neighbour's choice
+            # here would write it into these bits, where the mask cuts it
+            # down to something nobody picked
             out["options"] = [[str(sym.value), sym.name.removeprefix(prefix)]
-                              for sym in table.values()]
+                              for sym in table.values()
+                              if sym.value << shift & ~field.mask == 0]
             # An object nobody has asked about yet has no reading, and the
             # zero a missing value falls back to is a state most tables
             # name: an untouched page claimed the device was in whatever
@@ -3715,7 +3721,12 @@ class Bench:
             # whether the number itself was in doubt
             current = _typed_number(out["val"] or "")
             if current is not None and out["val"] not in {o[0] for o in out["options"]}:
-                out["options"] = [*out["options"], [out["val"], f"0x{current:X}"]]
+                # …and zero is not such a value: a lane whose bits are all
+                # clear is one the device has not set, the same "none" the
+                # reading under the row shows rather than a "0x0" that
+                # reads like something unnamed came back
+                out["options"] = [*out["options"],
+                                  [out["val"], f"0x{current:X}" if current else "none"]]
             # …and a dropdown needs something to stand on while it says so,
             # or the browser shows the first choice as if it were picked
             if not out["val"]:
