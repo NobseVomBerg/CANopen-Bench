@@ -120,8 +120,13 @@ def describe(value: int, fields: list[Field], symbols) -> str:
                 text = f"{text}+?0x{leftover:X}" if text else f"?0x{leftover:X}"
         else:
             # a value inside the mask that no symbol names is still a fact
-            # about the device — "?0x7" rather than nothing at all
-            text = symbols.name(field.table, raw) or f"?0x{raw:X}"
+            # about the device — "?0x7" rather than nothing at all. Zero is
+            # not such a value: a lane whose bits are all clear is one the
+            # device has not set, and "?0x0" made "nothing here" look like
+            # something unreadable — on a register of four lanes, three
+            # times over
+            text = (symbols.name(field.table, raw)
+                    or (f"?0x{raw:X}" if raw else "none"))
         parts.append(f"{field.label} {text}" if field.label else text)
     rest = value & ~covered
     if rest:

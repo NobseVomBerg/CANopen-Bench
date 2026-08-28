@@ -327,6 +327,77 @@ def test_an_enum_offers_the_names_the_firmware_uses(tmp_path):
     assert mode["val"] == "2"
 
 
+SHARED = """
+name: Shared Table Sample
+match: {eds: "dut_alpha*"}
+groups:
+  - title: Monitoring
+    fields:
+      - label: Monitoring
+        obj: "0x2040:01"
+        rw: true
+        parts:
+          - {label: Sensor, widget: enum, lane: sensor, rw: true}
+          - {label: Run,    widget: enum, lane: run, rw: true}
+"""
+
+
+class _SharedTablePlugin(_FieldPlugin):
+    """One table across two lanes of one register — the shape a
+    compatibility flag word takes: the sensor's two bits and the run
+    monitoring's two, all four of them named in the same header enum."""
+
+    name = "sharey"
+
+    def object_fields(self, symbols):
+        from canopen_bench.values import Field
+        return {"0x2040:01": [Field("ePair", mask=0x03, shift=0, label="sensor"),
+                              Field("ePair", mask=0x0C, shift=0, label="run")]}
+
+
+def _bench_with_shared_table(tmp_path) -> Bench:
+    file = tmp_path / "shared.panel.yaml"
+    file.write_text(SHARED, encoding="utf-8")
+    bench = Bench(Db(tmp_path / "shared.db"), plugins=[_SharedTablePlugin(file)])
+    (bench.symbols_dir / "sharey").mkdir(parents=True, exist_ok=True)
+    (bench.symbols_dir / "sharey" / "pair.h").write_text(
+        "typedef enum ePair { ePair_SensorOff = 1, ePair_SensorOn = 2,\n"
+        "                     ePair_RunOff = 4, ePair_RunOn = 8 } ePair;\n",
+        encoding="utf-8")
+    bench.dispatch("symbols_reload", {})
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_view", {"view": "panel"})
+    return bench
+
+
+def test_a_lane_offers_only_the_choices_that_fit_inside_it(tmp_path):
+    """Two lanes of one register out of one table. Every choice in both
+    dropdowns would let the operator pick the run monitoring's value for
+    the sensor's bits, where the mask cuts it down to something nobody
+    picked — and the two lists would be indistinguishable, on a row whose
+    whole point is that they are different settings."""
+    bench = _bench_with_shared_table(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x0A"          # sensor on, run on
+    (owner,) = _fields(bench)
+    sensor, run = owner["parts"]
+    assert [o[1] for o in sensor["options"]] == ["SensorOff", "SensorOn"]
+    assert [o[1] for o in run["options"]] == ["RunOff", "RunOn"]
+    assert sensor["val"] == "2" and run["val"] == "8"
+
+
+def test_a_lane_the_device_has_not_set_reads_as_none(tmp_path):
+    """Zero in a lane is not a value nobody can name — it is a lane the
+    device has not set, and the dropdown says the same word the reading
+    under the row does rather than "0x0"."""
+    bench = _bench_with_shared_table(tmp_path)
+    bench.obj_vals["0x2040:01"] = "0x02"          # sensor on, run untouched
+    (owner,) = _fields(bench)
+    _sensor, run = owner["parts"]
+    assert run["val"] == "0" and ["0", "none"] in run["options"]
+
+
 def test_a_value_no_symbol_names_is_shown_rather_than_snapped_to_one(tmp_path):
     bench = _bench_with_widgets(tmp_path)
     bench.obj_vals["0x2040:01"] = "0x07"          # lane = 7, named by nothing
