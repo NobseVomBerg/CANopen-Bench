@@ -1792,10 +1792,20 @@ class Bench:
         without stopping the whole bench for that long. Its own
         ``ensure_future`` would be collected mid-flight; this holds the
         reference until the coroutine is done.
+
+        A state push follows, so whatever it changed is on screen when it
+        finishes rather than at the next tick. The core's own tasks push as
+        they go and this one more costs nothing (``_changed`` keeps at most
+        one push in flight); a plugin's would otherwise have to reach for a
+        private method to be seen at all.
         """
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+
+        def done(finished) -> None:
+            self._tasks.discard(finished)
+            self._changed()
+        task.add_done_callback(done)
 
     def act_scan(self, p: dict) -> None:
         if not self.connected or self.scan_busy:
