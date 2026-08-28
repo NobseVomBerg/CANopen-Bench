@@ -50,6 +50,8 @@ ALLOWED = {
     "eMode_Off", "eMode_Run", "eSpeed_Slow", "eSpeed_Fast", "eA_One", "eB_First", "eX_A", "eX_Bad", "eX_Good",
     "eX_AlsoGood", "eFlags_First", "eFlags_Second", "eFlags_Fourth", "eFlags_Mask",
     "eStatus_Running", "eLamp_On",
+    # two lanes of one invented register, sharing one table
+    "ePair_SensorOff", "ePair_SensorOn", "ePair_RunOff", "ePair_RunOn",
 }
 
 #: directories worth scanning — everything a commit can add to this repo

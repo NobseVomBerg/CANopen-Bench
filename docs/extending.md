@@ -132,6 +132,11 @@ base, with the reading beside it. And it never drops bits — a value no
 symbol names shows as `?0x7`, bits outside every mask as `+0x80`. An
 unexplained bit in a status word is exactly what someone needs to see.
 
+A field whose bits are all clear reads as `none`, not as `?0x0`. Zero in
+a lane is not an unreadable value, it is a lane the device has not set —
+and on a register of four lanes, `?0x0` said "unreadable" three times
+where nothing was there at all.
+
 ### Device panels
 
 A plugin cannot ship frontend code — and should not be able to, since
