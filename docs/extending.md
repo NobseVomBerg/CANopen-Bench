@@ -68,6 +68,11 @@ only what you provide.
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
 | `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation; first plugin wins |
 
+A plugin's action is dispatched on the event loop with the browser
+waiting for it to return, so anything that has to wait for the device
+belongs in `bench.spawn(coro)` rather than in a sleep: a press that reads
+the device again a second later must not stop the bench for that second.
+
 The helper base classes (`AddressingProvider`, `DemoHook`,
 `TraceDecoder`, `DevicePanel`, `StepType`, `SwdlStrategy`) are defined
 next to `BenchPlugin` in `canopen_bench/plugin.py`, each with docstrings
