@@ -1782,7 +1782,17 @@ class Bench:
         if self.mc["enabled"] and self.mc.get("scanStart"):
             self.act_mc_verify({})
 
-    def _spawn(self, coro) -> None:
+    def spawn(self, coro) -> None:
+        """Run a coroutine alongside the bench, keeping a reference to it.
+
+        Public because a plugin has no other way to do something *later*.
+        An action is dispatched on the event loop and the browser waits for
+        it to return, so anything that has to wait for the device — read a
+        value again once it has finished moving — cannot sleep in there
+        without stopping the whole bench for that long. Its own
+        ``ensure_future`` would be collected mid-flight; this holds the
+        reference until the coroutine is done.
+        """
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -1790,7 +1800,7 @@ class Bench:
     def act_scan(self, p: dict) -> None:
         if not self.connected or self.scan_busy:
             return
-        self._spawn(self._scan_async())
+        self.spawn(self._scan_async())
 
     def _ensure_demo_eds_available(self) -> None:
         """Demo mode needs at least one enabled EDS with a real, loadable
@@ -2985,7 +2995,7 @@ class Bench:
             return
         self.mc["busy"] = True
         self.log("MC   scan & verify against the expected state")
-        self._spawn(self._mc_verify_task(self.mc_ref))
+        self.spawn(self._mc_verify_task(self.mc_ref))
 
     async def _mc_verify_task(self, ref: dict, allow_teach: bool = True) -> None:
         try:
@@ -3122,7 +3132,7 @@ class Bench:
             return
         self._teach_abort = False
         self.teach = {"step": 0, "of": len(flow.steps), "text": "starting…"}
-        self._spawn(self._teach_task(flow, expected, adopt_after=not auto))
+        self.spawn(self._teach_task(flow, expected, adopt_after=not auto))
 
     def act_mc_teach_abort(self, p: dict) -> None:
         if self.teach is not None:
@@ -3881,7 +3891,7 @@ class Bench:
         acc = {f"{row[0]}:{row[1]}": row[4] for rows in catalog.values() for row in rows}
         addrs = [a for a in addrs if acc.get(f"{a[0]}:{a[1]}") != "wo"]
         if addrs:
-            self._spawn(self._panel_read_async(addrs))
+            self.spawn(self._panel_read_async(addrs))
 
     async def _panel_read_async(self, addrs: list[tuple[str, str]]) -> None:
         """Walk a list of objects, one SDO at a time, off the event loop.
