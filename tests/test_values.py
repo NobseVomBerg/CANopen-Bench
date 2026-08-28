@@ -257,3 +257,14 @@ def test_string_objects_are_never_reformatted(bench):
     for _ in range(2):
         assert "0x2004:00" not in bench.snapshot()["objects"]["fmt"]
         bench.dispatch("num_base", {})
+
+
+def test_a_lane_with_nothing_in_it_says_so(syms):
+    """Zero in a lane is not a value nobody could read — it is a lane the
+    device has not set. "?0x0" made "nothing here" look like something
+    unreadable, and on a register of several lanes it said it several
+    times over. A value that is actually there and unnamed still gets the
+    question mark, because that one is worth looking at."""
+    lane = Field("eMode", mask=0x0F)
+    assert describe(0x00, [lane], syms) == "none"
+    assert describe(0x07, [lane], syms) == "?0x7"
