@@ -217,7 +217,13 @@ die Antwort so, wie das Gerät sie geschickt hat.
   - Registername `R3`,
   - Builtin: `$node` (aufgelöste DUT-Node-ID), `$expected`
     (Soll-Geräteanzahl aus dem übernommenen Soll-Zustand (Machine
-    Control)).
+    Control)), `$line` (die Zeile, die der Report vor diesem Schritt
+    ausgibt — die Zeilennummer der Datei selbst, außerhalb eines Laufs 0).
+    `$line` ist für Schritte da, die eine Marke auf den Bus legen: was im
+    Trace steht, steht dann auch im Report und im Editor. Als `data`-Byte
+    kommt wie bei Registern das Low-Byte an; ein Schritt, der die ganze
+    Zahl braucht, ist ein Plugin-Schritt (`<plugin>.<key>`), der sie sich
+    selbst zerlegt.
   - `$session` (die Session-Identität des Tools: Master-SerialNr 4 Byte,
     je Workspace einmalig erzeugt + SessionId 1 Byte, je Adressierungslauf
     inkrementiert) ist **nur** in `can_send`-Daten erlaubt — als ganze

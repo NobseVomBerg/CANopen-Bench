@@ -21,7 +21,9 @@ MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
 #: set is for membership tests and has no order to lend
 REGISTER_ORDER = [f"R{i}" for i in range(16)]
 REGISTERS = set(REGISTER_ORDER)
-_BUILTINS = {"$node", "$expected", "$session"}  # $session: only as can_send data
+#: $session: only as can_send data. $line: the line the report prints for
+#: the running step, for steps that put a marker on the bus
+_BUILTINS = {"$node", "$expected", "$session", "$line"}
 #: $eObjIdx_Foo / $acme:eObjIdx_Foo — a symbol from the device's
 #: own headers (canopen_bench/symbols.py), substituted before validation
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
