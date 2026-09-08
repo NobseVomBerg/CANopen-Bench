@@ -1347,6 +1347,41 @@ def test_the_frame_in_the_report_is_the_frame_on_the_bus(tc_bench):
     assert line.endswith(sent[-1].data), (line, sent[-1].data)
 
 
+LINE_TC = """\
+id: "0024"
+name: "the line a step is on"
+steps:
+  - wait: 0.01
+  - can_send: {cob: "0x3FE", data: ["$line"], note: "where are we"}
+"""
+
+
+def test_a_step_can_send_the_line_the_report_will_print(tc_bench):
+    """One number for three places: the row in the report, the line an
+    editor jumps to, and what a marker step puts on the bus. A trace and
+    a report are read side by side — matching them by counting steps is
+    what this is instead of.
+
+    The file's own line, not the step's ordinal: the report prints that
+    one, and an inserted step moves both together."""
+    _add_tc(tc_bench, "TC0024_line.yaml", LINE_TC)
+    run_selected(tc_bench, {"0024"})
+    assert tc_bench.results == {"0024": "PASS"}
+
+    marker = tc_bench._run_cases[0].steps[1]
+    assert marker.line == 5, "the can_send is line 5 of the file"
+    sent = [f for f in tc_bench.bus.poll_frames(4096)
+            if f.cob_id == "0x3FE" and f.direction == "TX"]
+    assert sent and sent[-1].data == "05", sent
+
+
+def test_outside_a_run_the_line_is_no_line(tc_bench):
+    """A value rather than an exception: a step type asking where it is
+    can say "nowhere" — a case rendered for the catalog is not running."""
+    from canopen_bench.core import _resolve  # noqa: PLC0415  (private on purpose)
+    assert _resolve("$line", {}, {}) == 0
+
+
 def test_a_write_that_failed_still_says_why(tc_bench):
     """The line is dropped because it was empty of news, not because a
     failing write should go unexplained."""

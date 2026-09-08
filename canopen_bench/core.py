@@ -566,6 +566,12 @@ def _resolve(value, regs: dict, builtins: dict) -> int:
         return int(builtins["node"])
     if s == "$expected":
         return int(builtins["expected"])
+    if s == "$line":
+        # the number the report prints in front of this step. 0 where
+        # nothing is running — a value, not an exception, because the
+        # step that asks is usually one putting a marker on the bus and
+        # "no line" is a thing it can say
+        return int(builtins.get("line") or 0)
     base = base_of(s)
     if base is None:
         raise ValueError(f"{s!r} names a base that does not exist "
@@ -4742,7 +4748,9 @@ class Bench:
         ``base`` counts steps for the progress line ("step 3/9"), ``lines``
         names them for the report — the file's own line numbers, which a
         reader looks up in the editor. A caller with no file behind it
-        (a built-in case, a test) passes none and gets the count."""
+        (a built-in case, a test) passes none and gets the count. The same
+        number is ``$line`` while the step runs, so a step that puts a
+        marker on the bus carries what the report will print."""
         labels = {step["label"]: i for i, step in enumerate(steps)
                   if len(step) == 1 and "label" in step}
         # Where each `loop` finds its `loop_end`. Loops are flat (checked at
@@ -4773,6 +4781,10 @@ class Bench:
             if should_stop():
                 return "error", "aborted"
             key, val = next(iter(steps[pc].items()))
+            # where this step is, as one number: the row the report prints,
+            # the line an editor jumps to, and `$line` for a step that puts
+            # a marker on the bus — a trace and a report meet on it
+            builtins["line"] = lines[pc] if pc < len(lines or ()) else base + pc + 1
             text = self._label_step(key, val, regs, builtins)
             if key == "loop_end" and loop_at is not None:
                 # said here rather than in _step_text, which sees the file and
@@ -4801,8 +4813,7 @@ class Bench:
                 if state == "ok" and key in _FLOW_KEYS:
                     state = "flow"
                 record.append(reportlib.StepRecord(
-                    line=lines[pc] if pc < len(lines or ()) else base + pc + 1,
-                    text=text, state=state,
+                    line=builtins["line"], text=text, state=state,
                     note=val.get("note", "") if isinstance(val, dict) else "",
                     # on the passing path this is what came back, not a
                     # reason — both belong in the file for the same reason
