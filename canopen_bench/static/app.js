@@ -1476,6 +1476,31 @@ function TestsPage({ s, ui, setUi }) {
   const history = t.history || {};
   const verdicts = ui.resultFilter === 'run' ? (t.results || {})
     : String(history.days || '') === ui.resultFilter ? (history.verdicts || {}) : {};
+  // The window the chip names has to be the window that is loaded, and
+  // picking it was the only thing that ever asked for it. A chip left on
+  // "failed · 1 d" while the server restarted came back to an empty list,
+  // which reads as "nothing failed" and took a detour through another
+  // window to correct. So the window is asked for whenever it is not the
+  // one loaded — the pick included, which is now the same path as every
+  // other way of getting here.
+  const wanted = ui.resultFilter && ui.resultFilter !== 'run' ? ui.resultFilter : '';
+  const asked = useRef({ want: '', at: 0 });
+  const loaded = String(history.days || '');
+  useEffect(() => {
+    if (!wanted || loaded === wanted) return undefined;
+    // …but not twice in a breath: a server that cannot read the folder
+    // answers nothing, and two browsers on different windows overwrite
+    // each other's, so asking again waits out a pause. Waits, rather
+    // than skips — a request dropped here is one nothing would send
+    // again, and that is the empty list this whole effect is about.
+    const wait = asked.current.want === wanted
+      ? Math.max(0, 5000 - (Date.now() - asked.current.at)) : 0;
+    const timer = setTimeout(() => {
+      asked.current = { want: wanted, at: Date.now() };
+      send('tests_history', { days: Number(wanted) });
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [wanted, loaded]);
   const shown = t.catalog
     .filter(([id]) => !ui.resultFilter || RED.has(verdicts[id]))
     .filter(([, , tools]) => t.toolFilter || tools === '—')
@@ -1533,15 +1558,12 @@ function TestsPage({ s, ui, setUi }) {
           the selection — and it shows what it is about to select before
           anything is selected. It also composes with Variant and
           Category, which a verb would have had to decide for itself.
-          Picking a window asks the server for it: the results folder is
-          the only thing that remembers past runs, and reading it in
+          A window on the chip asks the server for it: the results folder
+          is the only thing that remembers past runs, and reading it in
           every snapshot to serve a filter nobody has turned on would be
           the whole folder, every tick. */}
     <${FilterChip} label="Result" value=${ui.resultFilter || ''} options=${RESULT_WINDOWS}
-      empty="all" onPick=${(v) => {
-        if (v && v !== 'run') send('tests_history', { days: Number(v) });
-        setUi({ ...ui, resultFilter: v });
-      }} />
+      empty="all" onPick=${(v) => setUi({ ...ui, resultFilter: v })} />
     <span onClick=${() => send('tool_filter_toggle')}
       style="border:1px solid ${t.toolFilter ? 'var(--acc)' : 'var(--inp)'};background:${t.toolFilter ? 'var(--acc-soft)' : 'transparent'};border-radius:6px;padding:5px 9px;color:${t.toolFilter ? 'var(--acc)' : 'var(--mid)'};font-weight:600;cursor:pointer">Tool: PSU ${t.toolFilter ? '✓' : '✕'}</span>
     <input placeholder="⌕ Filter test cases…" value=${ui.testFilter || ''} onInput=${(e) => setUi({ ...ui, testFilter: e.target.value })}

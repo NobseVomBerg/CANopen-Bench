@@ -666,7 +666,14 @@ def test_what_a_case_sets_arrives_in_the_supply_box(tc_bench):
 
 def test_without_a_supply_the_case_errors_rather_than_blaming_the_device(tc_bench):
     """No instrument is a bench problem. FAIL would read as "the DUT did
-    the wrong thing", which is a different message entirely."""
+    the wrong thing", which is a different message entirely.
+
+    Reaching this at all takes turning the tool filter on, because a bench
+    with no supply does not offer these cases by itself. That is the
+    filter's whole job — and running one anyway has to say what happened
+    rather than nothing."""
+    tc_bench.dispatch("tool_filter_toggle", {})
+    assert tc_bench.tool_filter, "no supply, so the filter starts off"
     _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
     run_selected(tc_bench, {"0017"})
     assert tc_bench.results == {"0017": "ERROR"}
@@ -1819,6 +1826,64 @@ def test_a_run_older_than_the_window_does_not_answer(tc_bench):
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
     bench.dispatch("tests_history", {"days": 90})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "FAIL"}
+
+
+def test_the_window_follows_the_run_that_just_wrote_into_it(tc_bench):
+    """A filter on "failed · 1 d" is a filter on the folder this run adds
+    to. Left as it was, the case that went red a second ago stayed out of
+    the list until somebody picked the window again — the list saying
+    "nothing failed" about the run they are looking at."""
+    bench = tc_bench
+    _add_tc(bench, "TC0041_red.yaml", FAIL_TC.replace('id: "0002"', 'id: "0041"'))
+    bench.dispatch("tests_history", {"days": 1})
+    assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
+
+    run_selected(bench, {"0041"})
+
+    hist = bench.snapshot()["tests"]["history"]
+    assert hist["days"] == 1, "the window the operator picked, not another"
+    assert hist["verdicts"].get("0041") == "FAIL"
+
+
+# -- which cases a bench without the supply offers ---------------------------
+
+def test_without_a_supply_the_cases_that_need_one_are_not_offered(tc_bench):
+    """They can only fail on the step that reaches for the instrument, and
+    a list of tests that cannot run is not one to read a verdict off."""
+    assert tc_bench.psu is None and tc_bench.tool_filter is False
+    _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
+    assert "0017" not in [t[0] for t in tc_bench._shown_tests()]
+
+
+def test_a_supply_that_answers_brings_those_cases_back(tc_bench):
+    """The chip points at the hardware that is there. A search that finds
+    a supply makes its cases runnable without a second click somewhere
+    else — the operator plugged it in, which is the click."""
+    from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
+    tc_bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
+    _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
+
+    assert tc_bench._psu_connect("COM6")
+    assert tc_bench.tool_filter is True
+    assert "0017" in [t[0] for t in tc_bench._shown_tests()]
+
+    tc_bench.dispatch("psu_release", {})
+    assert tc_bench.tool_filter is False
+
+
+def test_a_click_on_the_chip_outlasts_the_supply(tc_bench):
+    """Following the hardware is what it does until somebody says
+    otherwise. After that the chip is theirs: an operator who turned the
+    cases on to look at them must not have them taken away again by the
+    next thing that happens to the serial port."""
+    from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
+    tc_bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
+    tc_bench.dispatch("tool_filter_toggle", {})       # on, with no supply
+    assert tc_bench.tool_filter is True
+
+    assert tc_bench._psu_connect("COM6")
+    tc_bench.dispatch("psu_release", {})
+    assert tc_bench.tool_filter is True, "the click stands"
 
 
 def test_an_emcy_still_in_the_queue_counts_as_arrived(tc_bench):
