@@ -180,7 +180,12 @@ class StepType:
         """Run the step inside the shared VM. Return ("ok" | "fail" |
         "error" | "jump", reason/target) like the built-in primitives;
         resolve values via ``canopen_bench.core._resolve(value, regs,
-        builtins)``. Exceptions are caught and turn into ERROR."""
+        builtins)``. Exceptions are caught and turn into ERROR.
+
+        ``builtins`` also answers ``$line``: the number the report prints
+        for this step, which is the file's own line. A step that puts a
+        marker on the bus sends that, and a trace and a report then meet
+        on one number instead of on a count of steps."""
         raise NotImplementedError
 
 
