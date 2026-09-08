@@ -989,6 +989,16 @@ class Bench:
         #: watching to do it — but a bench with no supply in play does not
         #: want the room taken, so it is a choice and it is remembered.
         self.psu_sidebar = bool(db.get("psu_sidebar", False))
+        # Whether the test list offers the cases that need the supply.
+        # They are worth offering when one answered: without it they can
+        # only fail on the step that reaches for it, and a list of tests
+        # that cannot run is not one to read a verdict off. So the chip
+        # starts where the hardware is and follows it — a search that
+        # finds a supply brings those cases back — until somebody clicks
+        # it, after which the click stands. Declared before the connect
+        # below, which is the first thing that points it anywhere.
+        self.tool_filter = False
+        self._tool_filter_pinned = False
         self._psu_connect(str(db.get("psu_port") or ""), announce=False)
         self.test_sel: set[str] = set()   # demo seeds below, once the catalog is known
         self.running = False
@@ -1013,7 +1023,6 @@ class Bench:
         # stop finding out about the rest. The option is on the Tests page
         # for the runs where the first failure invalidates what follows.
         self.stop_on_err = False
-        self.tool_filter = True
         self.repeat_case = 1
         self.repeat_run = 1
         self.reports: list[dict] = []  # demo seeds are injected per snapshot, demo adapter only
@@ -1553,6 +1562,14 @@ class Bench:
             self.log(f"RUN  report not written — {exc}", "emcy0")
             return f"{stamp}__summary.html"
         self.log(f"RUN  report {summary} ({len(run.cases)} case(s)) in {folder}")
+        # the Result filter is a window over this folder, and the run that
+        # just wrote into it is the one its reader cares about most. Folded
+        # again rather than left as it was: a case that went red in this
+        # run would otherwise stay out of "failed · 1 d" until somebody
+        # picked the window a second time
+        if self.test_history:
+            self.test_history = self._fold_history(self.test_history["days"]) \
+                or self.test_history
         return summary
 
     def _results_dir(self) -> Path:
@@ -1572,17 +1589,25 @@ class Bench:
         says what happened, that says which cases are meant.
         """
         days = max(1, min(90, int(p.get("days") or 7)))
+        history = self._fold_history(days)
+        if history is None:
+            return
+        self.test_history = history
+        verdicts = history["verdicts"]
+        red = sum(1 for v in verdicts.values() if v in (reportlib.FAIL, reportlib.ERROR))
+        self.log(f"RUN  last {days} day(s): {history['runs']} run(s), {len(verdicts)} case(s), "
+                 f"{red} still red")
+
+    def _fold_history(self, days: int) -> dict | None:
+        """The window itself, or None where the folder could not be read."""
         folder = self._results_dir()
         try:
             runs = reportlib.load_runs(folder, days)
         except OSError as exc:
             self.log(f"RUN  results in {folder} could not be read — {exc}", "emcy0")
-            return
-        verdicts = reportlib.last_verdicts(runs)
-        self.test_history = {"days": days, "runs": len(runs), "verdicts": verdicts}
-        red = sum(1 for v in verdicts.values() if v in (reportlib.FAIL, reportlib.ERROR))
-        self.log(f"RUN  last {days} day(s): {len(runs)} run(s), {len(verdicts)} case(s), "
-                 f"{red} still red")
+            return None
+        return {"days": days, "runs": len(runs),
+                "verdicts": reportlib.last_verdicts(runs)}
 
     def act_report_overview(self, p: dict) -> None:
         """Fold the last so many days of runs into one page per hardware
@@ -3250,6 +3275,7 @@ class Bench:
         self.psu_error = ""
         self.db.set("psu_port", port)
         self._psu_read()
+        self._tool_filter_follow()
         if announce:
             self.log(f"PSU  {self.psu.name} on {port} — {idn}")
         return True
@@ -3300,6 +3326,7 @@ class Bench:
         self.psu, self.psu_error = psu, ""
         self.db.set("psu_port", psu.link.port)
         self._psu_read()
+        self._tool_filter_follow()
         self.log(f"PSU  {psu.name} on {psu.link.port} — {idn}")
 
     def act_psu_sidebar_toggle(self, p: dict) -> None:
@@ -3319,6 +3346,7 @@ class Bench:
             self.log(f"PSU  released {self.psu.link.port}")
         self.psu, self._psu_state, self.psu_error = None, None, ""
         self.db.set("psu_port", "")
+        self._tool_filter_follow()
 
     def act_psu_output(self, p: dict) -> None:
         if self.psu is None:
@@ -4329,6 +4357,14 @@ class Bench:
 
     def act_tool_filter_toggle(self, p: dict) -> None:
         self.tool_filter = not self.tool_filter
+        self._tool_filter_pinned = True
+
+    def _tool_filter_follow(self) -> None:
+        """Point the tool filter at the hardware that is there — until the
+        operator has said otherwise, after which their click stands even
+        across a supply coming or going."""
+        if not self._tool_filter_pinned:
+            self.tool_filter = self.psu is not None
 
     def act_stop_err_toggle(self, p: dict) -> None:
         self.stop_on_err = not self.stop_on_err
