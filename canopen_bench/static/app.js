@@ -1445,10 +1445,9 @@ function ObjectsPage({ s, ui, setUi }) {
 // A catalog filter, offering only what the folder actually contains — a
 // dropdown listing grades or variants no case has is a filter that can
 // only ever empty the list.
-//: What the Result filter offers. "run" is this session's own run, which
-//: costs nothing — it is in the snapshot already and cleared when the next
-//: run starts. The rest are windows over the results folder, which is the
-//: only thing that remembers a run after a restart.
+//: What the Result filter offers, all of it out of the results folder —
+//: the only thing that remembers a run at all. "run" is the last run that
+//: finished, whenever that was; the rest are spans of days.
 const RESULT_WINDOWS = [['run', 'failed · last run'], ['1', 'failed · 1 d'],
                         ['7', 'failed · 7 d'], ['30', 'failed · 30 d']];
 
@@ -1480,14 +1479,16 @@ function TestsPage({ s, ui, setUi }) {
   // "" means no restriction for both dropdowns. A case with no variants
   // declared runs on every variant, so it stays visible under any choice —
   // hiding it would suggest it does not apply, which is the opposite.
-  // Red in the window the chip names. "run" reads this session's results;
-  // a day window reads what the server folded out of the results folder,
-  // and only once that is the window actually loaded — otherwise the list
-  // would show one tick of the previous window's answer, which is a
-  // wrong list rather than a slow one.
+  // Red in the window the chip names — every one of them out of the
+  // results folder, "last run" included, and only once that is the window
+  // actually loaded: otherwise the list would show one tick of the
+  // previous window's answer, which is a wrong list rather than a slow
+  // one. "last run" used to read this session's verdicts instead, which
+  // are cleared when a run starts: pressing Start emptied the list and
+  // let the rows back in one at a time as they failed again.
   const history = t.history || {};
-  const verdicts = ui.resultFilter === 'run' ? (t.results || {})
-    : String(history.days || '') === ui.resultFilter ? (history.verdicts || {}) : {};
+  const verdicts = String(history.window || '') === ui.resultFilter
+    ? (history.verdicts || {}) : {};
   // The window the chip names has to be the window that is loaded, and
   // picking it was the only thing that ever asked for it. A chip left on
   // "failed · 1 d" while the server restarted came back to an empty list,
@@ -1495,9 +1496,9 @@ function TestsPage({ s, ui, setUi }) {
   // window to correct. So the window is asked for whenever it is not the
   // one loaded — the pick included, which is now the same path as every
   // other way of getting here.
-  const wanted = ui.resultFilter && ui.resultFilter !== 'run' ? ui.resultFilter : '';
+  const wanted = ui.resultFilter || '';
   const asked = useRef({ want: '', at: 0 });
-  const loaded = String(history.days || '');
+  const loaded = String(history.window || '');
   useEffect(() => {
     if (!wanted || loaded === wanted) return undefined;
     // …but not twice in a breath: a server that cannot read the folder
@@ -1509,7 +1510,7 @@ function TestsPage({ s, ui, setUi }) {
       ? Math.max(0, 5000 - (Date.now() - asked.current.at)) : 0;
     const timer = setTimeout(() => {
       asked.current = { want: wanted, at: Date.now() };
-      send('tests_history', { days: Number(wanted) });
+      send('tests_history', { window: wanted });
     }, wait);
     return () => clearTimeout(timer);
   }, [wanted, loaded]);

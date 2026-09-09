@@ -275,7 +275,10 @@ def test_the_result_filter_is_a_chip_and_not_a_third_verb():
     # the one just picked: a chip that survived a restart of the server, a
     # reconnect or a trip to another page showed an empty list until the
     # window was picked a second time, which reads as "nothing failed"
-    assert "send('tests_history', { days: Number(wanted) })" in app
+    assert "send('tests_history', { window: wanted })" in app
+    # …and every window comes from the server, "last run" included: it read
+    # this session's verdicts once, which are cleared when a run starts
+    assert "t.results" not in app.split("const verdicts")[1].split("\n")[0]
     assert "if (!wanted || loaded === wanted) return undefined;" in app
 
 
