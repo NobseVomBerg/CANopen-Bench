@@ -88,6 +88,10 @@ BASE_EDS = Path(__file__).resolve().parent / "seed" / "CiA301Base.eds"
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
+#: the addressing procedure this package ships — vendor-neutral LSS. The
+#: procedure a real device family uses is that family's and arrives as a
+#: plugin's flow file, which is what a fresh workspace prefers.
+DEFAULT_FLOW = "lss_standard.yaml"
 #: how far back a `wait_for` on a COB-ID looks in the trace. It looks back
 #: at all because a device answers when it is ready, not when a step
 #: happens to start listening, and the answer to the step before this one
@@ -1041,8 +1045,11 @@ class Bench:
         # once a state was adopted and a verify actually ran
         self.mc: dict = {"enabled": False, "session": "", "expected": 0, "found": 0,
                          "last": "", "result": "", "busy": False}
+        # the flow the core itself ships; normalized below to a plugin's
+        # procedure where one is installed, since the addressing a real
+        # device family uses is that family's, not this file's
         self.mc.update({"autoStart": True, "autoReaddr": True, "scanStart": True,
-                        "teachFlow": "teach_addressing.yaml", "hbTimeoutMs": 3000}
+                        "teachFlow": DEFAULT_FLOW, "hbTimeoutMs": 3000}
                        | db.get("mc_opts", {}))
         # heartbeat-loss monitoring (Machine Control only — see
         # _check_heartbeats): last-seen time per node, nodes currently past
@@ -1163,16 +1170,24 @@ class Bench:
         self.active_suite: str = db.get("active_suite", "")
         # button-teach addressing (A-05): flow files + live progress
         self.flows_dir = self.db.path.parent / "flows"
+        #: file name -> ((mtime, size), button label), so the snapshot can
+        #: ask what is on the buttons without re-reading the folder
+        self._flow_button_cache: dict[str, tuple[tuple[int, int], str]] = {}
+        #: which of them a plugin brought — see the normalization below
+        self._plugin_flows: set[str] = set()
         self._seed_default_flows()
         # normalize the persisted procedure choice: heal names that no longer
-        # exist (e.g. plugin uninstalled) and prefer a vendor procedure over
-        # the shipped standard-LSS flow when one is available
-        flow_files = self._flow_files()
-        if self.mc.get("teachFlow") not in flow_files:
-            if "teach_addressing.yaml" in flow_files:
-                self.mc["teachFlow"] = "teach_addressing.yaml"
-            else:
-                self.mc["teachFlow"] = flow_files[0] if flow_files else ""
+        # exist (e.g. plugin uninstalled) and prefer a procedure a plugin
+        # brought over the standard-LSS flow this package ships. By where it
+        # came from, not by what it is called: how a device family is
+        # addressed is that family's business, and a core that knew the
+        # file name of one would be carrying a fact about it
+        flow_files = self._addressing_flows()
+        if dict(db.get("mc_opts", {})).get("teachFlow") not in flow_files:
+            vendor = sorted(self._plugin_flows & set(flow_files))
+            self.mc["teachFlow"] = next(iter(vendor), "") \
+                or (DEFAULT_FLOW if DEFAULT_FLOW in flow_files
+                    else (flow_files[0] if flow_files else ""))
         self.teach: dict | None = None  # {step, of, text} while teaching
         self._teach_abort = False
 
@@ -3098,14 +3113,20 @@ class Bench:
     def _seed_default_flows(self) -> None:
         """Workspace flows dir with the shipped default procedures — from the
         core package and from every plugin's flow_dirs(); existing (possibly
-        locally customized) files are never overwritten."""
+        locally customized) files are never overwritten.
+
+        Which names a plugin brought is remembered: that, and not the name
+        itself, is what makes one of them the addressing procedure to
+        prefer."""
         self.flows_dir.mkdir(parents=True, exist_ok=True)
-        sources = [Path(__file__).parent / "flows"]
-        sources += [d for p in self.plugins for d in p.flow_dirs()]
-        for packaged in sources:
+        sources = [(Path(__file__).parent / "flows", False)]
+        sources += [(d, True) for p in self.plugins for d in p.flow_dirs()]
+        for packaged, from_plugin in sources:
             if not packaged.is_dir():
                 continue
             for src in sorted(packaged.glob("*.yaml")):
+                if from_plugin:
+                    self._plugin_flows.add(src.name)
                 dst = self.flows_dir / src.name
                 if not dst.exists():
                     dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
@@ -3131,10 +3152,62 @@ class Bench:
         except OSError:
             return []
 
+    def _addressing_flows(self) -> list[str]:
+        """The flows that may be *the* addressing procedure: the ones that
+        do not offer themselves as a button.
+
+        A file is one or the other. A procedure with a button is one
+        somebody presses when they want it — forcing a single device onto
+        a known node-ID is not a way to address a machine, and it must not
+        be selectable as one: auto re-address runs the selected procedure
+        by itself, on a bus with every device still on it.
+        """
+        pressed = {b["file"] for b in self._flow_buttons()}
+        return [f for f in self._flow_files() if f not in pressed]
+
+    def _flow_buttons(self) -> list[dict]:
+        """The flows that ask for a button of their own — ``{file, label}``.
+
+        A procedure somebody needs at the press of a key rather than as
+        part of a run — force a single device onto a known node-ID, put a
+        family into a service mode — is a sequence of frames like the
+        addressing procedure is, and it belongs in a flow file for the
+        same reasons: a vendor ships it, and whoever owns the bench can
+        edit it without touching the tool. What the tool cannot work out
+        is what to call it, so the file says (``button:``).
+
+        Read from the folder, so a file that appeared or lost its button
+        is the truth about what can be pressed — but only re-read when it
+        changed on disk: this is asked for on every snapshot, and reading
+        every flow ten times a second to find two lines of header is the
+        kind of cost that never shows up in one place.
+
+        The header alone, not the whole file: a flow with a broken step
+        still has a name on its button, and pressing it is where that is
+        said.
+        """
+        out: list[dict] = []
+        for name in self._flow_files():
+            try:
+                info = (self.flows_dir / name).stat()
+                stamp = (info.st_mtime_ns, info.st_size)
+            except OSError:
+                continue
+            known = self._flow_button_cache.get(name)
+            if known is None or known[0] != stamp:
+                try:
+                    text = (self.flows_dir / name).read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                self._flow_button_cache[name] = known = (stamp, tclib.button_of(text))
+            if known[1]:
+                out.append({"file": name, "label": known[1]})
+        return out
+
     def act_mc_flow(self, p: dict) -> None:
         """Select which addressing procedure (flow file) machine control runs."""
         name = p.get("file", "")
-        if name in self._flow_files():
+        if name in self._addressing_flows():
             self.mc["teachFlow"] = name
             self._save_mc_opts()
             self.log(f'MC   addressing procedure set to "{name}"')
@@ -3168,7 +3241,7 @@ class Bench:
                 return
         else:
             expected = int(self.scan_range[1])
-        flow = self._load_flow(self.mc.get("teachFlow") or "teach_addressing.yaml")
+        flow = self._load_flow(self.mc.get("teachFlow") or DEFAULT_FLOW)
         if flow is None:
             return
         self._teach_abort = False
@@ -3178,6 +3251,64 @@ class Bench:
     def act_mc_teach_abort(self, p: dict) -> None:
         if self.teach is not None:
             self._teach_abort = True
+
+    def act_mc_procedure(self, p: dict) -> None:
+        """Run one flow that declared a button, once.
+
+        Not the addressing procedure and not a test case: a sequence
+        somebody presses a key for. So it distributes no session, adopts
+        nothing and verifies nothing afterwards — it runs the frames in
+        the file and says how it went. A flow that needs a session
+        identity is the addressing procedure and belongs on that button,
+        where the session is made; here ``$session`` fails as it does
+        anywhere else it cannot be answered.
+        """
+        name = p.get("file", "")
+        if self.teach is not None or self.scan_busy:
+            return
+        if not any(b["file"] == name for b in self._flow_buttons()):
+            self.log(f'MC   no procedure button for "{name}"', "emcy0")
+            return
+        if not self.connected:
+            self.log(f'MC   "{name}" not started — interface not connected', "emcy0")
+            return
+        flow = self._load_flow(name)
+        if flow is None:
+            return
+        self._teach_abort = False
+        self.teach = {"step": 0, "of": len(flow.steps), "text": "starting…",
+                      "name": flow.button or flow.name}
+        self.spawn(self._procedure_task(flow))
+
+    async def _procedure_task(self, flow: tclib.TestCase) -> None:
+        # the same floor a teach and a case get: a look-back inside this
+        # sequence sees nothing from before it started (_match_traced)
+        self._sequence_started_at = time.monotonic()
+        what = flow.button or flow.name
+        self.log(f'MC   procedure "{what}" started')
+        try:
+            regs = {name: 0 for name in tclib.REGISTERS}
+            builtins = {"node": 0, "expected": int(self.mc.get("expected") or 0),
+                        "session": None}
+
+            def on_step(idx: int, text: str) -> None:
+                self.teach = {"step": idx, "of": len(flow.steps), "text": text,
+                              "name": what}
+                self._changed()
+
+            status, why = await self._run_program(
+                flow, flow.steps, 0, regs, builtins, 0, on_step,
+                lambda: self._teach_abort)
+            if status == "ok":
+                self.log(f'MC   procedure "{what}" done')
+            else:
+                label = "aborted" if self._teach_abort else status.upper()
+                reason = "by operator" if self._teach_abort else why
+                self.log(f'MC   procedure "{what}" {label} — {reason}', "emcy0")
+        finally:
+            self.teach = None
+            self._teach_abort = False
+            self._changed()
 
     def act_demo_press(self, p: dict) -> None:
         """Demo mode only: simulate the operator pressing a device button."""
@@ -6216,7 +6347,8 @@ class Bench:
             "emcyNew": self.emcy_new,
             "eds": {"files": eds_files},
             "mc": self.mc | {"ref": self.mc_ref, "hbLost": sorted(self._hb_lost),
-                             "teach": self.teach, "flows": self._flow_files()},
+                             "teach": self.teach, "flows": self._addressing_flows(),
+                             "procedures": self._flow_buttons()},
             "paths": self.paths | {"eds": str(self.db.eds_dir)},
             "objects": {
                 "catalog": catalog,
