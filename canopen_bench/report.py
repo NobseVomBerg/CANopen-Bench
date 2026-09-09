@@ -359,6 +359,24 @@ def load_runs(folder, days: int, now: datetime | None = None) -> list[dict]:
     return runs
 
 
+#: "every run in the folder", as a day bound for load_runs. The last run
+#: is the last one whenever it was — a bench that stood still over the
+#: holidays has not lost its last result.
+EVERY_DAY = 36_500
+
+
+def newest_run(runs: list[dict]) -> list[dict]:
+    """Only the most recent run, as a list so it folds like any other.
+
+    By the run's own ``started`` for the reason ``load_runs`` filters on
+    it: a results folder gets copied, synced and restored, and neither
+    file names nor timestamps survive that.
+    """
+    if not runs:
+        return []
+    return [max(runs, key=lambda run: str(run.get("started") or ""))]
+
+
 def last_verdicts(runs: list[dict]) -> dict[str, str]:
     """The newest verdict per case id across these runs.
 

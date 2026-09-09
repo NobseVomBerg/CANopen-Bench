@@ -1589,7 +1589,7 @@ class Bench:
         # run would otherwise stay out of "failed · 1 d" until somebody
         # picked the window a second time
         if self.test_history:
-            self.test_history = self._fold_history(self.test_history["days"]) \
+            self.test_history = self._fold_history(self.test_history["window"]) \
                 or self.test_history
         return summary
 
@@ -1609,25 +1609,41 @@ class Bench:
         and `Variant:` is what narrows it. Which is the honest split: this
         says what happened, that says which cases are meant.
         """
-        days = max(1, min(90, int(p.get("days") or 7)))
-        history = self._fold_history(days)
+        history = self._fold_history(str(p.get("window") or "7"))
         if history is None:
             return
         self.test_history = history
+        window = history["window"]
         verdicts = history["verdicts"]
         red = sum(1 for v in verdicts.values() if v in (reportlib.FAIL, reportlib.ERROR))
-        self.log(f"RUN  last {days} day(s): {history['runs']} run(s), {len(verdicts)} case(s), "
+        span = "last run" if window == "run" else f"last {window} day(s)"
+        self.log(f"RUN  {span}: {history['runs']} run(s), {len(verdicts)} case(s), "
                  f"{red} still red")
 
-    def _fold_history(self, days: int) -> dict | None:
-        """The window itself, or None where the folder could not be read."""
+    def _fold_history(self, window: str) -> dict | None:
+        """One of the Result filter's windows, or None where the folder
+        could not be read.
+
+        ``"run"`` is the last run that *finished*, read from the folder
+        like the day windows are — not this session's verdicts. Those are
+        cleared the moment a run starts, so a filter standing on them
+        emptied the list at the press of Start and let the rows back in
+        one at a time as they failed again: the one moment the list has a
+        job to do is the one moment it stopped doing it. Out of the
+        folder it holds still while the run goes, and the report the run
+        writes at the end is what moves it on.
+        """
+        window = window if window == "run" else str(max(1, min(90, int(window or 7))))
         folder = self._results_dir()
         try:
-            runs = reportlib.load_runs(folder, days)
+            runs = reportlib.load_runs(
+                folder, reportlib.EVERY_DAY if window == "run" else int(window))
         except OSError as exc:
             self.log(f"RUN  results in {folder} could not be read — {exc}", "emcy0")
             return None
-        return {"days": days, "runs": len(runs),
+        if window == "run":
+            runs = reportlib.newest_run(runs)
+        return {"window": window, "runs": len(runs),
                 "verdicts": reportlib.last_verdicts(runs)}
 
     def act_report_overview(self, p: dict) -> None:
