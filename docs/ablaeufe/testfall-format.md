@@ -33,6 +33,7 @@ dut: selected               # optional; Zielgerät der Bus-Schritte:
 variants: ["820", "920"]    # optional; HW-Varianten, für die der Fall gilt,
                             #   so wie das Gerät sie meldet. [] = alle
 on_fail: continue           # optional; continue (Default) | stop
+button: "Gerät → Node 1"    # nur Abläufe; Aufschrift eines eigenen Knopfes
 preconditions: []           # optional; Schritte; Fehlschlag → SKIP
 steps: []                   # Pflicht; die eigentliche Sequenz
 ```
@@ -43,6 +44,30 @@ Bus-Schritt darf per `node:` ein anderes Gerät ansprechen: ein Fall
 handelt von einem Prüfling, aber am Bus hängt manchmal mehr — ein zweites
 Gerät, das Material verbraucht, ein Gateway. Ohne diese Angabe ließe sich
 so ein Fall gar nicht aufschreiben.
+
+### `button` — ein Ablauf mit eigenem Knopf
+
+Eine Prozedur, die jemand auf Tastendruck braucht — ein einzelnes Gerät
+auf eine bekannte Node-ID zwingen, eine Familie in einen Servicemodus
+setzen — ist eine Folge von Frames wie das Adressierungsverfahren auch.
+Das Einzige, was das Werkzeug nicht selbst herausfinden kann, ist ihr
+Name: `button:` ist die Aufschrift, und die Datei bekommt in der
+Machine-Control-Box einen eigenen Knopf.
+
+Ein Lauf über diesen Knopf verteilt **keine** Session-Identität,
+übernimmt nichts als Soll-Zustand und verifiziert danach nichts — er
+führt die Frames der Datei aus und sagt, wie es ausgegangen ist. Ein
+Ablauf, der `$session` braucht, ist das Adressierungsverfahren und gehört
+auf dessen Knopf, wo die Session entsteht.
+
+Eine Datei ist das eine **oder** das andere: ein Ablauf mit `button:`
+steht nicht in der Auswahl „Adressierungsverfahren". Auto-Re-Adressierung
+startet das ausgewählte Verfahren von sich aus, auf einem Bus mit allen
+Geräten daran — eine Prozedur, die ein Gerät auf eine feste Node-ID legt,
+darf von dort nicht erreichbar sein.
+
+Bei Testfällen (`TC<id>_…`) steht der Schlüssel nur herum: sie werden über
+den Katalog gestartet, nicht über einen Knopf.
 
 ### `id` — eindeutig, und zwar nachprüfbar
 
