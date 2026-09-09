@@ -824,9 +824,21 @@ function SetupPage({ s }) {
             <span class="hv" onClick=${() => send('mc_readdress')} title="Addresses across the whole address range (Bus interface) — ends via the procedure's end signal; the freshly addressed bus is then adopted as the expected state"
               style="${btn.ghost}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${mc.teach ? 'Teaching…' : 'Re-address (teach)'}</span>
           </div>
+          ${''/* A flow may ask for a button of its own (`button:` in its
+                header) — a procedure somebody presses a key for rather
+                than one that runs as part of addressing. The words are
+                the file's, because what it does is the vendor's business
+                and the tool has nothing to add to it. */}
+          ${!!(mc.procedures || []).length && html`
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${mc.procedures.map((proc) => html`
+              <span class="hv" onClick=${() => send('mc_procedure', { file: proc.file })}
+                title=${`Runs the procedure in ${proc.file} once — no session is distributed and nothing is adopted`}
+                style="${btn.ghost}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${proc.label}</span>`)}
+          </div>`}
           ${mc.teach && html`
           <div style="border:1px solid var(--acc-bd);background:var(--acc-soft);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
-            <div style="font-size:11.5px;color:var(--acc);font-weight:600">Teach ${mc.teach.step}/${mc.teach.of} — ${mc.teach.text}</div>
+            <div style="font-size:11.5px;color:var(--acc);font-weight:600">${mc.teach.name || 'Teach'} ${mc.teach.step}/${mc.teach.of} — ${mc.teach.text}</div>
             <div style="display:flex;gap:8px">
               ${s.adapter === 'demo' && html`<span class="hv-b" onClick=${() => send('demo_press')} style="${btn.acc}font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Simulate button press</span>`}
               <span class="hv" onClick=${() => send('mc_teach_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Abort teach</span>
