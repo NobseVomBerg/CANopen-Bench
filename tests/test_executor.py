@@ -1838,18 +1838,18 @@ def test_the_result_filter_asks_the_folder_for_a_window(tc_bench):
                     {"id": "0003", "verdict": "SKIP"}])
 
     assert bench.snapshot()["tests"]["history"] is None, "not until asked"
-    bench.dispatch("tests_history", {"days": 7})
+    bench.dispatch("tests_history", {"window": "7"})
     hist = bench.snapshot()["tests"]["history"]
-    assert hist["days"] == 7 and hist["runs"] == 1
+    assert hist["window"] == "7" and hist["runs"] == 1
     assert hist["verdicts"] == {"0001": "FAIL", "0002": "PASS", "0003": "SKIP"}
 
 
 def test_a_window_outside_the_range_is_pulled_back_in(tc_bench):
     """90 days is as far as the overview looks and as far as this does."""
-    tc_bench.dispatch("tests_history", {"days": 900})
-    assert tc_bench.snapshot()["tests"]["history"]["days"] == 90
-    tc_bench.dispatch("tests_history", {"days": 0})
-    assert tc_bench.snapshot()["tests"]["history"]["days"] == 7   # 0 means unset
+    tc_bench.dispatch("tests_history", {"window": "900"})
+    assert tc_bench.snapshot()["tests"]["history"]["window"] == "90"
+    tc_bench.dispatch("tests_history", {"window": ""})
+    assert tc_bench.snapshot()["tests"]["history"]["window"] == "7"  # unset
 
 
 def test_a_run_older_than_the_window_does_not_answer(tc_bench):
@@ -1857,9 +1857,9 @@ def test_a_run_older_than_the_window_does_not_answer(tc_bench):
     old = (datetime.now() - timedelta(days=40)).isoformat(timespec="seconds")
     _write_summary(Path(bench.paths["res"]), "run_old__summary.json", old,
                    [{"id": "0001", "verdict": "FAIL"}])
-    bench.dispatch("tests_history", {"days": 7})
+    bench.dispatch("tests_history", {"window": "7"})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
-    bench.dispatch("tests_history", {"days": 90})
+    bench.dispatch("tests_history", {"window": "90"})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "FAIL"}
 
 
@@ -1870,14 +1870,64 @@ def test_the_window_follows_the_run_that_just_wrote_into_it(tc_bench):
     "nothing failed" about the run they are looking at."""
     bench = tc_bench
     _add_tc(bench, "TC0041_red.yaml", FAIL_TC.replace('id: "0002"', 'id: "0041"'))
-    bench.dispatch("tests_history", {"days": 1})
+    bench.dispatch("tests_history", {"window": "1"})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
 
     run_selected(bench, {"0041"})
 
     hist = bench.snapshot()["tests"]["history"]
-    assert hist["days"] == 1, "the window the operator picked, not another"
+    assert hist["window"] == "1", "the window the operator picked, not another"
     assert hist["verdicts"].get("0041") == "FAIL"
+
+
+def test_the_last_run_is_the_last_run_that_finished(tc_bench):
+    """Not this session's verdicts. Those are what the page had before —
+    and they are cleared the moment a run starts, so the filter emptied
+    the list at the press of Start and let the rows back in one at a time
+    as they failed again. Out of the folder it is a fact that holds
+    still: the run that finished, whenever that was."""
+    bench = tc_bench
+    old = (datetime.now() - timedelta(days=3)).isoformat(timespec="seconds")
+    new = datetime.now().isoformat(timespec="seconds")
+    _write_summary(Path(bench.paths["res"]), "run_old__summary.json", old,
+                   [{"id": "0001", "verdict": "FAIL"}])
+    _write_summary(Path(bench.paths["res"]), "run_new__summary.json", new,
+                   [{"id": "0002", "verdict": "FAIL"}])
+
+    bench.dispatch("tests_history", {"window": "run"})
+    hist = bench.snapshot()["tests"]["history"]
+    assert hist["window"] == "run" and hist["runs"] == 1
+    assert hist["verdicts"] == {"0002": "FAIL"}, "only the newest run's cases"
+
+
+def test_the_list_holds_still_while_the_run_it_selected_is_running(tc_bench):
+    """The complaint this answers: filter on the failures, select them,
+    press Start — and every row disappeared until it failed again, which
+    is the one moment the list has a job to do.
+
+    During the run the folder has not changed, so the filter stands on
+    the same verdicts and the rows stay where they are; the Result column
+    fills in beside them. The report the run writes at the end is what
+    moves the window on."""
+    bench = tc_bench
+    _write_summary(Path(bench.paths["res"]), "run_before__summary.json",
+                   datetime.now().isoformat(timespec="seconds"),
+                   [{"id": "0001", "verdict": "FAIL"}])
+    bench.dispatch("tests_history", {"window": "run"})
+    assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "FAIL"}
+
+    seen = []
+
+    def while_running(b):
+        seen.append(dict(b.snapshot()["tests"]["history"]["verdicts"]))
+
+    run_selected(bench, {"0001"}, during=while_running)
+
+    assert seen, "the run finished before anything could be looked at"
+    assert all(v == {"0001": "FAIL"} for v in seen), \
+        "the filter's ground moved while the run was going"
+    # …and once it is over, the window is the run that just finished
+    assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "PASS"}
 
 
 # -- which cases a bench without the supply offers ---------------------------
