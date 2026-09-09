@@ -29,7 +29,7 @@ _BUILTINS = {"$node", "$expected", "$session", "$line"}
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
 _HEAD_KEYS = {"id", "name", "desc", "grade", "tools", "est", "dut",
-              "variants", "on_fail", "preconditions", "steps"}
+              "variants", "on_fail", "preconditions", "steps", "button"}
 #: what a failed expectation does to the rest of the case. "continue"
 #: (the default) records the failure and keeps going; "stop" ends the
 #: case there.
@@ -121,6 +121,14 @@ class TestCase:
     #: checked in preconditions so the catalog can filter on it without
     #: running anything, and so a case states its scope in one place.
     variants: list[str] = field(default_factory=list)
+    #: flows only: the words on a button that runs this procedure once,
+    #: beside the addressing controls. A procedure a bench needs at the
+    #: press of a key — force a single device onto a known node-ID, put a
+    #: family into a service mode — is a sequence of frames like any
+    #: other, and the only thing the tool cannot work out for itself is
+    #: what to call it. Empty means no button, which is every ordinary
+    #: flow and every test case.
+    button: str = ""
     preconditions: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     #: the line each of those steps stands on in the file, 1-based and
@@ -444,6 +452,20 @@ def _step_lines(text: str) -> dict[str, list[int]]:
             and isinstance(value, yaml.SequenceNode)}
 
 
+def button_of(text: str) -> str:
+    """The ``button:`` a flow declares, read from the header alone.
+
+    Nothing else in the file has to be sound for this: a flow whose steps
+    do not parse still has a name on its button, and pressing it is where
+    that is worth saying — not in a list that quietly dropped it.
+    """
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return ""
+    return str(doc.get("button") or "").strip() if isinstance(doc, dict) else ""
+
+
 def parse_testcase(text: str, filename: str, require_prefix: bool = True,
                    extensions: dict | None = None, symbols=None) -> TestCase:
     """``extensions`` maps plugin step names ("<plugin>.<key>") to their
@@ -479,6 +501,7 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     tc.est = str(doc.get("est") or "")
     tc.dut = doc.get("dut") or "selected"
     tc.on_fail = str(doc.get("on_fail") or "continue")
+    tc.button = str(doc.get("button") or "").strip()
     raw_variants = doc.get("variants") or []
     tc.variants = ([str(v) for v in raw_variants]
                    if isinstance(raw_variants, list) else [])

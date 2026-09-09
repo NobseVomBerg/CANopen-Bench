@@ -209,8 +209,8 @@ def test_fresh_bench_normalizes_teach_flow_to_lss_standard(tmp_path):
 
 class _FlowOnlyPlugin(BenchPlugin):
     """Minimal plugin that only contributes flow files — enough to prove
-    teachFlow normalization prefers a vendor-provided teach_addressing.yaml
-    over the shipped standard-LSS default."""
+    teachFlow normalization prefers the procedure a plugin brought over the
+    standard-LSS flow the core ships."""
     name = "flowonly"
 
     def __init__(self, flow_dir):
@@ -220,13 +220,33 @@ class _FlowOnlyPlugin(BenchPlugin):
         return [self._flow_dir]
 
 
-def test_teach_flow_prefers_teach_addressing_when_a_plugin_provides_one(tmp_path):
+def _vendor_flow(tmp_path, name: str = "acme_buttons.yaml"):
     flow_src = tmp_path / "flow_src"
-    flow_src.mkdir()
-    (flow_src / "teach_addressing.yaml").write_text(
-        'id: "teach"\nname: "vendor teach"\nsteps:\n  - log: "hi"\n', encoding="utf-8")
-    bench = Bench(Db(tmp_path / "x.db"), plugins=[_FlowOnlyPlugin(flow_src)])
-    assert bench.mc["teachFlow"] == "teach_addressing.yaml"
+    flow_src.mkdir(exist_ok=True)
+    (flow_src / name).write_text(
+        'id: "vendor"\nname: "vendor addressing"\nsteps:\n  - log: "hi"\n',
+        encoding="utf-8")
+    return flow_src
+
+
+def test_a_fresh_workspace_prefers_the_procedure_a_plugin_brought(tmp_path):
+    """How a device family is addressed is that family's business, and the
+    LSS flow this package ships is what is left when nobody says otherwise.
+    By where the file came from, not by what it is called — a core that
+    knew the vendor's file name would be carrying a fact about the
+    vendor."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_FlowOnlyPlugin(_vendor_flow(tmp_path))])
+    assert bench.mc["teachFlow"] == "acme_buttons.yaml"
+
+
+def test_a_chosen_procedure_survives_the_next_start(tmp_path):
+    """The preference is for a workspace nobody has decided about yet.
+    Somebody who picked the LSS flow with a plugin installed meant it."""
+    db_path = tmp_path / "x.db"
+    plugins = [_FlowOnlyPlugin(_vendor_flow(tmp_path))]
+    bench = Bench(Db(db_path), plugins=plugins)
+    bench.dispatch("mc_flow", {"file": "lss_standard.yaml"})
+    assert Bench(Db(db_path), plugins=plugins).mc["teachFlow"] == "lss_standard.yaml"
 
 
 # -- operator teach is bounded by the address range, not an adopted count --
@@ -360,3 +380,84 @@ def test_auto_readdress_verifies_and_never_adopts_a_shrunken_bus(teach_bench):
     assert bench.mc["result"] == "mismatch"
     new_logs = bench.logs[n_logs_before:]
     assert not any("expected state adopted" in ln["msg"] for ln in new_logs)
+
+
+# -- a flow may ask for a button of its own ---------------------------------
+
+BUTTON_FLOW = '''\
+id: "marker"
+name: "put a marker on the bus"
+button: "Marker frame"
+steps:
+  - can_send: {cob: "0x333", data: ["0x01"]}
+'''
+
+
+def test_a_flow_that_declares_a_button_is_offered_as_one(teach_bench):
+    """A procedure somebody presses a key for — force a single device onto
+    a known node-ID, put a family into a service mode — is a sequence of
+    frames like the addressing procedure is. The only thing the tool
+    cannot work out is what to call it, so the file says."""
+    bench = teach_bench
+    _write_flow(bench, "marker.yaml", BUTTON_FLOW)
+    procedures = bench.snapshot()["mc"]["procedures"]
+    assert procedures == [{"file": "marker.yaml", "label": "Marker frame"}]
+
+
+def test_a_procedure_with_a_button_is_not_the_addressing_procedure(teach_bench):
+    """The two are different jobs and a file is one of them. Auto
+    re-address runs the selected procedure by itself, on a bus with every
+    device still on it — a procedure that puts one device on a fixed
+    node-ID must not be reachable from there."""
+    bench = teach_bench
+    _write_flow(bench, "marker.yaml", BUTTON_FLOW)
+    assert "marker.yaml" not in bench.snapshot()["mc"]["flows"]
+
+    bench.dispatch("mc_flow", {"file": "marker.yaml"})
+    assert bench.mc["teachFlow"] == "lss_standard.yaml", "the choice was refused"
+
+
+def test_pressing_it_runs_the_flow_once(teach_bench):
+    """No session distributed, nothing adopted, nothing verified: it runs
+    the frames in the file and says how it went."""
+    bench = teach_bench
+    _write_flow(bench, "marker.yaml", BUTTON_FLOW)
+    before = dict(bench.mc_ref or {})
+
+    async def go():
+        bench.dispatch("mc_procedure", {"file": "marker.yaml"})
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5.0
+        while bench.teach is not None and loop.time() < deadline:
+            await asyncio.sleep(0.02)
+    _run(go)
+
+    assert bench.teach is None, "the procedure did not finish in time"
+    sent = [f for f in bench.bus.poll_frames(4096)
+            if f.cob_id == "0x333" and f.direction == "TX"]
+    assert sent, "the frame never reached the bus"
+    assert any('procedure "Marker frame" done' in ln["msg"] for ln in bench.logs)
+    assert bench.mc_ref == before, "a procedure adopts nothing"
+    assert not bench.mc["session"], "and distributes no session"
+
+
+def test_a_procedure_without_a_button_cannot_be_pressed(teach_bench):
+    """The button is what says a flow is meant to be run on its own. Any
+    file name from a browser would otherwise start any flow in the folder,
+    including the addressing procedure, without the guards that has."""
+    bench = teach_bench
+    _write_flow(bench, "quiet.yaml",
+                'id: "quiet"\nname: "no button"\nsteps:\n  - log: "hi"\n')
+    bench.dispatch("mc_procedure", {"file": "quiet.yaml"})
+    assert bench.teach is None
+    assert any("no procedure button" in ln["msg"] for ln in bench.logs)
+
+
+def test_a_procedure_needs_the_interface(tmp_path):
+    """Same rule the addressing button follows: a procedure that cannot
+    reach the bus says so instead of running against nothing."""
+    bench = Bench(Db(tmp_path / "off.db"))
+    _write_flow(bench, "marker.yaml", BUTTON_FLOW)
+    bench.dispatch("mc_procedure", {"file": "marker.yaml"})
+    assert bench.teach is None
+    assert any("not connected" in ln["msg"] for ln in bench.logs)
