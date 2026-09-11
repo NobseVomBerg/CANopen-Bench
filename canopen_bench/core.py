@@ -2629,12 +2629,16 @@ class Bench:
         try:
             _open_in_editor(target)
         except OSError as exc:
-            # a bench with no desktop to hand it to — headless, or the
-            # browser is on another machine. The route this link stopped
-            # using is still there, and is the way in from there
+            # A bench with no desktop to hand it to — headless, or the
+            # browser is on another machine, or nothing is registered for
+            # .html. Raised as well as logged: this is the one action
+            # whose whole effect happens somewhere the page cannot see, so
+            # a silent failure here looks exactly like a dead link.
             self.log(f"RUN  report {name} — {exc}. Over the bench: "
                      f"/api/report/{name}", "emcy0")
-            return
+            raise ValueError(
+                f"{name} could not be opened here — {exc}. The file is at "
+                f"{target}; over the bench: /api/report/{name}") from exc
         self.log(f"RUN  opening {target}")
 
     # -- workspaces --------------------------------------------------------
