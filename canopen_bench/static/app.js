@@ -1743,10 +1743,17 @@ function OperatorPrompt({ p }) {
 // and when the bench runs on another machine, a local path is simply the
 // wrong answer. The path goes in the tooltip instead, where it costs
 // nothing and answers "where is this thing when the bench is off".
+// A report is a file, and clicking it opens that file — the bench hands
+// it to the system, which is what puts its own path in the address bar.
+// It used to be a link into this server, so a page lying in a folder on
+// the same disk came up as localhost:8000/api/report/…: an address that
+// stops working when the bench does, for something that never needed it.
+// (The route is still there for a browser on another machine.)
 const reportLink = (name, dir) => html`
-  <a href=${'/api/report/' + encodeURIComponent(name)} target="_blank" rel="noopener"
-    title=${dir ? `${joinPath(dir, name)}\n\nopened here through the bench — the file itself needs no server` : 'open ' + name}
-    style="color:var(--acc);text-decoration:underline;cursor:pointer">${name}</a>`;
+  <span class="hv" onClick=${() => send('report_open', { file: name })}
+    title=${dir ? `${joinPath(dir, name)}\n\nopens as a file, on the machine running the bench — no server in the address`
+                : 'open ' + name}
+    style="color:var(--acc);text-decoration:underline;cursor:pointer">${name}</span>`;
 
 // Separator taken from the folder itself rather than from the browser:
 // the path was configured on the machine running the bench, and that is
