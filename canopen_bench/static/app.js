@@ -4,12 +4,52 @@ import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } f
 
 const MONO = "'IBM Plex Mono',monospace";
 
+// Every button on the page goes through here, and for a long time none of
+// them looked at the answer. An action the bench does not know comes back
+// with a sentence saying so — and nothing showed it, so the click did
+// nothing at all and the bench's own log stayed empty too, because the
+// bench never accepted it. That is what a page newer than the server it
+// came from looks like, and there was no way to tell it from a dead
+// button. Refusals are held here and drawn above the state log.
+const refusals = { text: '', listeners: new Set() };
+
+function refused(text) {
+  refusals.text = text;
+  refusals.listeners.forEach((fn) => fn());
+}
+
 function send(action, params = {}) {
   return fetch('/api/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, params }),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      refused(`${action} — ${body.error || 'refused (' + res.status + ')'}`);
+    }
+    return res;
+  }, (err) => {
+    // the bench is gone or restarting; the socket says so too, but a
+    // button that did nothing has to say it where it was pressed
+    refused(`${action} — the bench did not answer (${err})`);
   });
+}
+
+function ActionRefused() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const fn = () => bump((n) => n + 1);
+    refusals.listeners.add(fn);
+    return () => { refusals.listeners.delete(fn); };
+  }, []);
+  if (!refusals.text) return null;
+  return html`
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:6px 18px;
+                background:var(--red-soft);color:var(--red);font-size:11.5px;font-weight:600">
+      <span>⚠ ${refusals.text}</span>
+      <span class="hv" onClick=${() => refused('')} style="margin-left:auto;cursor:pointer;font-weight:400">dismiss</span>
+    </div>`;
 }
 
 function useServerState() {
@@ -2419,6 +2459,7 @@ function App() {
       ${ui.page === 'about' && html`<${AboutPage} />`}
       ${s.browse && html`<${BrowseDialog} b=${s.browse} />`}
 
+      <${ActionRefused} />
       <div style="flex:none;border-top:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column">
         <div class="hv" onClick=${() => setUi({ ...ui, logOpen: !ui.logOpen })} style="display:flex;align-items:center;gap:10px;padding:6px 18px;cursor:pointer">
           <span style="font-weight:600;font-size:11.5px">State log</span>
