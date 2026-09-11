@@ -4625,3 +4625,65 @@ def test_an_upload_keeps_the_bytes_the_file_was_written_in(bench, tmp_path):
     stored = (bench.db.eds_dir / "windows.eds").read_text(encoding="utf-8")
     assert "Betriebsstundenzähler" in stored
     assert "�" not in stored, "the character was lost on the way in"
+
+
+# -- act_report_open: a report is a file, not a URL --------------------------
+
+def _a_report(bench, name: str = "20260101_010101__summary.html") -> Path:
+    folder = bench._results_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_text("<h1>run</h1>", encoding="utf-8")
+    return folder / name
+
+
+def test_report_open_hands_the_file_to_the_system(bench, monkeypatch):
+    """The link used to go through this server, so a page in a folder on
+    the same disk came up as localhost:8000/api/report/… — an address that
+    stops working when the bench does, for a file that never needed it."""
+    target = _a_report(bench)
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("report_open", {"file": target.name})
+
+    assert opened == [target.resolve()]
+    assert any("opening" in ln["msg"] and target.name in ln["msg"] for ln in bench.logs)
+
+
+@pytest.mark.parametrize("name", [
+    "../bench.db",                 # out of the folder
+    "sub/report.html",             # not a plain name
+    "20260101_010101__summary.json",   # not the page a run wrote
+    "nothing_here.html",           # not on the disk
+    "",                            # nothing at all
+])
+def test_report_open_refuses_anything_but_a_report_in_the_folder(bench, monkeypatch, name):
+    """The name arrives from the outside, and the results folder is a path
+    the operator chose — "whatever is under it" must not become "whatever
+    is on the disk"."""
+    _a_report(bench)
+    (bench._results_dir() / "20260101_010101__summary.json").write_text("{}", encoding="utf-8")
+    opened = []
+    monkeypatch.setattr(core_mod, "_open_in_editor", lambda path: opened.append(path))
+
+    bench.dispatch("report_open", {"file": name})
+
+    assert opened == []
+    assert bench.logs[-1]["type"] == "emcy0"
+
+
+def test_report_open_survives_a_machine_with_no_browser(bench, monkeypatch):
+    """Headless, or the browser is on another machine: there is nothing to
+    hand the file to. The route this link stopped using is still there, so
+    the message that says it failed also says the way in."""
+    def boom(path):
+        raise OSError("no application registered")
+    _a_report(bench)
+    monkeypatch.setattr(core_mod, "_open_in_editor", boom)
+
+    bench.dispatch("report_open", {"file": "20260101_010101__summary.html"})  # must not raise
+
+    said = bench.logs[-1]["msg"]
+    assert "no application registered" in said
+    assert "/api/report/20260101_010101__summary.html" in said
+    assert bench.logs[-1]["type"] == "emcy0"
