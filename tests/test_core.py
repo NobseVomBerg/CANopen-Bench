@@ -4672,18 +4672,22 @@ def test_report_open_refuses_anything_but_a_report_in_the_folder(bench, monkeypa
     assert bench.logs[-1]["type"] == "emcy0"
 
 
-def test_report_open_survives_a_machine_with_no_browser(bench, monkeypatch):
-    """Headless, or the browser is on another machine: there is nothing to
-    hand the file to. The route this link stopped using is still there, so
-    the message that says it failed also says the way in."""
+def test_report_open_that_cannot_open_says_so_to_the_page(bench, monkeypatch):
+    """Headless, no .html registered, or the browser is on another
+    machine: there is nothing to hand the file to. This is the one action
+    whose whole effect happens where the page cannot look, so it is also
+    the one that must not fail quietly — a silent no-op here is
+    indistinguishable from a dead link, which is exactly how it was
+    reported. The refusal reaches the page; the log keeps its line."""
     def boom(path):
         raise OSError("no application registered")
     _a_report(bench)
     monkeypatch.setattr(core_mod, "_open_in_editor", boom)
 
-    bench.dispatch("report_open", {"file": "20260101_010101__summary.html"})  # must not raise
+    with pytest.raises(ValueError) as refused:
+        bench.dispatch("report_open", {"file": "20260101_010101__summary.html"})
 
-    said = bench.logs[-1]["msg"]
-    assert "no application registered" in said
-    assert "/api/report/20260101_010101__summary.html" in said
+    assert "no application registered" in str(refused.value)
+    assert "/api/report/20260101_010101__summary.html" in str(refused.value)
+    assert str(bench._results_dir()) in str(refused.value), "it says where the file is"
     assert bench.logs[-1]["type"] == "emcy0"

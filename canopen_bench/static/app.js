@@ -1723,7 +1723,7 @@ function TestsPage({ s, ui, setUi }) {
       <div style="font-weight:600;font-size:13px;margin-top:2px">Recent reports</div>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px">
         ${t.reports.map((rp) => html`
-          <span style="display:flex;justify-content:space-between;color:var(--mid)">${rp.file ? reportLink(rp.file, resDir) : html`<span>${rp.name}</span>`}<span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
+          <span style="display:flex;justify-content:space-between;color:var(--mid)">${rp.file ? html`<${ReportLink} name=${rp.file} dir=${resDir} />` : html`<span>${rp.name}</span>`}<span style="color:${rp.ok ? 'var(--grn)' : 'var(--red)'};font-weight:600">${rp.score}</span></span>`)}
       </div>
       <${ResultsPath} dir=${resDir} />
       <${OverviewBox} ov=${t.overview} dir=${resDir} />
@@ -1798,12 +1798,30 @@ function OperatorPrompt({ p }) {
 const fileHref = (path) =>
   'file:///' + encodeURI(path.replace(/\\/g, '/').replace(/^\/+/, ''));
 
-const reportLink = (name, dir) => html`
-  <a href=${dir ? fileHref(joinPath(dir, name)) : undefined}
-    onClick=${(e) => { e.preventDefault(); send('report_open', { file: name }); }}
-    title=${dir ? `${joinPath(dir, name)}\n\nopens as a file, on the machine running the bench — no server in the address`
-                : 'open ' + name}
-    style="color:var(--acc);text-decoration:underline;cursor:pointer">${name}</a>`;
+// …and beside it, the path itself, one click away. What the bench does
+// with the file happens on the bench's own desktop, where this page
+// cannot see whether anything came up — a default browser that opens
+// behind everything, an .html nobody registered, a machine with no
+// desktop at all. Copying the address always works, and the address is
+// what somebody wants anyway: to paste into Explorer, a mail, a ticket.
+function ReportLink({ name, dir }) {
+  const [done, setDone] = useState(false);
+  const path = dir ? joinPath(dir, name) : name;
+  return html`
+    <span style="display:flex;align-items:center;gap:6px;min-width:0">
+      <a href=${dir ? fileHref(path) : undefined}
+        onClick=${(e) => { e.preventDefault(); send('report_open', { file: name }); }}
+        title=${dir ? `${path}\n\nopens as a file, on the machine running the bench — no server in the address`
+                    : 'open ' + name}
+        style="color:var(--acc);text-decoration:underline;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</a>
+      ${!!dir && html`
+        <span class="hv-white" onClick=${() => copyText(path).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1400);
+        })} title=${`copy ${path}`}
+          style="flex:none;font-size:11px;color:var(--faint);cursor:pointer">${done ? '✓' : '⧉'}</span>`}
+    </span>`;
+}
 
 // Separator taken from the folder itself rather than from the browser:
 // the path was configured on the machine running the bench, and that is
@@ -1865,7 +1883,7 @@ function OverviewBox({ ov, dir }) {
       ${!ov && html`<span style="color:var(--faint)">not created yet — the file lands beside the reports</span>`}
       ${ov && html`
         <span style="display:flex;justify-content:space-between">
-          ${reportLink(ov.name, dir)}
+          <${ReportLink} name=${ov.name} dir=${dir} />
           <span style="color:var(--faint);font:10.5px ${MONO}">${ov.runs} run${ov.runs === 1 ? '' : 's'} · ${ov.days} d</span>
         </span>
         ${ov.variants.length === 0 && html`<span style="color:var(--faint)">no runs in that window</span>`}
