@@ -299,14 +299,14 @@ def test_a_report_opens_as_a_file_not_through_the_server():
     use it."""
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "send('report_open'" in app
-    link = app.split("const reportLink")[1].split("\n\n")[0]
+    link = app.split("function ReportLink")[1].split("\n\n")[0]
     assert "/api/report/" not in link, "the link goes through the server again"
     assert "joinPath(dir, name)" in link, "the tooltip no longer says where the file is"
     # …and it is a link, not something painted like one: the href is the
     # file's own address, which is what the status bar shows and what
     # "copy link address" copies. The click cannot follow it — a page on
     # http may not navigate to file:// — so it goes through the bench
-    assert "<a href=${dir ? fileHref(" in link
+    assert "<a href=${dir ? fileHref(path)" in link
     assert "e.preventDefault(); send('report_open'" in link
 
 
