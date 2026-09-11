@@ -308,3 +308,18 @@ def test_a_report_opens_as_a_file_not_through_the_server():
     # http may not navigate to file:// — so it goes through the bench
     assert "<a href=${dir ? fileHref(" in link
     assert "e.preventDefault(); send('report_open'" in link
+
+
+def test_an_action_the_bench_refuses_says_so():
+    """Every button goes through one `send`, and for a long time none of
+    them looked at the answer. An action the bench does not know comes
+    back with a sentence saying so — and nothing showed it, so the click
+    did nothing at all *and* the bench's log stayed empty, because the
+    bench never accepted it. A page newer than its server looked exactly
+    like a dead button."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    send = app.split("function send(")[1].split("\nfunction ")[0]
+    assert "res.ok" in send, "send() ignores the answer again"
+    assert "refused(" in send
+    assert "the bench did not answer" in send   # …and a request that never arrived
+    assert "<${ActionRefused} />" in app, "the strip is not drawn anywhere"
