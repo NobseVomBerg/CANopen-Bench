@@ -1783,35 +1783,23 @@ function OperatorPrompt({ p }) {
 // and when the bench runs on another machine, a local path is simply the
 // wrong answer. The path goes in the tooltip instead, where it costs
 // nothing and answers "where is this thing when the bench is off".
-// A report is a file, and the link is that file's own address: the
-// status bar shows it on hover, "copy link address" copies it, and it is
-// still the address after the bench is switched off. It used to be a
-// link into this server, so a page lying in a folder on the same disk
-// came up as localhost:8000/api/report/… — an address that outlives
-// nothing. (The route is still there for a browser on another machine.)
+// The name opens the report, the ⧉ beside it copies where the file is.
 //
-// The click cannot follow that href: a page served over http may not
-// navigate to file://, and the browser refuses it without a word. So the
-// click goes to the bench, which hands the file to the system — the same
-// thing the pencil does with a test case, and what opens it under its
-// own path. Both halves of a link, each by the only route it has.
-const fileHref = (path) =>
-  'file:///' + encodeURI(path.replace(/\\/g, '/').replace(/^\/+/, ''));
-
-// …and beside it, the path itself, one click away. What the bench does
-// with the file happens on the bench's own desktop, where this page
-// cannot see whether anything came up — a default browser that opens
-// behind everything, an .html nobody registered, a machine with no
-// desktop at all. Copying the address always works, and the address is
-// what somebody wants anyway: to paste into Explorer, a mail, a ticket.
+// Two controls because no one of them can be both. A browser will not
+// follow a link to file:// from a page it was served over http — it
+// refuses without a word — so a click has to go through this server, and
+// the address bar then says localhost. What somebody wants the path for
+// is the other things: pasting it into Explorer, a mail, a ticket. So
+// the click reads the report and the ⧉ hands over the path, which also
+// works while this page is open on another machine, where nothing local
+// could be opened at all.
 function ReportLink({ name, dir }) {
   const [done, setDone] = useState(false);
   const path = dir ? joinPath(dir, name) : name;
   return html`
     <span style="display:flex;align-items:center;gap:6px;min-width:0">
-      <a href=${dir ? fileHref(path) : undefined}
-        onClick=${(e) => { e.preventDefault(); send('report_open', { file: name }); }}
-        title=${dir ? `${path}\n\nopens as a file, on the machine running the bench — no server in the address`
+      <a href=${'/api/report/' + encodeURIComponent(name)} target="_blank" rel="noopener"
+        title=${dir ? `${path}\n\nopens through the bench — a browser will not open a local file from a page it was served. ⧉ copies the path`
                     : 'open ' + name}
         style="color:var(--acc);text-decoration:underline;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</a>
       ${!!dir && html`

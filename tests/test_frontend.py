@@ -289,25 +289,23 @@ def test_a_skipped_case_is_not_a_failed_one():
     assert "const RED = new Set(['FAIL', 'ERROR'])" in app
 
 
-def test_a_report_opens_as_a_file_not_through_the_server():
-    """A report is a page in a folder on the bench's own disk. Linked into
-    this server it came up as localhost:8000/api/report/… — an address
-    that stops working when the bench does, and one nobody can paste into
-    a mail for a file that needs no bench at all.
+def test_a_report_is_read_through_the_bench_and_its_path_is_copyable():
+    """Two controls, because neither can be both. A browser refuses to
+    follow a link to file:// from a page it was served over http — it says
+    nothing, the click just dies — so reading a report goes through the
+    route, and the address bar says localhost. The path is what somebody
+    wants for the other things (Explorer, a mail, a ticket), so it sits
+    beside the name as its own click.
 
-    The route stays for a browser on another machine; the link does not
-    use it."""
+    Tried the other way round once: the href was the file's own address
+    and the click asked the bench to open it. On a bench whose desktop did
+    not oblige, that was a link that did nothing at all."""
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "send('report_open'" in app
     link = app.split("function ReportLink")[1].split("\n\n")[0]
-    assert "/api/report/" not in link, "the link goes through the server again"
+    assert "'/api/report/' + encodeURIComponent(name)" in link
+    assert "copyText(path)" in link, "the path is not copyable beside it"
     assert "joinPath(dir, name)" in link, "the tooltip no longer says where the file is"
-    # …and it is a link, not something painted like one: the href is the
-    # file's own address, which is what the status bar shows and what
-    # "copy link address" copies. The click cannot follow it — a page on
-    # http may not navigate to file:// — so it goes through the bench
-    assert "<a href=${dir ? fileHref(path)" in link
-    assert "e.preventDefault(); send('report_open'" in link
+    assert "file:///" not in app, "a file:// link cannot be followed from this page"
 
 
 def test_an_action_the_bench_refuses_says_so():
