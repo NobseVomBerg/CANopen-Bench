@@ -287,3 +287,18 @@ def test_a_skipped_case_is_not_a_failed_one():
     "run the failures" would put it back for no reason."""
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "const RED = new Set(['FAIL', 'ERROR'])" in app
+
+
+def test_a_report_opens_as_a_file_not_through_the_server():
+    """A report is a page in a folder on the bench's own disk. Linked into
+    this server it came up as localhost:8000/api/report/… — an address
+    that stops working when the bench does, and one nobody can paste into
+    a mail for a file that needs no bench at all.
+
+    The route stays for a browser on another machine; the link does not
+    use it."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "send('report_open'" in app
+    link = app.split("const reportLink")[1].split("\n\n")[0]
+    assert "/api/report/" not in link, "the link goes through the server again"
+    assert "joinPath(dir, name)" in link, "the tooltip no longer says where the file is"

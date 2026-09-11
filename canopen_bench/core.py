@@ -2598,6 +2598,45 @@ class Bench:
             return
         self.log(f"CFG  opening {tc.file} in the system editor")
 
+    def act_report_open(self, p: dict) -> None:
+        """Open a report as what it is: a file on this machine.
+
+        The link used to go through this server, so a page sitting in a
+        folder on the same disk arrived as ``localhost:8000/api/report/…``
+        — an address that only works while the bench is running, for a
+        file that needs no bench at all, and one nobody can paste into a
+        mail or a ticket. Handed to the system instead, it opens under its
+        own path and can be kept, sent and filed from there.
+
+        The machine that opens it is the bench's, like every other `open`
+        here: a browser cannot reach a disk, and the file is on the bench
+        anyway. The route stays for the browser that is somewhere else.
+
+        Only a plain name, only inside the results folder, only the HTML a
+        run wrote — a name arriving from the outside is not a path this
+        resolves.
+        """
+        name = str(p.get("file") or "")
+        folder = self._results_dir().resolve()
+        try:
+            target = (folder / name).resolve()
+            if (Path(name).name != name or target.parent != folder
+                    or target.suffix.lower() != ".html" or not target.is_file()):
+                raise FileNotFoundError(target)
+        except (OSError, ValueError) as exc:
+            self.log(f"RUN  report {name or '?'} — {exc}", "emcy0")
+            return
+        try:
+            _open_in_editor(target)
+        except OSError as exc:
+            # a bench with no desktop to hand it to — headless, or the
+            # browser is on another machine. The route this link stopped
+            # using is still there, and is the way in from there
+            self.log(f"RUN  report {name} — {exc}. Over the bench: "
+                     f"/api/report/{name}", "emcy0")
+            return
+        self.log(f"RUN  opening {target}")
+
     # -- workspaces --------------------------------------------------------
     _WS_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,49}$")
     _RESERVED_WORKSPACE_NAMES = {"plugins"}  # plugin_dir lives beside the workspaces
