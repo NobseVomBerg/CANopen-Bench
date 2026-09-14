@@ -11,6 +11,7 @@
   td.resultCanceled { background-color: #C0C040; }
   td.resultOk     { background-color: #40C040; }
   td.resultNok    { background-color: #C04040; }
+  td.resultRunning { background-color: #405080; }
   tr.testStepOmitted, td.testStepOmitted { color: #808080; }
   tr.testStepFlow, summary  { color: #B09090; }
 }
@@ -27,6 +28,7 @@
   td.resultCanceled { background-color: #FFFF44; }
   td.resultOk     { background-color: #44FF44; }
   td.resultNok    { background-color: #FF4444; }
+  td.resultRunning { background-color: #99BBFF; }
   tr.testStepOmitted, td.testStepOmitted { color: #808080; }
   tr.testStepFlow, summary  { color: #705050; }
 }
@@ -50,5 +52,6 @@ summary         { cursor: pointer; font-weight: bold; padding: 2px 0; }
   td.resultCanceled { color: #C0C000; font-weight: bold; }
   td.resultOk   { color: #40C040; font-weight: bold; }
   td.resultNok  { color: #FF0000; font-weight: bold; }
+  td.resultRunning { color: #405080; font-weight: bold; }
   details[open] { display: block; }
 }
