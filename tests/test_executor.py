@@ -2003,6 +2003,69 @@ def test_a_step_costs_one_row_not_one_page(tc_bench):
     assert page.stat().st_size == before + grew
 
 
+def test_the_end_of_a_case_writes_two_rows_and_a_tail(tc_bench):
+    """Not the page. The result and the duration are known only at the
+    end and sit at the top, so they are laid down at a fixed width when
+    the case starts and written over where they lie — a file cannot
+    change the length of anything in its middle, which is the whole
+    reason for the padding."""
+    bench = tc_bench
+    rec = reportlib.CaseRecord(id="0053", name="patched", started="now")
+    bench._run_cases = [rec]
+    bench._live_case_begin(rec)
+    for i in range(5):
+        rec.steps.append(reportlib.StepRecord(line=i, text=f"step {i}", state="ok"))
+    bench._live_steps(rec)
+    page = Path(bench.paths["res"]) / rec.file
+    before = page.stat().st_size
+
+    rec.verdict, rec.reason, rec.seconds = "FAIL", "expected 0x0E", 12.75
+    bench._live_case_end(rec)
+
+    grew = page.stat().st_size - before
+    assert grew == len(reportlib.page_tail().encode()), \
+        "the end of a case moved more than the closing tags"
+    text = page.read_text(encoding="utf-8")
+    assert "FAIL — expected 0x0E" in text and "12.8 s" in text
+    assert "RUNNING" not in text
+
+
+def test_a_reason_longer_than_the_reserve_is_cut_in_the_header(tc_bench):
+    """The row has to keep its width, so a long reason is cut there. It
+    stands in full on the step that failed, which is where somebody
+    reading the page is looking anyway."""
+    bench = tc_bench
+    rec = reportlib.CaseRecord(id="0054", name="wordy", started="now")
+    bench._run_cases = [rec]
+    bench._live_case_begin(rec)
+    page = Path(bench.paths["res"]) / rec.file
+    before = page.stat().st_size
+
+    rec.verdict, rec.reason = "FAIL", "x" * 400
+    bench._live_case_end(rec)
+
+    assert page.stat().st_size - before == len(reportlib.page_tail().encode())
+    assert page.read_text(encoding="utf-8") == reportlib.case_html(rec)
+
+
+def test_a_page_that_is_not_what_the_run_left_is_written_whole(tc_bench):
+    """The offsets are only good for the file this run wrote. If the page
+    on disk is something else — edited, replaced, written by an older
+    version — the rows are not overwritten at an offset that means
+    nothing; the page is rendered whole instead."""
+    bench = tc_bench
+    rec = reportlib.CaseRecord(id="0055", name="meddled", started="now")
+    bench._run_cases = [rec]
+    bench._live_case_begin(rec)
+    page = Path(bench.paths["res"]) / rec.file
+    page.write_text("<html>somebody else was here</html>\n", encoding="utf-8")
+
+    rec.verdict, rec.seconds = "PASS", 1.0
+    bench._live_case_end(rec)
+
+    assert page.read_text(encoding="utf-8") == reportlib.case_html(rec)
+
+
 def test_the_page_left_behind_is_the_one_the_renderer_would_write(tc_bench):
     """Two ways to produce the same page — appended while the case runs,
     rendered whole when it ends — and only the second is the definition.

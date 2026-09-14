@@ -1027,6 +1027,7 @@ class Bench:
         #: where its line in the summary begins, which pages are finished,
         #: and whether a write has already failed (said once, not per step)
         self._written_steps = 0
+        self._patch_at: dict[str, int] = {}
         self._summary_tail = 0
         self._finalised: set[str] = set()
         self._report_live_failed = False
@@ -1633,7 +1634,12 @@ class Bench:
         endurance run does that all night.
         """
         self._written_steps = 0
-        if self._report_write(self._case_file(case), reportlib.case_head(case)):
+        head = reportlib.case_head(case)
+        # where the two rows the end of the case writes over begin. Which
+        # rows a header carries depends on what the case declares, so this
+        # is read off the head that was written, not assumed
+        self._patch_at = reportlib.patch_offsets(head)
+        if self._report_write(self._case_file(case), head):
             self._live_summary_row(case, replace=False)
 
     def _live_steps(self, case: reportlib.CaseRecord) -> None:
@@ -1646,17 +1652,59 @@ class Bench:
             self._written_steps = len(case.steps)
 
     def _live_case_end(self, case: reportlib.CaseRecord) -> None:
-        """Close this case off: the rest of its steps, then the page as it
-        will stand — header with the result and the duration in it, and
-        the tags that close the document.
+        """Close this case off: the rest of its steps, the two header rows
+        it can only fill in now, and the tags that end the document.
 
-        Written whole this once, which is where the old tool patched its
-        header. Once per case is nothing; per step it was the problem.
+        The rows are written over the bytes they already occupy — they
+        were laid down at a fixed width for exactly this (see
+        report.PATCH_LABELS), so nothing behind them has to move. What the
+        old tool did with its header, and the reason the end of a case
+        costs a few hundred bytes rather than the whole page.
+
+        Every assumption behind that is checked before anything is
+        written, and a page that does not look the way this left it gets
+        rendered whole instead. It is one write either way; a report with
+        a row overwritten at the wrong offset would be worse than either.
         """
         self._live_steps(case)
-        if self._report_write(self._case_file(case), reportlib.case_html(case)):
+        if self._patch_case(case):
+            self._finalised.add(case.file)
+        elif self._report_write(self._case_file(case), reportlib.case_html(case)):
             self._finalised.add(case.file)
         self._live_summary_row(case, replace=True)
+
+    def _patch_case(self, case: reportlib.CaseRecord) -> bool:
+        """Overwrite the two header rows and append the closing tags.
+
+        False where anything is not as expected — the offsets are gone,
+        the file was written by something else, a row came out a
+        different length — and the caller writes the page whole instead.
+        """
+        rows = reportlib.patch_rows(case)
+        if set(self._patch_at) != set(rows):
+            return False
+        try:
+            with (self._results_dir() / case.file).open("r+b") as out:
+                for label, offset in self._patch_at.items():
+                    row = rows[label].encode("utf-8")
+                    out.seek(offset)
+                    # what is there has to be this row, and exactly as
+                    # long: it opens with the label and closes with the
+                    # end of a row after precisely as many bytes
+                    was = out.read(len(row))
+                    if not (was.startswith(f"<tr><td>{label}</td>".encode())
+                            and was.endswith(b"</td></tr>\n")):
+                        return False
+                    out.seek(offset)
+                    out.write(row)
+                out.seek(0, 2)
+                out.write(reportlib.page_tail().encode("utf-8"))
+        except OSError as exc:
+            if not self._report_live_failed:
+                self._report_live_failed = True
+                self.log(f"RUN  report not written — {exc}", "emcy0")
+            return False
+        return True
 
     def _live_summary_row(self, case: reportlib.CaseRecord, replace: bool) -> None:
         """The case's line in the summary: appended when it starts, and
