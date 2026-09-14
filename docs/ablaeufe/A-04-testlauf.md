@@ -170,13 +170,33 @@ nicht neu geschrieben:
 | Lauf beginnt | Kopf der Zusammenfassung (`summary_head`) |
 | Testfall beginnt | Kopf seiner Seite (`case_head`) + seine Zeile in der Zusammenfassung |
 | je Schritt | **eine Zeile** (`step_row`), angehängt |
-| Testfall endet | restliche Zeilen, dann die Seite einmal vollständig (`case_html`) — dort bekommt der Kopf Ergebnis und Dauer; die Zeile in der Zusammenfassung wird an Ort und Stelle ersetzt |
+| Testfall endet | restliche Zeilen, die zwei Kopfzeilen (Ergebnis, Dauer) **an Ort und Stelle überschrieben**, schließende Tags angehängt; die Zeile in der Zusammenfassung wird ebenso ersetzt |
 | Lauf endet | Zusammenfassung vollständig (Ergebnis des Laufs), `__summary.json` |
 
 Ein Schritt kostet damit seine eigene Zeile, nicht das Dokument, in dem
 sie landet. Über einen Fall mit 10 000 Schritten sind das ~2,4 MB statt
 ~6 GB — der Unterschied, der einen Dauerlauf über Nacht von einer
 Belastung des Datenträgers unterscheidet.
+
+Am Ende eines Falls bewegt sich deshalb nichts außer zwei Zeilen und dem
+Abschluss — die Datei wächst um genau `page_tail()`.
+
+**Warum die Kopfzeilen aufgefüllt sind:** Ergebnis und Dauer stehen erst
+am Ende fest, aber oben in der Datei. Keine Datei kann die *Länge* von
+etwas in ihrer Mitte ändern — `seek` + `write` ersetzt Bytes, und nur so
+viele, wie da waren. Beide Zeilen werden deshalb von Anfang an auf feste
+Breite geschrieben (`PATCH_WIDTH`, 120 Zeichen Inhalt; das
+Klassenattribut auf 14, weil `resultOk` und `resultCanceled` verschieden
+lang sind). Gezahlt wird mit Leerzeichen, die HTML ohnehin zusammenfasst.
+Eine Begründung, die nicht hineinpasst, wird **in der Kopfzeile** gekürzt
+— vollständig steht sie in der Zeile des Schritts, der fehlschlug.
+
+Vor dem Überschreiben wird geprüft, dass an der Stelle wirklich diese
+Zeile steht (Label am Anfang, Zeilenende nach exakt so vielen Bytes).
+Passt das nicht — Datei von Hand bearbeitet, von einer älteren Version
+geschrieben —, wird die Seite stattdessen einmal ganz gerendert. Ein
+Report mit einer Zeile, die an der falschen Stelle überschrieben wurde,
+wäre schlimmer als beides.
 
 Weil die laufende Zeile in der Zusammenfassung immer die **letzte** ist,
 wird sie am Ende des Falls nicht gesucht, sondern abgeschnitten und neu
