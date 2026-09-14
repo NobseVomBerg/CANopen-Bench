@@ -4625,3 +4625,143 @@ def test_an_upload_keeps_the_bytes_the_file_was_written_in(bench, tmp_path):
     stored = (bench.db.eds_dir / "windows.eds").read_text(encoding="utf-8")
     assert "Betriebsstundenzähler" in stored
     assert "�" not in stored, "the character was lost on the way in"
+
+
+# -- one way in for a value, and it comes back for the right device ----------
+
+def test_remember_is_the_one_way_a_value_gets_in(connected_bench):
+    """Table, age and database in one call. There used to be five writers,
+    two of which reached the database — and a device switched away from
+    came back with whatever those two had happened to catch."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+
+    bench.remember("0x2040:01", "0x00C8")
+
+    assert bench.obj_vals["0x2040:01"] == "0x00C8"
+    assert bench.obj_vals_at["0x2040:01"] > 0
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
+
+
+def test_the_display_mirror_refresh_is_remembered_like_a_read(connected_bench):
+    """The mirror read its slots straight into the table and nowhere else,
+    so a device switch threw the whole display away. It goes through the
+    same door as every other read now."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench.db.eds_set_display(bench.sel_devices[0]["eds"], [{"idx": "0x2040", "sub": "01"}])
+
+    bench.dispatch("mirror_refresh", {})
+
+    assert "0x2040:01" in bench.db.last_values(sn)
+
+
+def test_an_accepted_write_is_remembered_too(connected_bench):
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x42"})
+    bench.dispatch("obj_write", {"idx": "0x2000", "sub": "00"})
+    assert bench.db.last_values(sn).get("0x2000:00", "").endswith("42")
+
+
+def test_what_the_bus_carried_past_comes_back_for_that_device(connected_bench):
+    """A TPDO a device broadcasts is the freshest thing known about it and
+    used to live in memory only, keyed by node. Now it is written down
+    under the device's serial number — on a switch, at shutdown and every
+    few seconds — and selecting the device again brings it back."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench._bus_sample(1, 0x2040, 0x01, 0x00C8, 2)        # node 1 broadcast 200
+    assert "0x2040:01" not in bench.db.last_values(sn), "not per frame"
+
+    bench.dispatch("dev_toggle", {"node": 1})            # away: the flush
+    bench.dispatch("dev_toggle", {"node": 2})
+    bench.dispatch("dev_toggle", {"node": 2})
+    bench.dispatch("dev_toggle", {"node": 1})            # …and back
+
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
+    assert bench.obj_vals["0x2040:01"] == "0x00C8"
+    assert bench._panel_value("0x2040:01", 1)[1] in ("bus", "db")
+
+
+def test_a_node_id_handed_to_another_unit_does_not_carry_its_values(connected_bench):
+    """Re-addressing gives a node-ID to a different device. Keyed by node,
+    the values the old unit broadcast were shown for the new one — a
+    reading nobody took, on a device nobody read. Keyed by serial number
+    they stay with the unit they came from."""
+    bench = connected_bench
+    bench._bus_sample(1, 0x2040, 0x01, 0x00C8, 2)        # the unit at node 1
+    old_sn = bench.devices[0]["sn"]
+    assert bench.seen_vals[(old_sn, "0x2040:01")][0] == "0x00C8"
+
+    bench.devices[0]["sn"] = "999999"                    # another unit, same node
+    assert bench._panel_value("0x2040:01", 1) == (None, "", 0.0)
+    assert (old_sn, "0x2040:01") in bench.seen_vals, "the old unit keeps its value"
+
+
+def test_the_bus_values_reach_the_database_every_few_seconds(connected_bench, monkeypatch):
+    """Ctrl-C and a closed console window skip shutdown. A flush every
+    SEEN_FLUSH_S is what keeps that from costing the session — seconds are
+    lost, not the afternoon."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench._bus_sample(1, 0x2040, 0x01, 0x0032, 2)
+    bench._tick_once_sync = lambda: asyncio.run(bench._tick_once())
+    bench._tick_once_sync()
+    assert "0x2040:01" not in bench.db.last_values(sn), "too soon"
+
+    monkeypatch.setattr(core_mod, "SEEN_FLUSH_S", 0.0)
+    bench._tick_once_sync()
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x0032"
+
+
+def test_shutdown_writes_the_last_seconds_of_the_bus(connected_bench):
+    bench = connected_bench
+    sn = bench.devices[0]["sn"]
+    bench._bus_sample(1, 0x2040, 0x01, 0x0011, 2)
+    bench.shutdown()
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x0011"
+
+
+def test_a_value_seen_at_an_unknown_node_is_not_written_down(connected_bench):
+    """"node:9" is not a device, it is where one happened to be."""
+    bench = connected_bench
+    bench._bus_sample(9, 0x2040, 0x01, 0x0011, 2)
+    bench._flush_seen()
+    assert bench.seen_vals[("node:9", "0x2040:01")][0] == "0x0011"
+    assert bench.db.last_values("node:9") == {}
+
+
+def test_a_restored_value_says_it_was_restored(connected_bench):
+    """Out of the database when the device was selected, not read: the
+    panel used to call it "read just now", which is the one thing it was
+    not. The previous device's timestamps went with it."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("dev_toggle", {"node": 1})
+    value, src, age = bench._panel_value("0x2040:01", 1)
+    assert value and src == "db" and age == 0.0
+    assert bench.obj_vals_at == {}
+
+
+def test_the_table_marks_the_eds_default_as_a_default(connected_bench):
+    """252 numbers in the table and none of them read: the file's defaults,
+    drawn like readings. After a device switch that is most of the table,
+    and a default that looks like a measurement is a measurement nobody
+    took."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    fmt = bench.snapshot()["objects"]["fmt"]
+    assert fmt and all(row["dflt"] for row in fmt.values()), "nothing read, all defaults"
+
+    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    fmt = bench.snapshot()["objects"]["fmt"]
+    assert fmt["0x2040:01"]["dflt"] is False
+    assert any(row["dflt"] for key, row in fmt.items() if key != "0x2040:01")

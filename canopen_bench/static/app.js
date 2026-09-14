@@ -967,6 +967,7 @@ function SetupPage({ s }) {
 // fades: full strength while it is fresh, then down to a third. The
 // tooltip says it in words, because a shade is a hint and not a fact.
 const panelWhen = (f) => ((f.alt ? f.alt + ' · ' : '') + (!f.src ? 'not read yet'
+  : f.src === 'db' ? 'last known value, restored from the workspace db — not read this session'
   : `${f.src === 'bus' ? 'seen on the bus' : 'read'} ${f.age < 1 ? 'just now'
     : f.age < 60 ? Math.round(f.age) + ' s ago'
     : Math.round(f.age / 60) + ' min ago'}`));
@@ -1238,7 +1239,15 @@ function ObjectsPage({ s, ui, setUi }) {
   // fields. The raw number never disappears behind a name.
   const fmt = s.objects.fmt || {};
   const shownValue = (key, fallback) => (fmt[key] ? fmt[key].txt : fallback);
-  const valueTitle = (key, fallback) => (fmt[key] ? fmt[key].alt : fallback);
+  // An object nobody has read or seen shows the EDS's default, and it
+  // has to look like one: a file's number drawn like a reading is a
+  // number nobody measured. Grey and slanted, and the tooltip says it
+  // in words — after a device switch that is most of the table.
+  const isDefault = (key) => !!(fmt[key] && fmt[key].dflt);
+  const valueTitle = (key, fallback) => (fmt[key]
+    ? (isDefault(key) ? 'EDS default — not read from this device · ' : '') + fmt[key].alt
+    : fallback);
+  const defaultStyle = (key) => (isDefault(key) ? 'font-style:italic;color:var(--faint);' : '');
 
   // What a person types is read one way and one way only: 0x makes it
   // hex, anything else is decimal (values.py, parse_value). The chip
@@ -1278,11 +1287,11 @@ function ObjectsPage({ s, ui, setUi }) {
             <${SyncInput} value=${shownValue(key, cur ?? '')}
               title=${valueTitle(key, 'staged value — Write sends it') + numberHint}
               onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
-              style="border:1px solid var(--inp);background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:86px;outline:none;text-align:right" />
+              style="border:1px solid var(--inp);background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};${defaultStyle(key)}border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:86px;outline:none;text-align:right" />
             <span class="hv" onClick=${() => send('obj_write', { idx, sub })} title="write the staged value to the device"
               style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer">Write</span>`
           : html`
-            <span title=${valueTitle(key, '')} style="font:600 12px ${MONO};color:${cur ? 'var(--acc)' : 'var(--tx)'};background:var(--chip);padding:2px 9px;border-radius:4px;min-width:44px;text-align:right">${shownValue(key, cur ?? '—')}</span>`}
+            <span title=${valueTitle(key, '')} style="font:600 12px ${MONO};color:${cur ? 'var(--acc)' : 'var(--tx)'};${defaultStyle(key)}background:var(--chip);padding:2px 9px;border-radius:4px;min-width:44px;text-align:right">${shownValue(key, cur ?? '—')}</span>`}
           ${plotIcon(idx, sub)}
           <span class="hv" onClick=${() => send('fav_toggle', { idx, sub })} title="remove favorite" style="color:var(--faint);cursor:pointer">✕</span>
         </div>`;
@@ -1396,11 +1405,11 @@ function ObjectsPage({ s, ui, setUi }) {
               <span style="display:flex;align-items:center;gap:6px;min-width:0;padding-right:10px">
                 <${SyncInput} value=${shown} title=${valueTitle(key, shown) + numberHint + rangeHint}
                   onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
-                  style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;flex:none" />
+                  style="border:1px solid ${oor ? 'var(--amb)' : 'var(--inp)'};background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};${defaultStyle(key)}border-radius:5px;padding:3px 7px;font:11.5px ${MONO};width:82px;outline:none;flex:none" />
                 ${sym && html`<span title=${valueTitle(key, shown)} style="font-size:10.5px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sym}</span>`}
               </span>`
             : html`
-              <span title=${valueTitle(key, shown) + rangeHint} style="font:11.5px ${MONO};font-weight:${oor ? 600 : 400};color:${oor ? 'var(--amb)' : (cur ? 'var(--acc)' : 'var(--tx)')};padding-right:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}${sym ? html`<span style="color:var(--dim);font-family:'IBM Plex Sans';font-size:10.5px"> ${sym}</span>` : ''}</span>`}
+              <span title=${valueTitle(key, shown) + rangeHint} style="font:11.5px ${MONO};font-weight:${oor ? 600 : 400};color:${oor ? 'var(--amb)' : (cur ? 'var(--acc)' : 'var(--tx)')};${defaultStyle(key)}padding-right:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}${sym ? html`<span style="color:var(--dim);font-family:'IBM Plex Sans';font-size:10.5px"> ${sym}</span>` : ''}</span>`}
             <span style="display:flex;gap:5px;align-items:center;padding-right:12px">
               <span onClick=${() => send('fav_toggle', { idx, sub })} title="favorite"
                 style="cursor:pointer;color:${favKeys.has(key) ? 'var(--amb, #d97706)' : 'var(--faint)'};font-size:12px">${favKeys.has(key) ? '★' : '☆'}</span>

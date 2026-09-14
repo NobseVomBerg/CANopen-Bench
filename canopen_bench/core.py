@@ -88,6 +88,10 @@ BASE_EDS = Path(__file__).resolve().parent / "seed" / "CiA301Base.eds"
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
+#: how often what the bus carried past is written to the workspace
+#: database. Often enough that a bench closed with Ctrl-C loses seconds,
+#: not a session; rare enough that a busy bus is not a busy disk.
+SEEN_FLUSH_S = 10.0
 #: the addressing procedure this package ships — vendor-neutral LSS. The
 #: procedure a real device family uses is that family's and arrives as a
 #: plugin's flow file, which is what a fresh workspace prefers.
@@ -771,6 +775,11 @@ def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
     return {tid: files for tid, files in seen.items() if len(files) > 1}
 
 
+def _stamp() -> str:
+    """When a value was learned, as the database keeps it."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
 def _bench_user() -> str:
     """Who ran it, for the report header. Best effort: on a bench machine
     this is a login name, and where the environment does not say, an empty
@@ -985,7 +994,16 @@ class Bench:
         #: values seen on the wire, (node, "0x2007:01") -> (value, when).
         #: Separate from obj_vals, which also holds what the operator has
         #: typed and not yet written (see _bus_sample)
-        self.seen_vals: dict[tuple[int, str], tuple[str, float]] = {}
+        #: keyed by the device's identity — its serial number where the
+        #: scan learned one, else "node:<n>" — not by node: a node-ID is
+        #: what re-addressing hands to a different unit, and the values
+        #: the old one broadcast would then be shown for the new one
+        self.seen_vals: dict[tuple[str, str], tuple[str, float]] = {}
+        #: which of those the database has not seen yet, and when it last
+        #: did. Flushed every SEEN_FLUSH_S, on a device switch and at
+        #: shutdown — never per frame, a PDO every 10 ms is not a disk write
+        self._seen_dirty: set[tuple[str, str]] = set()
+        self._seen_flushed_at = time.monotonic()
         # bench instruments beside the bus (canopen_bench/instruments): the
         # port that once answered is remembered, so a restart reconnects to
         # that one instead of writing *IDN? to every serial port it finds
@@ -1268,6 +1286,7 @@ class Bench:
             self.connected = False
             self.bus.disconnect()
             self.log("BUS  disconnected — server shutdown")
+        self._flush_seen()      # the last seconds of the bus, not lost
         self._autosave_close("closed")
         if self.psu is not None:
             try:
@@ -1497,6 +1516,8 @@ class Bench:
         if self.swdl_run:
             self._swdl.step(self)
             dirty = True
+        if self._seen_dirty and time.monotonic() - self._seen_flushed_at >= SEEN_FLUSH_S:
+            self._flush_seen()
         if dirty:
             # through the same gate as every other push, so a tick and a
             # running case cannot end up writing to one socket at once
@@ -2251,8 +2272,9 @@ class Bench:
         """
         if node is None:
             return
-        self.seen_vals[(int(node), f"0x{idx:04X}:{sub:02X}")] = (
-            f"0x{value:0{max(2, width * 2)}X}", time.monotonic())
+        at = (self._identity(int(node)), f"0x{idx:04X}:{sub:02X}")
+        self.seen_vals[at] = (f"0x{value:0{max(2, width * 2)}X}", time.monotonic())
+        self._seen_dirty.add(at)
 
     # -- trace interpretation ---------------------------------------------
     _EXPEDITED_LEN = {0x4F: 1, 0x4B: 2, 0x47: 3, 0x43: 4,   # upload response
@@ -2490,10 +2512,17 @@ class Bench:
         of values, which is the very thing this method exists to prevent,
         so those get an empty table and a line saying why.
         """
+        # what the bus carried past for the device being left goes to the
+        # database first, so it is there when that device is selected again
+        self._flush_seen()
         sel = self.sel_devices
         first = sel[0] if sel else None
         self.obj_vals = ({} if first is None or first["sn"] == NO_SERIAL
                          else dict(self.db.last_values(first["sn"])))
+        # …and no moment for any of them: these are last known, not just
+        # read. Left in place, the previous device's timestamps said the
+        # restored numbers were seconds old
+        self.obj_vals_at = {}
         if not announce:
             return
         if first is None:
@@ -2607,7 +2636,7 @@ class Bench:
             for slot in slots:
                 res = self.bus.sdo_read(node, slot["idx"], slot["sub"])
                 if res.ok:
-                    self.obj_vals[f"{slot['idx']}:{slot['sub']}"] = res.value
+                    self.remember(f"{slot['idx']}:{slot['sub']}", res.value)
         self.log("LCD  refresh display mirror")
 
     # -- setup: interface ---------------------------------------------------
@@ -3723,10 +3752,47 @@ class Bench:
         sel = self.sel_devices
         return sel[0]["node"] if sel else 1
 
-    def _remember(self, key: str, value: str) -> None:
+    def remember(self, key: str, value: str) -> None:
+        """A read of the selected device answered: keep the value everywhere
+        it is kept — the table, how old it is, and the workspace database
+        under the device's serial number, which is what brings it back
+        when this device is selected again.
+
+        The one way in, for the core and for plugins alike. There used to
+        be five: two wrote the database, three wrote the table only, and a
+        device switched away from came back with whatever the two had
+        happened to catch — the display a plugin had just read was gone.
+        A device that answers no serial number is remembered for the
+        session only; every such device would otherwise share one set.
+        """
+        self.obj_vals[key] = value
+        self.obj_vals_at[key] = time.monotonic()
         sel = self.sel_devices
-        if sel:
-            self.db.remember_value(sel[0]["sn"], key, value, datetime.now().strftime("%Y-%m-%d %H:%M"))
+        if sel and sel[0]["sn"] != NO_SERIAL:
+            self.db.remember_value(sel[0]["sn"], key, value, _stamp())
+
+    def _identity(self, node: int) -> str:
+        """What a value seen at a node belongs to: the device's serial
+        number, or the node itself where the scan learned none."""
+        dev = next((d for d in self.devices if d["node"] == node), None)
+        if dev is not None and dev.get("sn") and dev["sn"] != NO_SERIAL:
+            return str(dev["sn"])
+        return f"node:{node}"
+
+    def _flush_seen(self) -> None:
+        """Write what the bus carried past since the last time.
+
+        Only values with a serial number behind them — "node:3" is not a
+        device, it is where one happened to be — and only the changed
+        ones, in one transaction.
+        """
+        rows = [(ident, key, self.seen_vals[(ident, key)][0], _stamp())
+                for ident, key in self._seen_dirty
+                if not ident.startswith("node:") and (ident, key) in self.seen_vals]
+        self._seen_dirty.clear()
+        self._seen_flushed_at = time.monotonic()
+        if rows:
+            self.db.remember_values(rows)
 
     def act_obj_read(self, p: dict) -> None:
         idx, sub = p["idx"], p["sub"]
@@ -3734,9 +3800,7 @@ class Bench:
         res = self.bus.sdo_read(node, idx, sub)
         key = f"{idx}:{sub}"
         if res.ok:
-            self.obj_vals[key] = res.value
-            self.obj_vals_at[key] = time.monotonic()
-            self._remember(key, res.value)
+            self.remember(key, res.value)
             self.log(f"SDO  read {idx}:{sub} → {res.value} (node {node})", "sdo")
         else:
             self.log(f"SDO  read {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
@@ -3870,9 +3934,9 @@ class Bench:
         value = self._pad_hex(value, info.width if info else 0)
         res = self.bus.sdo_write(node, idx, sub, value)
         if res.ok:
-            self.obj_vals[key] = value
-            self.obj_vals_at[key] = time.monotonic()
-            self._remember(key, value)
+            # a write the device accepted is what it holds now — remembered
+            # the same way a read is
+            self.remember(key, value)
             self.log(f"SDO  write {idx}:{sub} ← {value} (node {node})", "sdo")
         else:
             self.log(f"SDO  write {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
@@ -3965,13 +4029,18 @@ class Bench:
         device without asking it anything.
         """
         mine, mine_at = self.obj_vals.get(key), self.obj_vals_at.get(key, 0.0)
-        theirs, theirs_at = self.seen_vals.get((node, key), (None, 0.0))
+        theirs, theirs_at = self.seen_vals.get((self._identity(node), key), (None, 0.0))
         now = time.monotonic()
         if theirs is not None and theirs_at >= mine_at:
             return theirs, "bus", now - theirs_at
         if mine is None:
             return None, "", 0.0
-        return mine, "read", (now - mine_at if mine_at else 0.0)
+        # no moment attached: the value came back out of the database when
+        # the device was selected, and "read just now" is the one thing it
+        # was not
+        if not mine_at:
+            return mine, "db", 0.0
+        return mine, "read", now - mine_at
 
     def _quantity(self, key: str, own: Quantity | None = None) -> Quantity:
         """What a value at this address means physically.
@@ -4295,9 +4364,7 @@ class Bench:
                 res = await asyncio.to_thread(self.bus.sdo_read, node, idx, sub)
                 key = f"{idx}:{sub}"
                 if res.ok:
-                    self.obj_vals[key] = res.value
-                    self.obj_vals_at[key] = time.monotonic()
-                    self._remember(key, res.value)
+                    self.remember(key, res.value)
                     done += 1
                 else:
                     self.log(f"SDO  read {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
@@ -6411,6 +6478,10 @@ class Bench:
             raw = self.obj_vals.get(key) or default
             if raw in (None, "", "—"):
                 continue
+            # the file's value, not the device's: nothing has been read or
+            # seen for this object, and the page has to say so — a default
+            # drawn like a reading is a number nobody measured
+            from_file = not self.obj_vals.get(key)
             idx, _, sub = key.partition(":")
             want_i, want_s = _addr_int(idx), _addr_int(sub)
             info = object_info(od, want_i, want_s or 0) if want_i is not None else None
@@ -6418,7 +6489,8 @@ class Bench:
             # number its bytes happen to spell, in whichever base — and
             # neither reading of nineteen digits is the name
             if info is not None and info.is_text and (text := _hex_to_text(raw)):
-                out[key] = {"txt": text, "alt": f"{text} · {raw}", "sym": "", "oor": False}
+                out[key] = {"txt": text, "alt": f"{text} · {raw}", "sym": "", "oor": False,
+                            "dflt": from_file}
                 continue
             try:
                 value = int(str(raw), 16)
@@ -6449,6 +6521,7 @@ class Bench:
                 # screen parsed as hex — so with the table in decimal a 500
                 # was compared as 0x500, and the warning was about 1280
                 "oor": info is not None and _out_of_range(dec, info.lo, info.hi),
+                "dflt": from_file,
             }
         return out
 

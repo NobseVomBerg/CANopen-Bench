@@ -163,6 +163,14 @@ plugin's `actions()`, which the panel's buttons and its refresh control
 dispatch. That is what keeps a visible panel from quietly becoming a
 poll loop.
 
+What such an action reads goes in through **`bench.remember(key, value)`**
+(`key` as `"0x2007:01"`), never straight into `bench.obj_vals`. That one
+call is what puts the value in the object table with its age *and* in
+the workspace database under the device's serial number — which is what
+brings it back when the device is selected again. A value written into
+the table directly lasts until the next device switch and no longer;
+that is how a display panel's whole reading used to vanish.
+
 ## Minimal example
 
 A plugin that adds one trace decoder and one custom step type:
