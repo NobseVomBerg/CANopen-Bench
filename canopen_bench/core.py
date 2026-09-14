@@ -88,6 +88,10 @@ BASE_EDS = Path(__file__).resolve().parent / "seed" / "CiA301Base.eds"
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
+#: how often a run rewrites the report it is in the middle of. Often
+#: enough to watch a case go by, rare enough that a case of ten thousand
+#: steps does not spend the run rewriting a page that grows with them.
+REPORT_LIVE_S = 0.4
 #: the addressing procedure this package ships — vendor-neutral LSS. The
 #: procedure a real device family uses is that family's and arrives as a
 #: plugin's flow file, which is what a fresh workspace prefers.
@@ -1014,10 +1018,17 @@ class Bench:
         self.running = False
         self.run_order: list[str] = []
         self.run_idx = 0
-        # what the run writes into the results folder at the end
+        # what the run writes into the results folder, as it goes and at
+        # the end: the records, the stamp every file of one run shares, the
+        # per-id counter that numbers a repeated case, and when the live
+        # write last happened (see _write_live)
         self._run_cases: list[reportlib.CaseRecord] = []
         self._run_record: reportlib.CaseRecord | None = None
         self._run_started = ""
+        self._run_stamp = ""
+        self._run_nth: Counter[str] = Counter()
+        self._report_live_at = 0.0
+        self._report_live_failed = False
         #: monotonic start of the case or flow now running — the floor for
         #: how far a `wait_for` looks back (0.0 = nothing running, no floor)
         self._sequence_started_at = 0.0
@@ -1550,29 +1561,99 @@ class Bench:
         self.reports = [{"name": name, "file": name,
                          "score": f"{passed}/{total}", "ok": ok}] + self.reports[:4]
 
+    def _report_stamp(self) -> str:
+        """The run's own stamp, so every file it writes shares one — the
+        live ones during the run and the final ones after it. A run that
+        stamped again at the end would write its reports twice, under two
+        names, and leave the half-finished set behind."""
+        if not self._run_stamp:
+            self._run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return self._run_stamp
+
+    def _case_file(self, case: reportlib.CaseRecord) -> str:
+        """What this case's page is called, decided when it starts.
+
+        A repeated case runs many times and each run is its own file:
+        without the number they all carried one name, so every run after
+        the first overwrote the one before it and all of the summary's
+        rows — the failed ones too — linked to whichever ran last.
+
+        Numbered when the case comes up more than once — by the plan
+        (`run_order`) or by what is already recorded, whichever knows.
+        The name is needed before the case runs, so the plan is what
+        there is to go on then; a file already on disk cannot be renamed
+        afterwards without breaking a link somebody may have followed. A
+        run that stops early therefore leaves `__001` on a case that
+        ended up running once.
+        """
+        if case.file:
+            return case.file
+        name = f"{self._report_stamp()}__{case.id}__{_slug(case.name)}"
+        recorded = sum(1 for c in self._run_cases if c.id == case.id)
+        if max(Counter(self.run_order)[case.id], recorded) > 1:
+            self._run_nth[case.id] += 1
+            name += f"__{self._run_nth[case.id]:03d}"
+        case.file = f"{name}.html"
+        return case.file
+
+    def _write_live(self, case: reportlib.CaseRecord | None = None,
+                    force: bool = False) -> None:
+        """Write what the run has so far: this case's page, and the summary
+        that indexes it.
+
+        The whole point of a report written as the run goes is that
+        somebody can open it while it goes — the old tool did this, and
+        watching a long case from the page instead of from the log is
+        worth keeping. Rendered whole each time rather than appended to:
+        `case_html` is a function of the record, so the file is never a
+        half-written document, and the header carries the result the
+        moment there is one.
+
+        Throttled, because a case may run ten thousand steps and the page
+        grows with them — rewriting it per step is work that squares. The
+        end of a case is always written (`force`), so what stands on disk
+        after one is the finished thing.
+        """
+        now = time.monotonic()
+        if not force and now - self._report_live_at < REPORT_LIVE_S:
+            return
+        self._report_live_at = now
+        folder = self._results_dir()
+        run = reportlib.RunRecord(
+            started=self._run_started or "", finished="(running)",
+            user=_bench_user(), workspace=self.workspace_name,
+            tool=f"canopen-bench {__version__}", cases=list(self._run_cases))
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            reportlib.write_stylesheet(folder)
+            if case is not None:
+                (folder / self._case_file(case)).write_text(
+                    reportlib.case_html(case), encoding="utf-8")
+            (folder / f"{self._report_stamp()}__summary.html").write_text(
+                reportlib.summary_html(run), encoding="utf-8")
+        except OSError as exc:
+            # the run is the thing that matters; a folder that cannot be
+            # written is worth saying once, not once per step
+            if not self._report_live_failed:
+                self._report_live_failed = True
+                self.log(f"RUN  report not written — {exc}", "emcy0")
+
     def _write_report(self, run: reportlib.RunRecord) -> str:
         """One file per case, one summary, one JSON beside it. Returns the
-        summary's file name — that is what the UI links to."""
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        summary's file name — that is what the UI links to.
+
+        Written again at the end even though the run wrote them as it
+        went: this is where a case's own page gets its verdict and its
+        duration, which is what the old tool patched into the header as
+        its last act."""
+        stamp = self._report_stamp()
         folder = Path(self.paths.get("res") or (self.db.path.parent / "results"))
         try:
             folder.mkdir(parents=True, exist_ok=True)
             reportlib.write_stylesheet(folder)
-            # a repeated case runs many times and each run is its own file:
-            # without the number they all carried one name, so every run
-            # after the first overwrote the one before it and all of the
-            # summary's rows — the failed ones too — linked to whichever
-            # ran last. Numbered only when the case did repeat, so an
-            # ordinary run's file names stay what they were.
-            runs_of = Counter(c.id for c in run.cases)
-            nth: Counter[str] = Counter()
             for case in run.cases:
-                name = f"{stamp}__{case.id}__{_slug(case.name)}"
-                if runs_of[case.id] > 1:
-                    nth[case.id] += 1
-                    name += f"__{nth[case.id]:03d}"
-                case.file = f"{name}.html"
-                (folder / case.file).write_text(reportlib.case_html(case), encoding="utf-8")
+                (folder / self._case_file(case)).write_text(
+                    reportlib.case_html(case), encoding="utf-8")
             summary = f"{stamp}__summary.html"
             (folder / summary).write_text(reportlib.summary_html(run), encoding="utf-8")
             (folder / f"{stamp}__summary.json").write_text(
@@ -4671,6 +4752,11 @@ class Bench:
     async def _run_task(self) -> None:
         self._run_cases = []
         self._run_started = datetime.now().isoformat(timespec="seconds")
+        # one stamp for every file this run writes, live ones included
+        self._run_stamp = ""
+        self._run_nth = Counter()
+        self._report_live_at = 0.0
+        self._report_live_failed = False
         try:
             for i, tid in enumerate(self.run_order):
                 self.run_idx = i
@@ -4679,8 +4765,6 @@ class Bench:
                     self._push_report(self.run_order[:i])
                     return
                 verdict, reason = await self._exec_case(tid)
-                if self._run_record is not None:
-                    self._run_cases.append(self._run_record)
                 self.results[tid] = verdict
                 suffix = f" ({reason})" if reason else ""
                 if verdict == "PASS":
@@ -4819,6 +4903,10 @@ class Bench:
         rec = reportlib.CaseRecord(id=tid, started=datetime.now().isoformat(timespec="seconds"),
                                    user=_bench_user())
         self._run_record = rec
+        # in the run's record now, not once it is over: the report is
+        # written while the run goes, and a case missing from the summary
+        # until it ends is the one somebody is looking for
+        self._run_cases.append(rec)
         if tc is None:
             rec.verdict, rec.reason = "ERROR", "unknown test case"
             rec.seconds = time.time() - started
@@ -4852,9 +4940,13 @@ class Bench:
                     "session": _session_bytes(sess) if sess else None,
                     "failed": ""}   # set by a failure the case chose to survive
         total = len(tc.preconditions) + len(tc.steps)
+        self._write_live(rec, force=True)      # the page exists before step 1
 
         def on_step(idx: int, text: str) -> None:
             self.run_prog = {"tid": tc.id, "step": idx, "of": total, "text": text}
+            # the steps behind this one are in the record and go to disk;
+            # the one about to run is not a step that happened yet
+            self._write_live(rec)
             self._changed()
 
         def stop() -> bool:
@@ -4863,6 +4955,10 @@ class Bench:
         def done(verdict: str, why: str = "") -> tuple[str, str]:
             rec.verdict, rec.reason = verdict, why
             rec.seconds = time.time() - started
+            # the last write of this case: from here its page carries the
+            # result and the duration, which is what the header was
+            # missing all the way through
+            self._write_live(rec, force=True)
             return verdict, why
 
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
