@@ -138,7 +138,7 @@ asyncio-Task pro Lauf** ersetzt (nicht durch mehr Tick-Logik):
 | 1 | Testdatei nicht parsebar (YAML-/Schemafehler) | beim Katalog-Laden markieren, nicht wählbar; gerät sie dennoch in einen Lauf (Datei zwischenzeitlich geändert): Verdikt ERROR |
 | 2 | Kein Gerät ausgewählt / `dut`-Rolle nicht auflösbar | Lauf startet nicht, Log `RUN  no target device` (`emcy0`) |
 | 3 | Verbindungsverlust während des Laufs | laufender Testfall ERROR, Lauf abbrechen (unabhängig von `stop_on_err`), Log |
-| 4 | Server-Shutdown während des Laufs | Executor-Task wird gecancelt; kein Report-Torso, Log wie `act_run_stop` |
+| 4 | Server-Shutdown während des Laufs | Executor-Task wird gecancelt; auf der Platte steht, was bis dahin geschrieben wurde — Ergebnis `RUNNING`, siehe unten. Log wie `act_run_stop` |
 
 ## Beobachtbares Ergebnis
 
@@ -160,9 +160,37 @@ Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
 | `<stamp>__summary.json` | derselbe Lauf als Daten — Grundlage der Übersicht unten |
 | `testReportStyle.css` | einmal geschrieben, von allen Reports verlinkt, **nie überschrieben** |
 
+### Geschrieben *während* der Lauf läuft **[Ist]**
+
+Die Dateien entstehen nicht erst am Ende: Sobald ein Testfall beginnt,
+steht seine Seite im Ordner, und während er läuft wächst sie um die
+Schritte, die hinter ihm liegen. Damit lässt sich ein langer Fall aus dem
+Report verfolgen statt nur aus dem Log — das alte Werkzeug hat das so
+gemacht, und es ist der Grund, warum eine Zwischenansicht überhaupt
+existiert.
+
+- **`RUNNING`** steht als Ergebnis, solange eines fehlt — im Kopf der
+  Fall-Seite, in der Zeile der Zusammenfassung und als Ergebnis des
+  Laufs. Ein leeres Feld läse sich wie „ohne Ergebnis beendet".
+  `Finished` zeigt `(running)`.
+- **Ganz neu gerendert**, nicht angehängt: die Seite ist eine Funktion
+  des Datensatzes, also nie ein halb geschriebenes Dokument.
+- **Gedrosselt** (`REPORT_LIVE_S`, 0,4 s): ein Fall mit zehntausend
+  Schritten würde sonst eine mitwachsende Seite pro Schritt neu
+  schreiben. Das Ende eines Falls wird immer geschrieben — was danach auf
+  der Platte steht, ist das fertige Dokument mit Ergebnis und Dauer.
+- **Ein Stempel für den ganzen Lauf**: die Dateien während des Laufs sind
+  dieselben wie die am Ende, unter denselben Namen. Ein Link, dem jemand
+  mitten im Lauf gefolgt ist, zeigt hinterher auf das fertige Dokument.
+- Ein wiederholter Fall wird nach dem **Plan** nummeriert (`__001`,
+  `__002`, …), nicht nach dem Ergebnis — der Name muss stehen, bevor der
+  Fall läuft. Ein früh abgebrochener Lauf hinterlässt deshalb `__001` an
+  einem Fall, der am Ende nur einmal lief.
+
 Schlägt das Schreiben fehl (volle Platte, ungültiger Pfad), ist das eine
-Logzeile `RUN  report not written — …` und **kein** fehlgeschlagener
-Lauf: die Verdikte stehen bereits im Log und auf dem Schirm.
+Logzeile `RUN  report not written — …` (einmal je Lauf, nicht je Schritt)
+und **kein** fehlgeschlagener Lauf: die Verdikte stehen bereits im Log
+und auf dem Schirm.
 
 ### Übersicht nach HW-Varianten **[Ist]**
 

@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
+import canopen_bench.core as core_mod
 from canopen_bench import data
+from canopen_bench import report as reportlib
 from canopen_bench.core import Bench, _step_text
 from canopen_bench.db import Db
 from canopen_bench.plugin import BenchPlugin
@@ -1928,6 +1930,118 @@ def test_the_list_holds_still_while_the_run_it_selected_is_running(tc_bench):
         "the filter's ground moved while the run was going"
     # …and once it is over, the window is the run that just finished
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "PASS"}
+
+
+# -- the report is written while the run goes --------------------------------
+
+SLOW_TC = """\
+id: "0050"
+name: "long enough to look at"
+steps:
+  - log: "first"
+  - wait: 0.25
+  - log: "second"
+  - wait: 0.25
+  - log: "third"
+"""
+
+
+def _report_files(bench) -> list[Path]:
+    return sorted(Path(bench.paths["res"]).glob("*.html"))
+
+
+def test_the_case_page_fills_in_while_the_case_runs(tc_bench, monkeypatch):
+    """The old tool wrote every step as it happened and patched the result
+    into the header at the end, so a long case could be watched from the
+    page. Worth keeping: the alternative is a file that appears, finished,
+    at a moment nobody can predict.
+
+    The throttle is off here — with it on, how much of the case is on disk
+    at any moment depends on how long its steps take, which is not what
+    this is about (see the test below)."""
+    monkeypatch.setattr(core_mod, "REPORT_LIVE_S", 0.0)
+    bench = tc_bench
+    _add_tc(bench, "TC0050_slow.yaml", SLOW_TC)
+    seen: list[str] = []
+
+    def while_running(b):
+        pages = [p for p in _report_files(b) if "summary" not in p.name]
+        if pages:
+            seen.append(pages[-1].read_text(encoding="utf-8"))
+
+    run_selected(bench, {"0050"}, during=while_running)
+
+    assert seen, "no page was on disk while the case ran"
+    assert "RUNNING" in seen[0], "a page of a case that has not ended says so"
+    assert any("first" in text for text in seen), "the steps were not written as they went"
+    # …and the last thing written is the finished document
+    final = [p for p in _report_files(bench) if "summary" not in p.name][-1]
+    done = final.read_text(encoding="utf-8")
+    assert "RUNNING" not in done and "PASS" in done
+    assert "first" in done and "third" in done
+
+
+def test_the_live_write_is_throttled_but_the_end_of_a_case_never_is(tc_bench):
+    """A case may run ten thousand steps and its page grows with them, so
+    rewriting it per step is work that squares. What a reader loses is a
+    fraction of a second of freshness; what the end of a case writes is
+    always written, so the document left behind is the finished one."""
+    bench = tc_bench
+    rec = reportlib.CaseRecord(id="0051", name="throttled")
+    bench._run_cases = [rec]
+
+    bench._write_live(rec, force=True)
+    page = Path(bench.paths["res"]) / rec.file
+    first = page.read_text(encoding="utf-8")
+
+    rec.steps.append(reportlib.StepRecord(line=1, text="a step nobody sees yet"))
+    bench._write_live(rec)                      # too soon after the last one
+    assert page.read_text(encoding="utf-8") == first
+
+    bench._write_live(rec, force=True)          # the end of a case
+    assert "a step nobody sees yet" in page.read_text(encoding="utf-8")
+
+
+def test_the_summary_lists_the_case_that_is_running(tc_bench):
+    """The summary is the way into the pages, so a case missing from it
+    until it ends is the one somebody is looking for. The run's own result
+    stays RUNNING while any case has none — a summary that called it PASS
+    on the strength of what is already in would be saying the run went
+    well before it went."""
+    bench = tc_bench
+    _add_tc(bench, "TC0050_slow.yaml", SLOW_TC)
+    seen: list[str] = []
+
+    def while_running(b):
+        pages = [p for p in _report_files(b) if "summary" in p.name]
+        if pages:
+            seen.append(pages[-1].read_text(encoding="utf-8"))
+
+    run_selected(bench, {"0050"}, during=while_running)
+
+    assert seen, "no summary was on disk while the run went"
+    assert "0050" in seen[0] and "RUNNING" in seen[0]
+    assert "(running)" in seen[0], "…and it says it is not finished"
+    summary = [p for p in _report_files(bench) if "summary" in p.name][-1]
+    done = summary.read_text(encoding="utf-8")
+    assert "RUNNING" not in done and "(running)" not in done
+
+
+def test_the_live_files_are_the_files_the_run_leaves_behind(tc_bench):
+    """One stamp for the whole run: the pages written while it went are
+    the pages it ends with, at the same names. A run that stamped again at
+    the end would write everything twice and leave the half-finished set
+    beside it."""
+    bench = tc_bench
+    _add_tc(bench, "TC0050_slow.yaml", SLOW_TC)
+    during: list[set[str]] = []
+
+    run_selected(bench, {"0050"},
+                 during=lambda b: during.append({p.name for p in _report_files(b)}))
+
+    after = {p.name for p in _report_files(bench)}
+    assert during and during[-1] <= after, "the live files are not the final ones"
+    assert len(after) == 2, after          # one case page, one summary
 
 
 # -- which cases a bench without the supply offers ---------------------------
