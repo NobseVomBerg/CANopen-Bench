@@ -77,7 +77,15 @@ browser):
   SDO read/write, PDO send, NMT send, each with its own node-id, up to
   8 rows, autosaved and restored on next start —, last-known values per
   device restored from the workspace db keyed by serial number
-  (0x1018:04). PDO rows can transmit cyclically (per-row cycle time in
+  (0x1018:04). Every value goes in through one door, `Bench.remember`
+  — table, age and database at once, for the core's reads and writes
+  and for a plugin's (`docs/extending.md`); what the bus carries past
+  (`seen_vals`) is kept by serial number too and reaches the database
+  on a device switch, at shutdown and every `SEEN_FLUSH_S` seconds, so
+  a Ctrl-C does not lose it. A device switch replaces the table rather
+  than merging into it and drops every timestamp: restored values are
+  last known, not just read, and the panel says so. PDO rows can
+  transmit cyclically (per-row cycle time in
   ms, ⟳ toggle): `core._cyclic_loop` runs beside the tick loop with ms
   granularity and also drives the SYNC producer configured on the
   Setup page. Run flags never survive a restart or disconnect — no
