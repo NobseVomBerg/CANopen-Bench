@@ -64,6 +64,22 @@ _ROW_CLASS = {"ok": "testStepOk", "fail": "testStepNok", "error": "testStepNok",
 #: written next to the reports as this file, and linked from them
 STYLESHEET = "testReportStyle.css"
 
+#: The two header rows a finished case writes over: its result and how
+#: long it took. Everything else in a report is appended, but these are
+#: known only at the end and sit at the top — so they are written at a
+#: fixed width from the start and overwritten in place later.
+#:
+#: Fixed width, because no file can change the length of something in its
+#: middle: `seek` + `write` replaces bytes, and only as many as were
+#: there. The room is spent on spaces, which HTML collapses to nothing,
+#: and a reason longer than fits is cut here — it stands in full on the
+#: step that failed.
+PATCH_LABELS = ("Duration", "Result")
+PATCH_WIDTH = 120
+#: the same for the class attribute, whose name varies in length too.
+#: Trailing spaces in a class list are not a class.
+_CLASS_WIDTH = 14
+
 
 @dataclass
 class StepRecord:
@@ -195,6 +211,64 @@ def _row(label: str, value: str, cls: str = "") -> str:
     return f"<tr><td>{_e(label)}</td><td colspan=2{klass}>{value}</td></tr>\n"
 
 
+def _fit(text: str, width: int) -> str:
+    """`text` escaped, then cut and padded to exactly `width` bytes.
+
+    Bytes rather than characters, because this is what gets overwritten
+    in place: an em dash is one character and three bytes, and a row that
+    came out three bytes short would leave three bytes of the old one
+    behind. Cut before escaping, so the end can never be half an entity.
+    """
+    while len(_e(text).encode("utf-8")) > width:
+        text = text[:-1]
+    body = _e(text)
+    return body + " " * (width - len(body.encode("utf-8")))
+
+
+def _patch_row(label: str, text: str, cls: str) -> str:
+    """One of the two rows a finished case writes over — same length
+    whatever it says.
+
+    The class is padded because its name varies with the verdict
+    (`resultOk`, `resultCanceled`); trailing spaces in a class list are
+    not a class. A row that never has one does not grow an empty
+    attribute for the sake of it — what has to hold is one length per
+    row, not one length for both.
+    """
+    klass = f" class='{_fit(cls, _CLASS_WIDTH)}'" if cls else ""
+    return (f"<tr><td>{_e(label)}</td><td colspan=2{klass}>"
+            f"{_fit(text, PATCH_WIDTH)}</td></tr>\n")
+
+
+def patch_rows(case: CaseRecord) -> dict[str, str]:
+    """The two rows as they stand for this record, by their label.
+
+    Written by `case_head` when the case starts, with whatever is known
+    then, and written again over the same bytes when it ends.
+    """
+    shown = case.verdict or RUNNING
+    return {
+        "Duration": _patch_row("Duration", f"{case.seconds:.1f} s", ""),
+        "Result": _patch_row("Result",
+                             shown + (f" — {case.reason}" if case.reason else ""),
+                             _RESULT_CLASS.get(shown, "")),
+    }
+
+
+def patch_offsets(head: str) -> dict[str, int]:
+    """Where those rows begin, in bytes from the start of the file.
+
+    Taken from the head as written rather than guessed: which rows a
+    header carries depends on what the case declares (a description, its
+    tools, its grade), so the offset is not a constant.
+    """
+    out: dict[str, int] = {}
+    for label in PATCH_LABELS:
+        at = head.index(f"<tr><td>{label}</td>")
+        out[label] = len(head[:at].encode("utf-8"))
+    return out
+
+
 def case_head(case: CaseRecord) -> str:
     """Everything above the first step: the page, the header block, the
     column titles. Written when the case starts.
@@ -217,10 +291,10 @@ def case_head(case: CaseRecord) -> str:
     if case.user:
         head += _row("User", _e(case.user))
     head += _row("Timestamp", _e(case.started))
-    head += _row("Duration", f"{case.seconds:.1f} s")
-    shown = case.verdict or RUNNING
-    verdict = _e(shown) + (f" — {_e(case.reason)}" if case.reason else "")
-    head += _row("Result", verdict, _RESULT_CLASS.get(shown, ""))
+    # the two the end of the case writes over, at a width that does not
+    # depend on what they say — see PATCH_LABELS
+    rows = patch_rows(case)
+    head += rows["Duration"] + rows["Result"]
     head += "<tr><th colspan=3 class='emptyColumn'></th></tr>\n"
     # the class keeps its old name on purpose: a results folder holds the
     # stylesheet it was first written with and is never overwritten, so a
