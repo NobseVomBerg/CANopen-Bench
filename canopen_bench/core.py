@@ -88,10 +88,6 @@ BASE_EDS = Path(__file__).resolve().parent / "seed" / "CiA301Base.eds"
 
 TICK_S = 0.8
 SCAN_DELAY_S = 1.1
-#: how often a run rewrites the report it is in the middle of. Often
-#: enough to watch a case go by, rare enough that a case of ten thousand
-#: steps does not spend the run rewriting a page that grows with them.
-REPORT_LIVE_S = 0.4
 #: the addressing procedure this package ships — vendor-neutral LSS. The
 #: procedure a real device family uses is that family's and arrives as a
 #: plugin's flow file, which is what a fresh workspace prefers.
@@ -1021,13 +1017,18 @@ class Bench:
         # what the run writes into the results folder, as it goes and at
         # the end: the records, the stamp every file of one run shares, the
         # per-id counter that numbers a repeated case, and when the live
-        # write last happened (see _write_live)
+        # write last happened (see _live_case_begin)
         self._run_cases: list[reportlib.CaseRecord] = []
         self._run_record: reportlib.CaseRecord | None = None
         self._run_started = ""
         self._run_stamp = ""
         self._run_nth: Counter[str] = Counter()
-        self._report_live_at = 0.0
+        #: how many of the running case's steps are on its page already,
+        #: where its line in the summary begins, which pages are finished,
+        #: and whether a write has already failed (said once, not per step)
+        self._written_steps = 0
+        self._summary_tail = 0
+        self._finalised: set[str] = set()
         self._report_live_failed = False
         #: monotonic start of the case or flow now running — the floor for
         #: how far a `wait_for` looks back (0.0 = nothing running, no floor)
@@ -1596,44 +1597,90 @@ class Bench:
         case.file = f"{name}.html"
         return case.file
 
-    def _write_live(self, case: reportlib.CaseRecord | None = None,
-                    force: bool = False) -> None:
-        """Write what the run has so far: this case's page, and the summary
-        that indexes it.
-
-        The whole point of a report written as the run goes is that
-        somebody can open it while it goes — the old tool did this, and
-        watching a long case from the page instead of from the log is
-        worth keeping. Rendered whole each time rather than appended to:
-        `case_html` is a function of the record, so the file is never a
-        half-written document, and the header carries the result the
-        moment there is one.
-
-        Throttled, because a case may run ten thousand steps and the page
-        grows with them — rewriting it per step is work that squares. The
-        end of a case is always written (`force`), so what stands on disk
-        after one is the finished thing.
-        """
-        now = time.monotonic()
-        if not force and now - self._report_live_at < REPORT_LIVE_S:
-            return
-        self._report_live_at = now
-        folder = self._results_dir()
-        run = reportlib.RunRecord(
+    def _live_run(self) -> reportlib.RunRecord:
+        """The run as it stands, for the summary's header."""
+        return reportlib.RunRecord(
             started=self._run_started or "", finished="(running)",
             user=_bench_user(), workspace=self.workspace_name,
             tool=f"canopen-bench {__version__}", cases=list(self._run_cases))
+
+    def _report_write(self, name: str, text: str, mode: str = "w") -> bool:
+        """One write into the results folder, or a single complaint.
+
+        A run writes hundreds of times; a folder that cannot be written
+        is worth saying once, not once per step.
+        """
         try:
+            folder = self._results_dir()
             folder.mkdir(parents=True, exist_ok=True)
             reportlib.write_stylesheet(folder)
-            if case is not None:
-                (folder / self._case_file(case)).write_text(
-                    reportlib.case_html(case), encoding="utf-8")
-            (folder / f"{self._report_stamp()}__summary.html").write_text(
-                reportlib.summary_html(run), encoding="utf-8")
+            with (folder / name).open(mode, encoding="utf-8") as out:
+                out.write(text)
         except OSError as exc:
-            # the run is the thing that matters; a folder that cannot be
-            # written is worth saying once, not once per step
+            if not self._report_live_failed:
+                self._report_live_failed = True
+                self.log(f"RUN  report not written — {exc}", "emcy0")
+            return False
+        return True
+
+    def _live_case_begin(self, case: reportlib.CaseRecord) -> None:
+        """Start this case's page and give it a line in the summary.
+
+        The page is opened with its header and then grows by one row per
+        step (`_live_steps`). Appending rather than re-rendering is what
+        keeps a long run off the disk: a page of ten thousand steps
+        written whole per step is gigabytes of the same document, and an
+        endurance run does that all night.
+        """
+        self._written_steps = 0
+        if self._report_write(self._case_file(case), reportlib.case_head(case)):
+            self._live_summary_row(case, replace=False)
+
+    def _live_steps(self, case: reportlib.CaseRecord) -> None:
+        """Append the steps that have happened since the last time."""
+        new = case.steps[self._written_steps:]
+        if not new:
+            return
+        if self._report_write(self._case_file(case),
+                              "".join(reportlib.step_row(s) for s in new), mode="a"):
+            self._written_steps = len(case.steps)
+
+    def _live_case_end(self, case: reportlib.CaseRecord) -> None:
+        """Close this case off: the rest of its steps, then the page as it
+        will stand — header with the result and the duration in it, and
+        the tags that close the document.
+
+        Written whole this once, which is where the old tool patched its
+        header. Once per case is nothing; per step it was the problem.
+        """
+        self._live_steps(case)
+        if self._report_write(self._case_file(case), reportlib.case_html(case)):
+            self._finalised.add(case.file)
+        self._live_summary_row(case, replace=True)
+
+    def _live_summary_row(self, case: reportlib.CaseRecord, replace: bool) -> None:
+        """The case's line in the summary: appended when it starts, and
+        rewritten in place when it ends.
+
+        In place, because the running case is always the last line in the
+        file: seek to where it began, cut, write the finished one. That
+        keeps the summary append-only too — rewriting it per case would
+        put an endurance run's whole index on the disk once per case.
+        """
+        row = reportlib.summary_row(case).encode("utf-8")
+        # bytes, not text: `tell` on a text file is a cookie rather than an
+        # offset, and `truncate` is about the stream underneath it
+        try:
+            path = self._results_dir() / f"{self._report_stamp()}__summary.html"
+            with path.open("r+b") as out:
+                if replace:
+                    out.seek(self._summary_tail)
+                    out.truncate()
+                else:
+                    out.seek(0, 2)                 # after the last line
+                    self._summary_tail = out.tell()
+                out.write(row)
+        except OSError as exc:
             if not self._report_live_failed:
                 self._report_live_failed = True
                 self.log(f"RUN  report not written — {exc}", "emcy0")
@@ -1642,18 +1689,23 @@ class Bench:
         """One file per case, one summary, one JSON beside it. Returns the
         summary's file name — that is what the UI links to.
 
-        Written again at the end even though the run wrote them as it
-        went: this is where a case's own page gets its verdict and its
-        duration, which is what the old tool patched into the header as
-        its last act."""
+        The pages were written as the run went, a row per step, and each
+        was closed off at the end of its case. What is left here is the
+        summary — whose header carries the run's own result — the JSON
+        beside it, and any page that never got an ending because the run
+        did not get that far."""
         stamp = self._report_stamp()
         folder = Path(self.paths.get("res") or (self.db.path.parent / "results"))
         try:
             folder.mkdir(parents=True, exist_ok=True)
             reportlib.write_stylesheet(folder)
+            # a page the run already closed off stays as it is — the run
+            # wrote it once, at the end of that case, and writing every
+            # page again here would be a second full copy of a long run
             for case in run.cases:
-                (folder / self._case_file(case)).write_text(
-                    reportlib.case_html(case), encoding="utf-8")
+                if case.file not in self._finalised:
+                    (folder / self._case_file(case)).write_text(
+                        reportlib.case_html(case), encoding="utf-8")
             summary = f"{stamp}__summary.html"
             (folder / summary).write_text(reportlib.summary_html(run), encoding="utf-8")
             (folder / f"{stamp}__summary.json").write_text(
@@ -4755,8 +4807,10 @@ class Bench:
         # one stamp for every file this run writes, live ones included
         self._run_stamp = ""
         self._run_nth = Counter()
-        self._report_live_at = 0.0
+        self._finalised = set()
         self._report_live_failed = False
+        self._report_write(f"{self._report_stamp()}__summary.html",
+                           reportlib.summary_head(self._live_run()))
         try:
             for i, tid in enumerate(self.run_order):
                 self.run_idx = i
@@ -4940,13 +4994,13 @@ class Bench:
                     "session": _session_bytes(sess) if sess else None,
                     "failed": ""}   # set by a failure the case chose to survive
         total = len(tc.preconditions) + len(tc.steps)
-        self._write_live(rec, force=True)      # the page exists before step 1
+        self._live_case_begin(rec)             # the page exists before step 1
 
         def on_step(idx: int, text: str) -> None:
             self.run_prog = {"tid": tc.id, "step": idx, "of": total, "text": text}
             # the steps behind this one are in the record and go to disk;
             # the one about to run is not a step that happened yet
-            self._write_live(rec)
+            self._live_steps(rec)
             self._changed()
 
         def stop() -> bool:
@@ -4958,7 +5012,7 @@ class Bench:
             # the last write of this case: from here its page carries the
             # result and the duration, which is what the header was
             # missing all the way through
-            self._write_live(rec, force=True)
+            self._live_case_end(rec)
             return verdict, why
 
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
