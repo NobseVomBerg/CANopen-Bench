@@ -179,11 +179,15 @@ def _rich(text: object) -> str:
     return _TAG.sub(lambda m: f"<{m.group(1)}{m.group(2).lower()}>", _e(text))
 
 
-def _page(title: str, body: str) -> str:
+def _page_open(title: str) -> str:
     return ("<!doctype html>\n<html lang='en'>\n<head><meta charset='utf-8'>"
             f"<title>{_e(title)}</title>"
             f"<link rel='stylesheet' href='{STYLESHEET}'></head>\n"
-            f"<body>\n{body}</body>\n</html>\n")
+            "<body>\n")
+
+
+def _page(title: str, body: str) -> str:
+    return _page_open(title) + body + "</body>\n</html>\n"
 
 
 def _row(label: str, value: str, cls: str = "") -> str:
@@ -191,8 +195,16 @@ def _row(label: str, value: str, cls: str = "") -> str:
     return f"<tr><td>{_e(label)}</td><td colspan=2{klass}>{value}</td></tr>\n"
 
 
-def case_html(case: CaseRecord) -> str:
-    """One test case: the header block, then every step that ran."""
+def case_head(case: CaseRecord) -> str:
+    """Everything above the first step: the page, the header block, the
+    column titles. Written when the case starts.
+
+    Split out because a run writes its report as it goes, one row per
+    step — see `step_row`. Nothing outside this module builds any of it;
+    what the caller composes is these three pieces, and
+    `test_a_case_page_is_its_head_its_rows_and_its_tail` holds them to
+    producing exactly what `case_html` does.
+    """
     head = "<table>\n"
     head += _row("TestCase", _e(case.name), "testCaseName")
     if case.desc:
@@ -215,20 +227,37 @@ def case_html(case: CaseRecord) -> str:
     # new report dropped next to old ones still finds its column width
     head += ("<tr><th>Timestamp</th><th class='StepLine'>Line</th>"
              "<th>Step Action and Comment</th></tr>\n")
-    for step in case.steps:
-        cls = _ROW_CLASS.get(step.state, "")
-        text = _rich(step.text)
-        if step.note:
-            # A delay says nothing by itself, so its note is not a remark on
-            # the step — it *is* the step ("wait 1s; the menu updates late").
-            # Two lines for four words wastes a row somebody has to read past.
-            sep = "; " if _DELAY.match(step.text) else "<br />"
-            text += sep + _rich(step.note)
-        if step.detail:
-            text += f"<br /><i>{_rich(step.detail)}</i>"
-        head += (f"<tr class='{cls}'><td>{_e(step.ts)}</td>"
-                 f"<td>{step.line}</td><td>{text}</td></tr>\n")
-    return _page(f"{case.id} · {case.name}", head + "</table>\n")
+    return _page_open(f"{case.id} · {case.name}") + head
+
+
+def step_row(step: StepRecord) -> str:
+    """One executed step. Appended the moment it is over."""
+    cls = _ROW_CLASS.get(step.state, "")
+    text = _rich(step.text)
+    if step.note:
+        # A delay says nothing by itself, so its note is not a remark on
+        # the step — it *is* the step ("wait 1s; the menu updates late").
+        # Two lines for four words wastes a row somebody has to read past.
+        sep = "; " if _DELAY.match(step.text) else "<br />"
+        text += sep + _rich(step.note)
+    if step.detail:
+        text += f"<br /><i>{_rich(step.detail)}</i>"
+    return (f"<tr class='{cls}'><td>{_e(step.ts)}</td>"
+            f"<td>{step.line}</td><td>{text}</td></tr>\n")
+
+
+def page_tail() -> str:
+    """What closes a report. Absent while it is being written, which is
+    how a browser can tell a page that is still growing — and which it
+    renders anyway, because an unclosed table is one every parser has had
+    to cope with since the nineties."""
+    return "</table>\n</body>\n</html>\n"
+
+
+def case_html(case: CaseRecord) -> str:
+    """One test case: the header block, then every step that ran."""
+    return (case_head(case) + "".join(step_row(s) for s in case.steps)
+            + page_tail())
 
 
 def _device_text(case: CaseRecord) -> str:
@@ -242,8 +271,13 @@ def _device_text(case: CaseRecord) -> str:
     return " · ".join(bits)
 
 
-def summary_html(run: RunRecord) -> str:
-    """The run at a glance: one line per case, linking to its own report."""
+def summary_head(run: RunRecord) -> str:
+    """The run's header block and the column titles.
+
+    Its counts and its result are those of the record it is given, so a
+    summary written while the run goes says RUNNING until the run is over
+    and this is written again over the finished record.
+    """
     counts = {v: sum(1 for c in run.cases if c.verdict == v)
               for v in (PASS, FAIL, ERROR, SKIP)}
     body = "<table>\n"
@@ -257,16 +291,24 @@ def summary_html(run: RunRecord) -> str:
     body += _row("Result", _e(run.verdict), _RESULT_CLASS.get(run.verdict, ""))
     body += "<tr><th colspan=3 class='emptyColumn'></th></tr>\n"
     body += ("<tr><th>Case</th><th>Device</th><th>Result</th></tr>\n")
-    for case in run.cases:
-        link = (f"<a href='{_e(case.file)}'>{_e(case.id)} · {_e(case.name)}</a>"
-                if case.file else f"{_e(case.id)} · {_e(case.name)}")
-        shown = case.verdict or RUNNING
-        cls = _RESULT_CLASS.get(shown, "")
-        detail = f" — {_e(case.reason)}" if case.reason else ""
-        body += (f"<tr><td>{link}</td><td>{_e(_device_text(case))}</td>"
-                 f"<td class='{cls}'>{_e(shown)}{detail}</td></tr>\n")
-    body += "</table>\n"
-    return _page(f"Test run {run.started}", body)
+    return _page_open(f"Test run {run.started}") + body
+
+
+def summary_row(case: CaseRecord) -> str:
+    """One case's line, linking to its own report."""
+    link = (f"<a href='{_e(case.file)}'>{_e(case.id)} · {_e(case.name)}</a>"
+            if case.file else f"{_e(case.id)} · {_e(case.name)}")
+    shown = case.verdict or RUNNING
+    cls = _RESULT_CLASS.get(shown, "")
+    detail = f" — {_e(case.reason)}" if case.reason else ""
+    return (f"<tr><td>{link}</td><td>{_e(_device_text(case))}</td>"
+            f"<td class='{cls}'>{_e(shown)}{detail}</td></tr>\n")
+
+
+def summary_html(run: RunRecord) -> str:
+    """The run at a glance: one line per case, linking to its own report."""
+    return (summary_head(run) + "".join(summary_row(c) for c in run.cases)
+            + page_tail())
 
 
 def summary_json(run: RunRecord) -> str:

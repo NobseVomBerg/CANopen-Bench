@@ -14,6 +14,7 @@ from pathlib import Path
 
 from conftest import connect_and_scan, write_seed_eds_files
 
+from canopen_bench import report
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.report import (
@@ -718,3 +719,52 @@ def test_a_run_with_nothing_readable_in_it_is_skipped_not_fatal():
     assert last_verdicts([{"cases": ["not a case", None]},
                           {"cases": [{"verdict": FAIL}]},        # no id
                           {"nonsense": 1}]) == {}
+
+
+# -- written as the run goes: the pieces have to add up ----------------------
+
+def test_a_case_page_is_its_head_its_rows_and_its_tail():
+    """A run writes a page as it goes — the header when the case starts, a
+    row per step, the closing tags at the end — and renders the same page
+    whole when the case is over. Two producers of one document, so they
+    are held to being the same one: change the markup in either half and
+    this says so, which is the answer to "now two places know it"."""
+    case = CaseRecord(id="0001", name="both ways", desc="a description",
+                      tools=["PSU"], grade="automated", user="somebody",
+                      device="dut", variant="820", sn="SN1", node=3,
+                      started="2026-09-14T07:00:00", seconds=1.25,
+                      verdict="FAIL", reason="expected 0x0E")
+    case.steps = [
+        StepRecord(line=4, text="wait 1s", note="the menu updates late", state="ok"),
+        StepRecord(line=5, text="read 0x2007:0x01", detail="= 0x0E", state="fail"),
+        StepRecord(line=6, text="LoopEnd", state="flow"),
+    ]
+    assert case_html(case) == (
+        report.case_head(case)
+        + "".join(report.step_row(s) for s in case.steps)
+        + report.page_tail())
+
+
+def test_a_summary_is_its_head_its_rows_and_its_tail():
+    """Same bargain for the run's own page: the header goes down when the
+    run starts and a line is appended per case."""
+    run = RunRecord(started="2026-09-14T07:00:00", finished="2026-09-14T07:03:00",
+                    user="somebody", workspace="default", tool="canopen-bench x",
+                    cases=[CaseRecord(id="0001", name="one", verdict="PASS",
+                                      file="a.html", device="dut"),
+                           CaseRecord(id="0002", name="two", verdict="FAIL",
+                                      reason="why", file="b.html")])
+    assert summary_html(run) == (
+        report.summary_head(run)
+        + "".join(report.summary_row(c) for c in run.cases)
+        + report.page_tail())
+
+
+def test_a_page_still_being_written_has_no_closing_tags():
+    """What a browser has to cope with while the run goes: a document that
+    stops mid-table. It renders it — every parser has had to since the
+    nineties — and the missing end is how a reader can tell it is not
+    over. The closing tags arrive with the last write."""
+    case = CaseRecord(id="0001", name="in progress")
+    assert "</html>" not in report.case_head(case)
+    assert report.page_tail().rstrip().endswith("</html>")
