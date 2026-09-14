@@ -84,10 +84,18 @@ class Db:
         return row["ts"] if row and row["ts"] else None
 
     def remember_value(self, sn: str, obj: str, value: str, ts: str) -> None:
+        self.remember_values([(sn, obj, value, ts)])
+
+    def remember_values(self, rows: list[tuple[str, str, str, str]]) -> None:
+        """Many at once, one transaction. What the bus carries past is
+        flushed in batches, and a transaction per value would turn a busy
+        bus into a busy disk."""
+        if not rows:
+            return
         with self._lock, self._conn as c:
-            c.execute("""INSERT INTO last_values(sn,obj,value,ts) VALUES(?,?,?,?)
-                         ON CONFLICT(sn,obj) DO UPDATE SET value=excluded.value, ts=excluded.ts""",
-                      (sn, obj, value, ts))
+            c.executemany("""INSERT INTO last_values(sn,obj,value,ts) VALUES(?,?,?,?)
+                             ON CONFLICT(sn,obj) DO UPDATE SET value=excluded.value, ts=excluded.ts""",
+                          rows)
 
     # -- EDS file registry -------------------------------------------------
     # The eds_files table holds only metadata; the actual .eds text lives as
