@@ -321,3 +321,17 @@ def test_an_action_the_bench_refuses_says_so():
     assert "refused(" in send
     assert "the bench did not answer" in send   # …and a request that never arrived
     assert "<${ActionRefused} />" in app, "the strip is not drawn anywhere"
+
+
+def test_an_eds_default_is_drawn_as_one():
+    """The table shows the file's default for an object nobody has read or
+    seen, and after a device switch that is most of the table. Drawn like
+    a reading, a default is a number nobody measured — so it is grey and
+    slanted, and the tooltip says which it is. The panel's tooltip knows
+    the third origin too: a value restored from the workspace db is not
+    one that was "read just now"."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "fmt[key].dflt" in app
+    assert "EDS default — not read from this device" in app
+    assert app.count("${defaultStyle(key)}") == 4, "both tables, both kinds of cell"
+    assert "restored from the workspace db" in app
