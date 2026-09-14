@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
-import canopen_bench.core as core_mod
 from canopen_bench import data
 from canopen_bench import report as reportlib
 from canopen_bench.core import Bench, _step_text
@@ -1950,16 +1949,15 @@ def _report_files(bench) -> list[Path]:
     return sorted(Path(bench.paths["res"]).glob("*.html"))
 
 
-def test_the_case_page_fills_in_while_the_case_runs(tc_bench, monkeypatch):
+def test_the_case_page_fills_in_while_the_case_runs(tc_bench):
     """The old tool wrote every step as it happened and patched the result
     into the header at the end, so a long case could be watched from the
     page. Worth keeping: the alternative is a file that appears, finished,
     at a moment nobody can predict.
 
-    The throttle is off here — with it on, how much of the case is on disk
-    at any moment depends on how long its steps take, which is not what
-    this is about (see the test below)."""
-    monkeypatch.setattr(core_mod, "REPORT_LIVE_S", 0.0)
+    A row per step, appended — not the page rewritten. A page of ten
+    thousand steps written whole per step is gigabytes of the same
+    document, and an endurance run does that all night."""
     bench = tc_bench
     _add_tc(bench, "TC0050_slow.yaml", SLOW_TC)
     seen: list[str] = []
@@ -1979,27 +1977,49 @@ def test_the_case_page_fills_in_while_the_case_runs(tc_bench, monkeypatch):
     done = final.read_text(encoding="utf-8")
     assert "RUNNING" not in done and "PASS" in done
     assert "first" in done and "third" in done
+    assert done.rstrip().endswith("</html>"), "the page was never closed off"
 
 
-def test_the_live_write_is_throttled_but_the_end_of_a_case_never_is(tc_bench):
-    """A case may run ten thousand steps and its page grows with them, so
-    rewriting it per step is work that squares. What a reader loses is a
-    fraction of a second of freshness; what the end of a case writes is
-    always written, so the document left behind is the finished one."""
+def test_a_step_costs_one_row_not_one_page(tc_bench):
+    """The whole reason for appending. What reaches the disk for a step is
+    that step's row — not the document it lands in, which is what makes a
+    long run expensive rather than the run itself."""
     bench = tc_bench
-    rec = reportlib.CaseRecord(id="0051", name="throttled")
+    rec = reportlib.CaseRecord(id="0051", name="appended", started="now")
     bench._run_cases = [rec]
-
-    bench._write_live(rec, force=True)
+    bench._live_case_begin(rec)
     page = Path(bench.paths["res"]) / rec.file
-    first = page.read_text(encoding="utf-8")
+    before = page.stat().st_size
 
-    rec.steps.append(reportlib.StepRecord(line=1, text="a step nobody sees yet"))
-    bench._write_live(rec)                      # too soon after the last one
-    assert page.read_text(encoding="utf-8") == first
+    rec.steps.append(reportlib.StepRecord(line=1, text="one step", state="ok"))
+    bench._live_steps(rec)
+    grew = page.stat().st_size - before
 
-    bench._write_live(rec, force=True)          # the end of a case
-    assert "a step nobody sees yet" in page.read_text(encoding="utf-8")
+    assert "one step" in page.read_text(encoding="utf-8")
+    assert grew == len(reportlib.step_row(rec.steps[0]).encode()), \
+        "a step wrote more than its own row"
+    # …and writing again without a new step writes nothing at all
+    bench._live_steps(rec)
+    assert page.stat().st_size == before + grew
+
+
+def test_the_page_left_behind_is_the_one_the_renderer_would_write(tc_bench):
+    """Two ways to produce the same page — appended while the case runs,
+    rendered whole when it ends — and only the second is the definition.
+    The first is held to it here, because a divergence between them is a
+    report that reads differently depending on when it was written."""
+    bench = tc_bench
+    rec = reportlib.CaseRecord(id="0052", name="either way", started="now",
+                               verdict="PASS")
+    bench._run_cases = [rec]
+    bench._live_case_begin(rec)
+    for i in range(3):
+        rec.steps.append(reportlib.StepRecord(line=i, text=f"step {i}", state="ok"))
+        bench._live_steps(rec)
+    bench._live_case_end(rec)
+
+    page = (Path(bench.paths["res"]) / rec.file).read_text(encoding="utf-8")
+    assert page == reportlib.case_html(rec)
 
 
 def test_the_summary_lists_the_case_that_is_running(tc_bench):

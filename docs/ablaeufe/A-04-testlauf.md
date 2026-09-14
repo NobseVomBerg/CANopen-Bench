@@ -162,23 +162,33 @@ Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
 
 ### Geschrieben *während* der Lauf läuft **[Ist]**
 
-Die Dateien entstehen nicht erst am Ende: Sobald ein Testfall beginnt,
-steht seine Seite im Ordner, und während er läuft wächst sie um die
-Schritte, die hinter ihm liegen. Damit lässt sich ein langer Fall aus dem
-Report verfolgen statt nur aus dem Log — das alte Werkzeug hat das so
-gemacht, und es ist der Grund, warum eine Zwischenansicht überhaupt
-existiert.
+Die Dateien entstehen nicht erst am Ende, und sie werden **angehängt**,
+nicht neu geschrieben:
+
+| Zeitpunkt | Was auf die Platte geht |
+|---|---|
+| Lauf beginnt | Kopf der Zusammenfassung (`summary_head`) |
+| Testfall beginnt | Kopf seiner Seite (`case_head`) + seine Zeile in der Zusammenfassung |
+| je Schritt | **eine Zeile** (`step_row`), angehängt |
+| Testfall endet | restliche Zeilen, dann die Seite einmal vollständig (`case_html`) — dort bekommt der Kopf Ergebnis und Dauer; die Zeile in der Zusammenfassung wird an Ort und Stelle ersetzt |
+| Lauf endet | Zusammenfassung vollständig (Ergebnis des Laufs), `__summary.json` |
+
+Ein Schritt kostet damit seine eigene Zeile, nicht das Dokument, in dem
+sie landet. Über einen Fall mit 10 000 Schritten sind das ~2,4 MB statt
+~6 GB — der Unterschied, der einen Dauerlauf über Nacht von einer
+Belastung des Datenträgers unterscheidet.
+
+Weil die laufende Zeile in der Zusammenfassung immer die **letzte** ist,
+wird sie am Ende des Falls nicht gesucht, sondern abgeschnitten und neu
+geschrieben (gemerkter Byte-Offset). Auch die Zusammenfassung wächst
+damit nur.
 
 - **`RUNNING`** steht als Ergebnis, solange eines fehlt — im Kopf der
   Fall-Seite, in der Zeile der Zusammenfassung und als Ergebnis des
   Laufs. Ein leeres Feld läse sich wie „ohne Ergebnis beendet".
   `Finished` zeigt `(running)`.
-- **Ganz neu gerendert**, nicht angehängt: die Seite ist eine Funktion
-  des Datensatzes, also nie ein halb geschriebenes Dokument.
-- **Gedrosselt** (`REPORT_LIVE_S`, 0,4 s): ein Fall mit zehntausend
-  Schritten würde sonst eine mitwachsende Seite pro Schritt neu
-  schreiben. Das Ende eines Falls wird immer geschrieben — was danach auf
-  der Platte steht, ist das fertige Dokument mit Ergebnis und Dauer.
+- Eine Seite, an die noch angehängt wird, hat **keine schließenden Tags**
+  — genau daran ist sie zu erkennen. Browser stellen sie trotzdem dar.
 - **Ein Stempel für den ganzen Lauf**: die Dateien während des Laufs sind
   dieselben wie die am Ende, unter denselben Namen. Ein Link, dem jemand
   mitten im Lauf gefolgt ist, zeigt hinterher auf das fertige Dokument.
@@ -186,6 +196,13 @@ existiert.
   `__002`, …), nicht nach dem Ergebnis — der Name muss stehen, bevor der
   Fall läuft. Ein früh abgebrochener Lauf hinterlässt deshalb `__001` an
   einem Fall, der am Ende nur einmal lief.
+
+Kopf, Zeile und Abschluss sind dieselben Funktionen, aus denen
+`case_html` bzw. `summary_html` bestehen — die Tests
+`test_a_case_page_is_its_head_its_rows_and_its_tail` und
+`test_a_summary_is_its_head_its_rows_and_its_tail` halten beide Hälften
+darauf fest, dass sie zusammengesetzt exakt das ergeben, was der
+Komplett-Renderer liefert.
 
 Schlägt das Schreiben fehl (volle Platte, ungültiger Pfad), ist das eine
 Logzeile `RUN  report not written — …` (einmal je Lauf, nicht je Schritt)
