@@ -43,10 +43,15 @@ from importlib import resources
 
 #: Verdicts, in the vocabulary the runner produces.
 PASS, FAIL, ERROR, SKIP = "PASS", "FAIL", "ERROR", "SKIP"
+#: …and the one the runner never produces: what a record without a verdict
+#: means while the run is still going. These files are written as the run
+#: goes, so a reader opens one mid-run and has to be told which it is —
+#: an empty Result cell reads as a case that ended without one.
+RUNNING = "RUNNING"
 
 #: verdict -> the cell class that colours it
 _RESULT_CLASS = {PASS: "resultOk", FAIL: "resultNok", ERROR: "resultNok",
-                 SKIP: "resultCanceled"}
+                 SKIP: "resultCanceled", RUNNING: "resultRunning"}
 #: step outcome -> row class. "flow" is not an outcome but a kind: the
 #: case's own bookkeeping (labels, jumps, register arithmetic), which the
 #: previous tool set apart the same way. A loop is the reason it matters —
@@ -108,7 +113,15 @@ class RunRecord:
     @property
     def verdict(self) -> str:
         """A run is only OK when every case that ran is. A skipped case is
-        not a failure — it is a case that did not apply."""
+        not a failure — it is a case that did not apply.
+
+        A case with no verdict has not finished, which makes the run
+        unfinished too: these files are written while the run goes, and a
+        summary that called it PASS on the strength of the cases that are
+        already in would be saying the run went well before it went.
+        """
+        if any(not c.verdict for c in self.cases):
+            return RUNNING
         if any(c.verdict in (FAIL, ERROR) for c in self.cases):
             return FAIL
         return PASS if any(c.verdict == PASS for c in self.cases) else SKIP
@@ -193,8 +206,9 @@ def case_html(case: CaseRecord) -> str:
         head += _row("User", _e(case.user))
     head += _row("Timestamp", _e(case.started))
     head += _row("Duration", f"{case.seconds:.1f} s")
-    verdict = _e(case.verdict) + (f" — {_e(case.reason)}" if case.reason else "")
-    head += _row("Result", verdict, _RESULT_CLASS.get(case.verdict, ""))
+    shown = case.verdict or RUNNING
+    verdict = _e(shown) + (f" — {_e(case.reason)}" if case.reason else "")
+    head += _row("Result", verdict, _RESULT_CLASS.get(shown, ""))
     head += "<tr><th colspan=3 class='emptyColumn'></th></tr>\n"
     # the class keeps its old name on purpose: a results folder holds the
     # stylesheet it was first written with and is never overwritten, so a
@@ -246,10 +260,11 @@ def summary_html(run: RunRecord) -> str:
     for case in run.cases:
         link = (f"<a href='{_e(case.file)}'>{_e(case.id)} · {_e(case.name)}</a>"
                 if case.file else f"{_e(case.id)} · {_e(case.name)}")
-        cls = _RESULT_CLASS.get(case.verdict, "")
+        shown = case.verdict or RUNNING
+        cls = _RESULT_CLASS.get(shown, "")
         detail = f" — {_e(case.reason)}" if case.reason else ""
         body += (f"<tr><td>{link}</td><td>{_e(_device_text(case))}</td>"
-                 f"<td class='{cls}'>{_e(case.verdict)}{detail}</td></tr>\n")
+                 f"<td class='{cls}'>{_e(shown)}{detail}</td></tr>\n")
     body += "</table>\n"
     return _page(f"Test run {run.started}", body)
 
