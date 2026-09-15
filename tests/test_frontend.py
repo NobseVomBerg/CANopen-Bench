@@ -350,3 +350,19 @@ def test_a_plugin_stats_block_is_drawn_from_what_the_server_sent():
     assert "(b.fields || [])" in block and "(b.tables || [])" in block
     assert "c.align === 'r'" in block, "a column of numbers is not right-aligned"
     assert "${r[i] || ''}" in block, "a row shorter than its columns breaks the grid"
+
+
+def test_the_stats_view_scrolls_instead_of_squashing_its_boxes():
+    """The Stats view is a flex column that scrolls. Its children shrink by
+    default, and a shrunk box with overflow:hidden does not scroll — it
+    cuts its rows off. That is how adding the plugin block below the
+    COB-ID table left that table standing as a header with nothing under
+    it: at 800 px of window the card was 2 px tall around 120 px of rows.
+    Every direct child of that column has to keep its own height."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "const NONE = 'flex:0 0 auto;'" in app
+    stats = app.split("function TraceStats(")[1].split("\nfunction ")[0]
+    assert stats.count("${NONE}") == 4, "cards, by-class, COB table, footnote"
+    block = app.split("function StatsBlock(")[1].split("\nfunction ")[0]
+    assert "NONE + 'background" in block, "a block would squash its neighbours"
+    assert "${NONE}border:1px solid" in block, "and its own tables would be cut off"
