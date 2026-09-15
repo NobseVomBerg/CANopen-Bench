@@ -1207,6 +1207,7 @@ class _FakeStats(StatsProvider):
 
     def __init__(self, data=None, raises="", ):
         self.seen: list[tuple[int, bytes]] = []
+        self.forks: list = []
         self.resets = 0
         self._data = data
         self._raises = raises
@@ -1223,6 +1224,11 @@ class _FakeStats(StatsProvider):
 
     def reset(self) -> None:
         self.resets += 1
+
+    def fresh(self):
+        other = _FakeStats(self._data, self._raises)
+        self.forks.append(other)
+        return other
 
 
 class _StatsPlugin(BenchPlugin):
@@ -1344,18 +1350,78 @@ def test_every_recorded_frame_reaches_the_provider_exactly_once(tmp_path):
     assert prov.seen.count((0x381, bytes.fromhex("0E00C8000000"))) == 1
 
 
-def test_a_loaded_capture_is_not_counted_as_the_bus(tmp_path):
-    """An imported capture is a view, not a recording: it leaves the live
-    record untouched and never reaches the frame counters beside the
-    block, so it must not reach the block either — half the numbers would
-    then describe this session and half a file."""
-    prov = _FakeStats()
-    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
-    text = "(0.000000) can0 381#0E00C8000000\n"
+def _import(bench, *lines: str) -> None:
+    text = "".join(line + "\n" for line in lines)
     bench.dispatch("trace_import", {"filename": "capture.log", "fmt": "candump",
                                     "data": base64.b64encode(text.encode()).decode()})
+
+
+def test_a_loaded_capture_is_read_by_a_provider_of_its_own(tmp_path):
+    """A capture is a file, the session is the bus, and adding one to the
+    other gives a number nobody can see is wrong. So the block that counts
+    this session never sees the file: the capture is read by a second
+    provider, asked for with fresh()."""
+    prov = _FakeStats(_one_table())
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
+    _import(bench, "(0.000000) can0 381#0E00C8000000")
     assert len(bench._trace_view()[0]) == 1, "the capture is shown"
-    assert prov.seen == [], "and counted by nobody"
+    assert prov.seen == [], "and not by the one counting the bus"
+    (other,) = prov.forks
+    assert other.seen == [(0x381, bytes.fromhex("0E00C8000000"))]
+    assert _blocks(bench)[0]["key"] == "fake.load", "the capture's own block"
+
+
+def test_a_provider_that_hands_back_its_live_self_reads_no_capture(tmp_path):
+    """Two measurements added together is worse than one missing block —
+    and this is the mistake a plugin makes by returning a singleton."""
+    prov = _FakeStats(_one_table())
+    prov.fresh = lambda: prov
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
+    _import(bench, "(0.000000) can0 381#0E00C8000000")
+    assert prov.seen == [], "the file never reached the live counter"
+    assert _blocks(bench) == []
+    assert sum("fake.load" in row["msg"] for row in bench.logs) == 1
+
+
+def test_a_capture_is_read_not_driven(tmp_path):
+    """The buttons of a block act on the bus. Beside numbers that came out
+    of a file they would offer to change something the reading is not
+    about — and on a bench with no device at all, nothing."""
+    data = _one_table() | {"action": "fake.set", "controls": [{"id": "0", "label": "Stop"}]}
+    prov = _FakeStats(data)
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
+    assert "controls" in _blocks(bench)[0], "live, they are there"
+    _import(bench, "(0.000000) can0 381#0E00C8000000")
+    (block,) = _blocks(bench)
+    assert "controls" not in block and "action" not in block
+    assert block["tables"], "the reading itself is still shown"
+
+
+def test_the_whole_stats_view_follows_the_open_capture(tmp_path):
+    """Half these numbers from a file and half from this session would be
+    a reading of neither, so the view switches together — the way the
+    trace panel it sits behind does."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    bench.bus.queue_raw(0x181, b"\x01\x02")
+    bench._drain_frames()
+    rows, bench._tick_rows = bench._tick_rows, []
+    bench._update_bus_stats(rows)
+    live = bench.snapshot()["trace"]["stats"]["total"]
+
+    _import(bench, "(0.000000) can0 700#05", "(2.000000) can0 700#05",
+            "(4.000000) can0 285#0102")
+    st = bench.snapshot()["trace"]["stats"]
+    assert st["of"] == bench.trace_loaded
+    assert st["total"] == 3 and st["total"] != live
+    assert {c["cob"] for c in st["cobs"]} == {"0x700", "0x285"}
+    assert st["span"] == 4.0, "as long as the file, not as long as the session"
+    assert st["loadHist"] == [], "a file carries no bitrate to measure load against"
+
+    bench.dispatch("trace_toggle", {})  # back to live
+    assert bench.snapshot()["trace"]["stats"]["total"] == live
+    assert "of" not in bench.snapshot()["trace"]["stats"]
 
 
 def test_the_block_starts_over_where_the_counters_do(tmp_path):

@@ -177,10 +177,19 @@ buttons.
 
 `observe()` sees live frames only, each exactly once and in bus order: it
 sits in the drain, where the queue is emptied, not in the view — so a
-pause does not hide frames from it, and a loaded or imported capture,
-which is a view and not a recording, never reaches it. Frames can still
-be lost on the wire, so a provider has to survive a gap in what it is
-assembling rather than assume a complete sequence.
+pause does not hide frames from it. Frames can still be lost on the wire,
+so a provider has to survive a gap in what it is assembling rather than
+assume a complete sequence.
+
+A capture that is opened is read by a **second** provider, asked for with
+`fresh()` (the default builds another of the same class). The one the
+bench holds goes on counting the bus and is never handed the file: a file
+added to a session is a number nobody can see is wrong. A provider whose
+`fresh()` gives back `self` is left out of captures entirely, and the
+state log says so — a missing block is a gap, two measurements added
+together is not. A capture's block carries no controls: those act on the
+bus, and beside numbers read out of a file they would offer to change
+something the reading is not about.
 
 Every cell is a string the plugin has already formatted, unit included —
 the core lays the block out and learns nothing about the device from it.
