@@ -60,6 +60,7 @@ only what you provide.
 | `addressing_provider()` | `AddressingProvider \| None` | Session identity for (re-)addressing runs (`$session` in flows); first plugin wins |
 | `demo_hooks()` | `list[DemoHook]` | Device-side protocol simulation on the demo bus, so vendor flows run hardware-free |
 | `trace_decoders()` | `list[TraceDecoder]` | Decoding for vendor-specific frames in the trace monitor |
+| `stats_providers()` | `list[StatsProvider]` | Blocks of measured numbers under the Stats view of the trace, assembled from the frames the bench records. A device family's own measurement telegram — task load, timings, reserves — is neither a CANopen object nor a frame count, and a single trace row is not where anybody reads it |
 | `device_panels()` | `list[DevicePanel]` | Sidebar boxes for a device family — front-panel mirror, virtual buttons, status LEDs |
 | `object_panels()` | `list[Path]` | Packaged `*.panel.yaml` files: the Objects page's panel view, where a device's values appear as named boxes with the unit and scaling no EDS carries ([panel-format.md](panel-format.md)). Read from the package, never copied into a workspace |
 | `emcy_codes()` | `dict[int, str]` | Vendor-/profile-specific EMCY error-code texts, merged over the built-in CiA-301 table (plugin wins on conflict) |
@@ -136,6 +137,49 @@ A field whose bits are all clear reads as `none`, not as `?0x0`. Zero in
 a lane is not an unreadable value, it is a lane the device has not set —
 and on a register of four lanes, `?0x0` said "unreadable" three times
 where nothing was there at all.
+
+### Stats blocks
+
+A `TraceDecoder` names one row from one frame. A measurement that arrives
+as a *sequence* of frames — a report opened by one telegram and closed by
+another, with a value per function code in between — cannot be put
+together there, and its result is a table rather than a row. That is what
+`stats_providers()` is for.
+
+A `StatsProvider` has three moments and they are deliberately separate:
+
+```python
+class LoadStats(StatsProvider):
+    key, title = "load", "Controller load"
+
+    def observe(self, cob, data):     # every recorded frame, exactly once
+        ...
+
+    def render(self, bench):          # every snapshot; must not touch the bus
+        return {"note": "12 reports",
+                "fields": [{"label": "Heap free", "value": "12 480 B"}],
+                "tables": [{"title": "Tasks",
+                            "cols": [{"label": "Task"},
+                                     {"label": "Load %", "align": "r"}],
+                            "rows": [["worker", "12.34"]]}]}
+
+    def reset(self):                  # connect, and trace clear
+        ...
+```
+
+`observe()` sees live frames only, each exactly once and in bus order: it
+sits in the drain, where the queue is emptied, not in the view — so a
+pause does not hide frames from it, and a loaded or imported capture,
+which is a view and not a recording, never reaches it. Frames can still
+be lost on the wire, so a provider has to survive a gap in what it is
+assembling rather than assume a complete sequence.
+
+Every cell is a string the plugin has already formatted, unit included —
+the core lays the block out and learns nothing about the device from it.
+The only thing said about a column is whether it holds numbers
+(`align: "r"`). `render()` runs on every snapshot, the same rule a panel's
+does: format what is already counted, never read the bus. A provider that
+raises is hidden for the rest of the session and logged once.
 
 ### Device panels
 

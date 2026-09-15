@@ -890,6 +890,12 @@ class Bench:
         self.addressing = next((ap for p in self.plugins
                                 if (ap := p.addressing_provider()) is not None), None)
         self._trace_decoders = [d for p in self.plugins for d in p.trace_decoders()]
+        # blocks of measured numbers for the Stats view, namespaced like
+        # panels; one that raises goes into _stats_broken and is never
+        # retried, since render() runs on every snapshot
+        self._stats_providers = [(f"{p.name}.{prov.key}", prov)
+                                 for p in self.plugins for prov in p.stats_providers()]
+        self._stats_broken: set[str] = set()
         # sidebar panels, namespaced like actions and step types; a panel
         # that raises is dropped into _panels_broken and never retried,
         # since render() runs on every snapshot
@@ -1482,6 +1488,7 @@ class Bench:
             self._annotate_emcy(row)
             # last: a matching vendor decoder overrides generic decode
             self._annotate_plugin(row)
+            self._observe_stats(row)
             if row["cls"] == "HB" and row["node"] is not None:
                 self._hb_seen[row["node"]] = time.monotonic()
             key = (row["cls"], row["node"])
@@ -2029,6 +2036,7 @@ class Bench:
         self._rate_win.clear()
         self._load_hist.clear()
         self._stats_t0 = 0.0
+        self._reset_stats_providers()
         self.connected = True
         self._reset_hb_monitor()
         # the channel is in the line because opening the wrong one does not
@@ -2163,9 +2171,9 @@ class Bench:
         plus payload per standard frame) over the last ~5 s, a cumulative
         error-frame counter, and the per-COB statistics behind the trace
         Stats view. Called every tick while draining — also with zero rows,
-        so load and history decay on an idle bus. Values freeze while the
-        trace is paused — no frames are drained then, so there is nothing
-        to measure."""
+        so load and history decay on an idle bus. A paused trace does not
+        stop any of it: the pause holds the view, the record underneath
+        goes on being written and measured."""
         bits = 0
         tick_counts: dict[str, int] = {}
         for r in rows:
@@ -2482,6 +2490,36 @@ class Bench:
                 row.update({k: v for k, v in res.items()
                             if k in ("dec", "obj", "val")})
                 return
+
+    def _observe_stats(self, row: dict) -> None:
+        """Hand one recorded frame to the plugin stats providers.
+
+        Live frames only, and every one of them exactly once — this sits in
+        the drain, where the queue is emptied, not in the view. A provider
+        assembles a measurement out of a sequence of frames, so a frame
+        counted twice or missed is a wrong number, not a missing row.
+        """
+        if not self._stats_providers:
+            return
+        try:
+            cob = int(row["cob"], 16)
+            data = bytes.fromhex(row["data"].replace(" ", ""))
+        except ValueError:
+            return
+        for _key, prov in self._stats_providers:
+            try:
+                prov.observe(cob, data)
+            except Exception:  # a broken provider must not stall the trace
+                continue
+
+    def _reset_stats_providers(self) -> None:
+        """Start the plugin blocks over, wherever the frame counters beside
+        them start over: connect and trace clear."""
+        for _key, prov in self._stats_providers:
+            try:
+                prov.reset()
+            except Exception:
+                continue
 
     def _read_variant(self, node: int, eds_entry: dict) -> str:
         """Auto-detect the device variant from the object configured on its
@@ -5776,6 +5814,7 @@ class Bench:
         self._cob_stats = {}
         self._rate_win.clear()
         self._stats_t0 = 0.0
+        self._reset_stats_providers()
 
     def act_trace_filter(self, p: dict) -> None:
         self.trace_hide = set(p.get("hide", [])) & set(TRACE_CLASSES)
@@ -6269,6 +6308,11 @@ class Bench:
         return "\n".join(lines) + ("\n" if lines else "")
 
     _STATS_TOP = 40  # COB rows shipped per snapshot; the rest is aggregated
+    #: caps on a plugin stats block — it is rebuilt into every snapshot,
+    #: so a provider with a runaway table cannot make the push expensive
+    _BLOCK_TABLES = 8
+    _BLOCK_ROWS = 200
+    _BLOCK_COLS = 12
 
     def _trace_stats(self) -> dict:
         """Statistics view: cumulative per-COB counters (since connect or
@@ -6297,7 +6341,56 @@ class Bench:
                 "total": sum(st["n"] for _, st in ordered),
                 "rate": round(sum(rates.values()) / max(rate_span, TICK_S), 1),
                 "span": round(now - self._stats_t0, 1) if self._stats_t0 else 0.0,
-                "loadHist": list(self._load_hist), "err": self.err_frames}
+                "loadHist": list(self._load_hist), "err": self.err_frames,
+                "blocks": self._stats_blocks()}
+
+    def _stats_blocks(self) -> list[dict]:
+        """What the plugins have measured, as blocks under the COB table.
+
+        The plugin formats every value; this only takes the shape apart and
+        drops what is not in it, the way a trace decoder's return is
+        filtered — a block is drawn by the core, so what a provider may say
+        has to be exactly as wide as what the core can draw. A provider
+        that raises is hidden for the session and said so once, since this
+        runs on every snapshot and a line per tick is not a report.
+        """
+        out = []
+        for key, prov in self._stats_providers:
+            if key in self._stats_broken:
+                continue
+            try:
+                data = prov.render(self)
+            except Exception as exc:  # a broken block must not break the snapshot
+                self._stats_broken.add(key)
+                self.log(f'PLG  stats block "{key}" failed — hidden for this session ({exc})',
+                         "emcy0")
+                continue
+            if not data:
+                continue
+            block = {"key": key, "title": prov.title}
+            if data.get("note"):
+                block["note"] = str(data["note"])
+            fields = [{"label": str(f.get("label", "")), "value": str(f.get("value", "")),
+                       "hint": str(f.get("hint", ""))}
+                      for f in data.get("fields") or []]
+            tables = []
+            for t in (data.get("tables") or [])[:self._BLOCK_TABLES]:
+                cols = [{"label": str(c.get("label", "")),
+                         "align": "r" if c.get("align") == "r" else "l"}
+                        for c in (t.get("cols") or [])[:self._BLOCK_COLS]]
+                if not cols:
+                    continue
+                rows = [[str(cell) for cell in row[:len(cols)]]
+                        for row in (t.get("rows") or [])[:self._BLOCK_ROWS]]
+                tables.append({"title": str(t.get("title", "")), "cols": cols, "rows": rows})
+            if fields:
+                block["fields"] = fields
+            if tables:
+                block["tables"] = tables
+            if len(block) > 2 or block.get("note"):
+                # a heading alone is a card that says a device answered
+                out.append(block)
+        return out
 
     def act_emcy_ack(self, p: dict) -> None:
         self.emcy_new = 0

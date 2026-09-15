@@ -129,7 +129,16 @@ browser):
   therefore never lose a frame to something the operator did on screen.
   Filtering is server-side over the whole ring buffer (200k frames,
   `core.TRACE_CAP`), so a hidden class or device cannot push visible
-  frames out of the browser's window.
+  frames out of the browser's window. The **Stats** view counts frames
+  per COB-ID, per class and as bus load (`Bench._trace_stats`); under
+  those, a plugin may add blocks of its own (`stats_providers()`,
+  `Bench._observe_stats`/`_stats_blocks`), for a device family's own
+  measurement telegram — a report spread over a sequence of frames is
+  not something a `TraceDecoder` can assemble, and its result is a table
+  rather than a trace row. The provider is handed every *recorded* frame
+  exactly once, from the drain rather than the view, and hands back
+  strings it has formatted itself: the core lays the block out and
+  learns nothing about the device from it.
   The table draws newest-first and only the rows on screen, placing them
   by index against a full-height spacer — 200k rows is not something a
   browser lays out. The newest `core.TRACE_VIEW` ride along in the state

@@ -24,6 +24,7 @@ from canopen_bench.plugin import (
     BenchPlugin,
     DemoHook,
     DevicePanel,
+    StatsProvider,
     StepType,
     SwdlStrategy,
     TraceDecoder,
@@ -1193,3 +1194,168 @@ def test_an_empty_manufacturer_field_says_nothing(tmp_path):
     row = _emcy_row("00 10 01 00 00 00 00 00")
     bench._annotate_emcy(row, live=False)
     assert row["obj"] == "0x1000 Generic error"
+
+
+# -- stats providers (Bench._observe_stats / _stats_blocks) ------------------
+
+class _FakeStats(StatsProvider):
+    """Counts what it is given and reports it back, so a test can see both
+    halves: which frames reached it, and what the core made of what it
+    returned."""
+
+    key, title = "load", "Controller load"
+
+    def __init__(self, data=None, raises="", ):
+        self.seen: list[tuple[int, bytes]] = []
+        self.resets = 0
+        self._data = data
+        self._raises = raises
+
+    def observe(self, cob: int, data: bytes) -> None:
+        if self._raises == "observe":
+            raise RuntimeError("broken provider")
+        self.seen.append((cob, data))
+
+    def render(self, bench) -> dict | None:
+        if self._raises == "render":
+            raise RuntimeError("broken provider")
+        return self._data
+
+    def reset(self) -> None:
+        self.resets += 1
+
+
+class _StatsPlugin(BenchPlugin):
+    name = "fake"
+
+    def __init__(self, *providers):
+        self._providers = list(providers)
+
+    def stats_providers(self) -> list:
+        return self._providers
+
+
+def _one_table(**over) -> dict:
+    table = {"title": "Tasks",
+             "cols": [{"label": "Task"}, {"label": "Load %", "align": "r"}],
+             "rows": [["worker", "12.34"]]}
+    table.update(over)
+    return {"tables": [table]}
+
+
+def _blocks(bench) -> list[dict]:
+    return bench.snapshot()["trace"]["stats"]["blocks"]
+
+
+def test_snapshot_has_no_stats_blocks_without_plugins(tmp_path):
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[])
+    assert _blocks(bench) == []
+
+
+def test_a_stats_block_is_namespaced_and_carries_its_title(tmp_path):
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(_FakeStats(_one_table()))])
+    (got,) = _blocks(bench)
+    assert got["key"] == "fake.load"
+    assert got["title"] == "Controller load"
+    assert got["tables"][0]["rows"] == [["worker", "12.34"]]
+
+
+def test_a_block_with_nothing_to_say_is_not_drawn(tmp_path):
+    """Before the first measurement there is nothing to show, and an empty
+    card in the Stats view reads like a device that answered."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(_FakeStats(None))])
+    assert _blocks(bench) == []
+
+
+def test_the_block_carries_only_what_the_core_can_draw(tmp_path):
+    """The core lays a block out; what a provider may say is therefore
+    exactly as wide as what the core draws. A key it invented would
+    otherwise ride along in every snapshot and be drawn by nobody."""
+    data = {"note": "3 reports", "colour": "red",
+            "fields": [{"label": "Heap free", "value": 12480, "hint": "min 11904"}],
+            "tables": [{"title": "Tasks",
+                        "cols": [{"label": "Task"}, {"label": "Load %", "align": "r"},
+                                 {"label": "Free", "align": "middle"}],
+                        "rows": [["worker", 12.34, "512", "spare cell"]]}]}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(_FakeStats(data))])
+    (got,) = _blocks(bench)
+    assert "colour" not in got
+    assert got["note"] == "3 reports"
+    assert got["fields"] == [{"label": "Heap free", "value": "12480", "hint": "min 11904"}]
+    cols = got["tables"][0]["cols"]
+    assert [c["align"] for c in cols] == ["l", "r", "l"], "only 'r' is a column of numbers"
+    assert got["tables"][0]["rows"] == [["worker", "12.34", "512"]], "a cell per column"
+
+
+def test_a_table_without_columns_is_dropped(tmp_path):
+    bench = Bench(Db(tmp_path / "x.db"),
+                  plugins=[_StatsPlugin(_FakeStats({"tables": [{"rows": [["a"]]}]}))])
+    assert _blocks(bench) == []
+
+
+def test_a_runaway_table_is_capped(tmp_path):
+    """The block is rebuilt into every snapshot, which goes out every tick
+    to every open browser. A provider that measured ten thousand things
+    must not make that push expensive."""
+    rows = [[str(i), "1"] for i in range(5000)]
+    bench = Bench(Db(tmp_path / "x.db"),
+                  plugins=[_StatsPlugin(_FakeStats(_one_table(rows=rows)))])
+    (got,) = _blocks(bench)
+    assert len(got["tables"][0]["rows"]) == Bench._BLOCK_ROWS
+
+
+def test_every_recorded_frame_reaches_the_provider_exactly_once(tmp_path):
+    """A provider assembles a measurement out of a sequence of frames, so a
+    frame counted twice is a wrong number rather than a duplicated row.
+    This sits in the drain, where the queue is emptied — whoever drains
+    first gets the frames, and the second drain finds nothing."""
+    prov = _FakeStats()
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    prov.seen.clear()  # the scan itself carried frames
+    bench.bus.queue_raw(0x381, bytes.fromhex("0E00C8000000"))
+    bench._drain_frames()
+    bench._drain_frames()
+    # the demo devices go on sending heartbeats around it; this one frame
+    # is the one being counted
+    assert prov.seen.count((0x381, bytes.fromhex("0E00C8000000"))) == 1
+
+
+def test_a_loaded_capture_is_not_counted_as_the_bus(tmp_path):
+    """An imported capture is a view, not a recording: it leaves the live
+    record untouched and never reaches the frame counters beside the
+    block, so it must not reach the block either — half the numbers would
+    then describe this session and half a file."""
+    prov = _FakeStats()
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
+    text = "(0.000000) can0 381#0E00C8000000\n"
+    bench.dispatch("trace_import", {"filename": "capture.log", "fmt": "candump",
+                                    "data": base64.b64encode(text.encode()).decode()})
+    assert len(bench._trace_view()[0]) == 1, "the capture is shown"
+    assert prov.seen == [], "and counted by nobody"
+
+
+def test_the_block_starts_over_where_the_counters_do(tmp_path):
+    prov = _FakeStats(_one_table())
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(prov)])
+    bench.dispatch("connect_toggle", {})
+    assert prov.resets == 1, "connect"
+    bench.dispatch("trace_clear", {})
+    assert prov.resets == 2, "trace clear"
+
+
+def test_a_broken_block_is_hidden_for_the_session_and_logged(tmp_path):
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(_FakeStats(raises="render"))])
+    assert _blocks(bench) == []
+    assert sum("fake.load" in row["msg"] for row in bench.logs) == 1
+    assert _blocks(bench) == []  # snapshot still up
+    assert sum("fake.load" in row["msg"] for row in bench.logs) == 1  # not re-logged
+
+
+def test_a_provider_that_raises_on_a_frame_does_not_stall_the_trace(tmp_path):
+    broken, good = _FakeStats(raises="observe"), _FakeStats()
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(broken, good)])
+    row = _trace_row("0x381", "0E 00 C8 00 00 00")
+    bench._observe_stats(row)
+    assert good.seen == [(0x381, bytes.fromhex("0E00C8000000"))]
