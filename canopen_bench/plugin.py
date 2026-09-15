@@ -77,6 +77,67 @@ class TraceDecoder:
         return None
 
 
+class StatsProvider:
+    """A block of numbers in the Stats view of the trace, assembled from
+    the frames the bench records. A device family's own measurement
+    telegram carries figures that are neither a CANopen object nor a frame
+    count — and one row of the trace is not where anybody reads them.
+
+    The core lays the block out and learns nothing else: the plugin
+    formats every value, unit included, and hands over strings. What the
+    numbers mean, and which frames they were assembled from, stays with
+    whoever knows the device.
+
+    The three moments are deliberately separate. ``observe()`` sees the
+    bus, ``render()`` shows what was counted, ``reset()`` says when the
+    counting starts over. A ``TraceDecoder`` is none of these: it names
+    one row from one frame, and a measurement spread over a sequence of
+    frames cannot be put together there.
+    """
+
+    #: namespaced as "<plugin name>.<key>" in the snapshot
+    key = "unnamed"
+    #: block heading
+    title = "Statistics"
+
+    def observe(self, cob: int, data: bytes) -> None:
+        """One recorded frame, exactly once, in the order the bus carried
+        it.
+
+        Live frames only. A loaded or imported capture is a view, not a
+        recording: it leaves the live record untouched and never reaches
+        the frame counters beside this block, so it does not reach this
+        either. Called for every frame while connected — keep it fast, and
+        return rather than raise on a frame that is not yours.
+        """
+
+    def render(self, bench) -> dict | None:
+        """The block for the current snapshot, or None to show nothing.
+
+        Runs on every snapshot and must not touch the bus — it formats
+        what ``observe()`` has already counted. Keys, all optional:
+
+        ``note``    one line under the heading.
+        ``fields``  [{label, value, hint?}] — single numbers, drawn as a
+                    wrapping row above the tables.
+        ``tables``  [{title?, cols: [{label, align?}], rows: [[cell, ...]]}]
+                    — ``align`` is "r" for a column of numbers. Cells are
+                    strings the plugin has formatted; a row shorter than
+                    ``cols`` leaves the remaining cells blank.
+
+        A provider that raises is dropped for the rest of the session and
+        logged once; it can never take a snapshot (and with it the whole
+        UI) down.
+        """
+        return None
+
+    def reset(self) -> None:
+        """Start over: on connect, and when the trace is cleared — the two
+        moments the frame counters beside this block are cleared too. A
+        block that kept counting through them would report a span the
+        numbers next to it no longer cover."""
+
+
 class DevicePanel:
     """A panel for the sidebar, below the Devices box, for device families
     the core cannot know anything about: a front-panel mirror, virtual
@@ -376,6 +437,11 @@ class BenchPlugin:
 
     def trace_decoders(self) -> list[TraceDecoder]:
         """Decoders for vendor-specific frames in the trace monitor."""
+        return []
+
+    def stats_providers(self) -> list[StatsProvider]:
+        """Blocks of measured numbers for the Stats view of the trace,
+        assembled from the frames the bench records."""
         return []
 
     def device_panels(self) -> list[DevicePanel]:

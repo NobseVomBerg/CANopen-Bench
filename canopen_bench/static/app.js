@@ -2060,6 +2060,44 @@ function TracePlot({ plot, connected }) {
   </div>`;
 }
 
+// A block of numbers a plugin measured off the bus (BenchPlugin.stats_providers).
+// The core draws it and knows nothing about it: every cell arrives as a string
+// the plugin has already formatted, unit included, and the only thing said about
+// a column is whether it holds numbers. Anything the server did not send is
+// simply absent here — never a broken block.
+function blockCols(cols) {
+  return 'minmax(120px,2fr)' + ' minmax(70px,1fr)'.repeat(Math.max(0, cols.length - 1));
+}
+
+function StatsBlock({ b }) {
+  const card = 'background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 14px;display:flex;flex-direction:column;gap:8px';
+  const lbl = 'font:600 10px ' + MONO + ';color:var(--faint);letter-spacing:.08em';
+  const head = 'gap:0 12px;padding:5px 12px;border-bottom:1px solid var(--bd);font:600 10px ' + MONO + ';color:var(--faint);letter-spacing:.08em';
+  return html`
+  <div style="${card}">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <span style="${lbl}">${(b.title || '').toUpperCase()}</span>
+      ${b.note && html`<span style="font:10.5px ${MONO};color:var(--dim)">${b.note}</span>`}
+    </div>
+    ${(b.fields || []).length > 0 && html`
+    <div style="display:flex;flex-wrap:wrap;gap:4px 20px">
+      ${b.fields.map((f) => html`
+      <span style="font:11px ${MONO};color:var(--dim)">${f.label} <b style="color:var(--tx)">${f.value}</b>${f.hint ? html`<span style="color:var(--faint)"> · ${f.hint}</span>` : ''}</span>`)}
+    </div>`}
+    ${(b.tables || []).map((t) => { const cols = blockCols(t.cols); return html`
+    <div style="border:1px solid var(--bd);border-radius:6px;overflow:hidden">
+      ${t.title && html`<div style="${head}">${t.title}</div>`}
+      <div style="display:grid;grid-template-columns:${cols};${head}">
+        ${t.cols.map((c) => html`<span style="${c.align === 'r' ? 'text-align:right' : ''}">${c.label}</span>`)}
+      </div>
+      ${t.rows.map((r) => html`
+      <div style="display:grid;grid-template-columns:${cols};gap:0 12px;padding:3px 12px;border-bottom:1px solid var(--bd2);font:11px ${MONO};color:var(--mid)">
+        ${t.cols.map((c, i) => html`<span style="${c.align === 'r' ? 'text-align:right;color:var(--tx)' : 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap'}">${r[i] || ''}</span>`)}
+      </div>`)}
+    </div>`; })}
+  </div>`;
+}
+
 function TraceStats({ st, connected }) {
   if (!connected) return html`<div style="flex:1;display:grid;place-items:center;color:var(--faint);font-size:12.5px">offline — connect to collect statistics</div>`;
   if (!st || !st.total) return html`<div style="flex:1;display:grid;place-items:center;color:var(--faint);font-size:12.5px">no frames observed yet</div>`;
@@ -2121,7 +2159,8 @@ function TraceStats({ st, connected }) {
       ${st.restCobs > 0 && html`
       <div style="padding:6px 14px;font:10.5px ${MONO};color:var(--faint)">… + ${st.restCobs} more COB-IDs (${st.restN.toLocaleString('en')} frames)</div>`}
     </div>
-    <div style="font-size:10.5px;color:var(--faint)">Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace freezes the statistics.</div>
+    ${(st.blocks || []).map((b) => html`<${StatsBlock} b=${b} />`)}
+    <div style="font-size:10.5px;color:var(--faint)">Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace holds the view — the record underneath, and these numbers with it, go on.</div>
   </div>`;
 }
 
