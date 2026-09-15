@@ -335,3 +335,18 @@ def test_an_eds_default_is_drawn_as_one():
     assert "EDS default — not read from this device" in app
     assert app.count("${defaultStyle(key)}") == 4, "both tables, both kinds of cell"
     assert "restored from the workspace db" in app
+
+
+def test_a_plugin_stats_block_is_drawn_from_what_the_server_sent():
+    """The core draws a plugin's block and knows nothing about it: every
+    cell is a string the plugin formatted, and the only thing said about a
+    column is whether it holds numbers. So the renderer may read nothing
+    out of a cell — and must survive a block without note, fields or
+    title, since all three are optional."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "<${StatsBlock} b=${b} />" in app, "blocks are not drawn anywhere"
+    assert "(st.blocks || [])" in app, "a server without blocks must still render"
+    block = app.split("function StatsBlock(")[1].split("\nfunction ")[0]
+    assert "(b.fields || [])" in block and "(b.tables || [])" in block
+    assert "c.align === 'r'" in block, "a column of numbers is not right-aligned"
+    assert "${r[i] || ''}" in block, "a row shorter than its columns breaks the grid"
