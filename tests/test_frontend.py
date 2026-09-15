@@ -376,3 +376,16 @@ def test_a_block_control_dispatches_the_plugin_action():
     block = app.split("function StatsBlock(")[1].split("\nfunction ")[0]
     assert "send(b.action, { id: c.id })" in block
     assert "b.action && (b.controls || []).length > 0" in block, "no action, no buttons"
+
+
+def test_the_stats_view_says_when_it_is_reading_a_capture():
+    """The whole view switches with the trace panel, so it has to say so:
+    the same four cards showing a file's numbers and this session's are
+    indistinguishable otherwise. Bus load is the one that cannot come from
+    a file at all — a capture carries no bitrate to measure it against."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    stats = app.split("function TraceStats(")[1].split("\nfunction ")[0]
+    assert "const of = st.of || ''" in stats
+    assert "not measured for a capture" in stats
+    assert "These numbers are the open capture" in stats
+    assert "${of ? 'in the capture' : 'since connect'}" in stats
