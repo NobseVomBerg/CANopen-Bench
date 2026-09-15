@@ -1287,6 +1287,28 @@ def test_the_block_carries_only_what_the_core_can_draw(tmp_path):
     assert got["tables"][0]["rows"] == [["worker", "12.34", "512"]], "a cell per column"
 
 
+def test_a_block_may_offer_controls(tmp_path):
+    """What a measurement is started and stopped by belongs next to the
+    measurement. The core forwards the action name and the button's id and
+    knows nothing else about it — exactly like a panel's buttons."""
+    data = _one_table() | {"action": "fake.set",
+                           "controls": [{"id": "off", "label": "Stop", "title": "stop it"},
+                                        {"id": "5", "label": "0.5 s"}]}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(_FakeStats(data))])
+    (got,) = _blocks(bench)
+    assert got["action"] == "fake.set"
+    assert got["controls"] == [{"id": "off", "label": "Stop", "title": "stop it"},
+                               {"id": "5", "label": "0.5 s", "title": ""}]
+
+
+def test_controls_without_an_action_reach_nobody(tmp_path):
+    """A button the core would dispatch nowhere is a button that does
+    nothing when pressed, which is worse than one that is not there."""
+    data = _one_table() | {"controls": [{"id": "off", "label": "Stop"}]}
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_StatsPlugin(_FakeStats(data))])
+    assert "controls" not in _blocks(bench)[0]
+
+
 def test_a_table_without_columns_is_dropped(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"),
                   plugins=[_StatsPlugin(_FakeStats({"tables": [{"rows": [["a"]]}]}))])

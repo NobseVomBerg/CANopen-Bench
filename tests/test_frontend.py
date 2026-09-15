@@ -366,3 +366,13 @@ def test_the_stats_view_scrolls_instead_of_squashing_its_boxes():
     block = app.split("function StatsBlock(")[1].split("\nfunction ")[0]
     assert "NONE + 'background" in block, "a block would squash its neighbours"
     assert "${NONE}border:1px solid" in block, "and its own tables would be cut off"
+
+
+def test_a_block_control_dispatches_the_plugin_action():
+    """The button says what it is for and the plugin says what it does:
+    the core sends the action name it was given with the button's id, the
+    same blind forwarding a device panel's buttons get."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    block = app.split("function StatsBlock(")[1].split("\nfunction ")[0]
+    assert "send(b.action, { id: c.id })" in block
+    assert "b.action && (b.controls || []).length > 0" in block, "no action, no buttons"

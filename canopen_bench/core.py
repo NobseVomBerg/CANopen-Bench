@@ -6313,6 +6313,7 @@ class Bench:
     _BLOCK_TABLES = 8
     _BLOCK_ROWS = 200
     _BLOCK_COLS = 12
+    _BLOCK_CONTROLS = 8
 
     def _trace_stats(self) -> dict:
         """Statistics view: cumulative per-COB counters (since connect or
@@ -6383,6 +6384,13 @@ class Bench:
                 rows = [[str(cell) for cell in row[:len(cols)]]
                         for row in (t.get("rows") or [])[:self._BLOCK_ROWS]]
                 tables.append({"title": str(t.get("title", "")), "cols": cols, "rows": rows})
+            controls = [{"id": str(c["id"]), "label": str(c.get("label", "")),
+                         "title": str(c.get("title", ""))}
+                        for c in (data.get("controls") or [])[:self._BLOCK_CONTROLS]
+                        if c.get("id")]
+            if controls and data.get("action"):
+                block["controls"] = controls
+                block["action"] = str(data["action"])
             if fields:
                 block["fields"] = fields
             if tables:
