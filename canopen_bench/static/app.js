@@ -2065,12 +2065,17 @@ function TracePlot({ plot, connected }) {
 // the plugin has already formatted, unit included, and the only thing said about
 // a column is whether it holds numbers. Anything the server did not send is
 // simply absent here — never a broken block.
+const NONE = 'flex:0 0 auto;';
+
 function blockCols(cols) {
   return 'minmax(120px,2fr)' + ' minmax(70px,1fr)'.repeat(Math.max(0, cols.length - 1));
 }
 
 function StatsBlock({ b }) {
-  const card = 'background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 14px;display:flex;flex-direction:column;gap:8px';
+  // NONE keeps a child of a scrolling flex column at its own height: the
+  // default is to shrink, and a shrunk box with overflow:hidden does not
+  // scroll — it cuts its rows off and leaves the header standing alone
+  const card = NONE + 'background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 14px;display:flex;flex-direction:column;gap:8px';
   const lbl = 'font:600 10px ' + MONO + ';color:var(--faint);letter-spacing:.08em';
   const head = 'gap:0 12px;padding:5px 12px;border-bottom:1px solid var(--bd);font:600 10px ' + MONO + ';color:var(--faint);letter-spacing:.08em';
   return html`
@@ -2085,7 +2090,7 @@ function StatsBlock({ b }) {
       <span style="font:11px ${MONO};color:var(--dim)">${f.label} <b style="color:var(--tx)">${f.value}</b>${f.hint ? html`<span style="color:var(--faint)"> · ${f.hint}</span>` : ''}</span>`)}
     </div>`}
     ${(b.tables || []).map((t) => { const cols = blockCols(t.cols); return html`
-    <div style="border:1px solid var(--bd);border-radius:6px;overflow:hidden">
+    <div style="${NONE}border:1px solid var(--bd);border-radius:6px;overflow:hidden">
       ${t.title && html`<div style="${head}">${t.title}</div>`}
       <div style="display:grid;grid-template-columns:${cols};${head}">
         ${t.cols.map((c) => html`<span style="${c.align === 'r' ? 'text-align:right' : ''}">${c.label}</span>`)}
@@ -2110,7 +2115,7 @@ function TraceStats({ st, connected }) {
   const cols = '70px minmax(200px,1fr) 56px 90px 80px minmax(140px,300px)';
   return html`
   <div style="flex:1;min-height:0;overflow:auto;background:var(--panel2);padding:14px 18px;display:flex;flex-direction:column;gap:12px">
-    <div style="display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:12px">
+    <div style="${NONE}display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:12px">
       <div style="${card}">
         <span style="${lbl}">BUS LOAD · last 60 s</span>
         <div style="display:flex;align-items:flex-end;gap:12px">
@@ -2135,12 +2140,12 @@ function TraceStats({ st, connected }) {
         <span style="font:10.5px ${MONO};color:var(--faint)">distinct identifiers</span>
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center">
+    <div style="${NONE}display:flex;gap:8px;align-items:center">
       <span style="${lbl}">BY CLASS</span>
       ${clsOrder.filter((c) => st.classes[c]).map((c) => html`
         <span style="border:1px solid var(--bd);background:var(--panel);color:var(--mid);font:600 10.5px ${MONO};padding:3px 10px;border-radius:9px">${c} <b style="color:var(--tx)">${st.classes[c].toLocaleString('en')}</b></span>`)}
     </div>
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden">
+    <div style="${NONE}background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden">
       <div style="display:grid;grid-template-columns:${cols};gap:0 12px;padding:7px 14px;border-bottom:1px solid var(--bd);font:600 10px ${MONO};color:var(--faint);letter-spacing:.08em">
         <span>COB-ID</span><span>DECODED</span><span>CLASS</span><span style="text-align:right">COUNT</span><span style="text-align:right">FRAMES/S</span><span>SHARE</span>
       </div>
@@ -2160,7 +2165,7 @@ function TraceStats({ st, connected }) {
       <div style="padding:6px 14px;font:10.5px ${MONO};color:var(--faint)">… + ${st.restCobs} more COB-IDs (${st.restN.toLocaleString('en')} frames)</div>`}
     </div>
     ${(st.blocks || []).map((b) => html`<${StatsBlock} b=${b} />`)}
-    <div style="font-size:10.5px;color:var(--faint)">Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace holds the view — the record underneath, and these numbers with it, go on.</div>
+    <div style="${NONE}font-size:10.5px;color:var(--faint)">Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace holds the view — the record underneath, and these numbers with it, go on.</div>
   </div>`;
 }
 
