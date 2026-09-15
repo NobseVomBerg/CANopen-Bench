@@ -147,6 +147,18 @@ class StatsProvider:
         block that kept counting through them would report a span the
         numbers next to it no longer cover."""
 
+    def fresh(self) -> StatsProvider:
+        """A second provider of this kind, for reading an opened capture.
+
+        The one the bench holds is counting the live bus and must never be
+        handed a file's frames on top of that, so a capture gets its own.
+        The default builds another of the same class; override it when
+        construction needs arguments. Returning ``self`` is refused — the
+        capture is then simply not analysed, which is a missing block
+        rather than two measurements added together.
+        """
+        return type(self)()
+
 
 class DevicePanel:
     """A panel for the sidebar, below the Devices box, for device families
