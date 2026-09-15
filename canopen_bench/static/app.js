@@ -2117,28 +2117,35 @@ function TraceStats({ st, connected }) {
   const big = 'font:600 20px ' + MONO + ';color:var(--tx)';
   const load = st.loadHist.length ? st.loadHist[st.loadHist.length - 1] : 0;
   const peak = st.loadHist.length ? Math.max(...st.loadHist) : 0;
+  // A capture describes itself: the whole view switched with the trace
+  // panel, so say which file it is reading — and do not draw a bus load
+  // for it, since a file carries no bitrate to measure one against.
+  const of = st.of || '';
   const clsOrder = ['NMT', 'SDO', 'PDO', 'EMCY', 'HB', 'other'];
   const cols = '70px minmax(200px,1fr) 56px 90px 80px minmax(140px,300px)';
   return html`
   <div style="flex:1;min-height:0;overflow:auto;background:var(--panel2);padding:14px 18px;display:flex;flex-direction:column;gap:12px">
     <div style="${NONE}display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:12px">
       <div style="${card}">
-        <span style="${lbl}">BUS LOAD · last 60 s</span>
+        <span style="${lbl}">BUS LOAD${of ? '' : ' · last 60 s'}</span>
+        ${of ? html`
+        <span style="${big};color:var(--faint)">—</span>
+        <span style="font:10.5px ${MONO};color:var(--faint)">not measured for a capture</span>` : html`
         <div style="display:flex;align-items:flex-end;gap:12px">
           <span style="${big}">${load.toFixed(1)}%</span>
           <span style="font:10.5px ${MONO};color:var(--faint);padding-bottom:3px">peak ${peak.toFixed(1)}%</span>
         </div>
-        <${Sparkline} vals=${st.loadHist.length ? st.loadHist : [0]} />
+        <${Sparkline} vals=${st.loadHist.length ? st.loadHist : [0]} />`}
       </div>
       <div style="${card}">
         <span style="${lbl}">FRAMES</span>
         <span style="${big}">${st.total.toLocaleString('en')}</span>
-        <span style="font:10.5px ${MONO};color:var(--dim)">${st.rate}/s · observed ${fmtSpan(st.span)}</span>
+        <span style="font:10.5px ${MONO};color:var(--dim)">${st.rate}/s · ${of ? 'over' : 'observed'} ${fmtSpan(st.span)}</span>
       </div>
       <div style="${card}">
         <span style="${lbl}">ERROR FRAMES</span>
         <span style="${big};color:${st.err ? 'var(--red)' : 'var(--grn)'}">${st.err}</span>
-        <span style="font:10.5px ${MONO};color:var(--faint)">since connect</span>
+        <span style="font:10.5px ${MONO};color:var(--faint)">${of ? 'in the capture' : 'since connect'}</span>
       </div>
       <div style="${card}">
         <span style="${lbl}">COB-IDS</span>
@@ -2171,7 +2178,9 @@ function TraceStats({ st, connected }) {
       <div style="padding:6px 14px;font:10.5px ${MONO};color:var(--faint)">… + ${st.restCobs} more COB-IDs (${st.restN.toLocaleString('en')} frames)</div>`}
     </div>
     ${(st.blocks || []).map((b) => html`<${StatsBlock} b=${b} />`)}
-    <div style="${NONE}font-size:10.5px;color:var(--faint)">Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace holds the view — the record underneath, and these numbers with it, go on.</div>
+    <div style="${NONE}font-size:10.5px;color:var(--faint)">${of
+      ? html`These numbers are the open capture <b style="color:var(--dim)">${of}</b>, counted once when it was opened — not this session. Resume the trace to measure the bus again.`
+      : 'Counters run since connect or trace clear; frames/s over the last 5 s. Pausing the trace holds the view — the record underneath, and these numbers with it, go on.'}</div>
   </div>`;
 }
 

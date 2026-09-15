@@ -896,6 +896,9 @@ class Bench:
         self._stats_providers = [(f"{p.name}.{prov.key}", prov)
                                  for p in self.plugins for prov in p.stats_providers()]
         self._stats_broken: set[str] = set()
+        #: what an opened capture says about itself — the Stats view reads
+        #: this instead of the live counters while one is open
+        self._capture_stats: dict | None = None
         # sidebar panels, namespaced like actions and step types; a panel
         # that raises is dropped into _panels_broken and never retried,
         # since render() runs on every snapshot
@@ -2491,22 +2494,25 @@ class Bench:
                             if k in ("dec", "obj", "val")})
                 return
 
-    def _observe_stats(self, row: dict) -> None:
+    def _observe_stats(self, row: dict, providers: list | None = None) -> None:
         """Hand one recorded frame to the plugin stats providers.
 
-        Live frames only, and every one of them exactly once — this sits in
-        the drain, where the queue is emptied, not in the view. A provider
-        assembles a measurement out of a sequence of frames, so a frame
-        counted twice or missed is a wrong number, not a missing row.
+        Called from the drain, where the queue is emptied, so every live
+        frame reaches them exactly once — a provider assembles a
+        measurement out of a sequence of frames, and a frame counted twice
+        or missed is a wrong number, not a missing row. An opened capture
+        passes its own second set of providers instead; the ones this
+        bench holds only ever see the bus.
         """
-        if not self._stats_providers:
+        providers = self._stats_providers if providers is None else providers
+        if not providers:
             return
         try:
             cob = int(row["cob"], 16)
             data = bytes.fromhex(row["data"].replace(" ", ""))
         except ValueError:
             return
-        for _key, prov in self._stats_providers:
+        for _key, prov in providers:
             try:
                 prov.observe(cob, data)
             except Exception:  # a broken provider must not stall the trace
@@ -5795,6 +5801,7 @@ class Bench:
         else:
             self._trace_freeze = None
             self._trace_import = None  # resuming shows live data, not the capture
+            self._capture_stats = None
             self.trace_loaded = None
 
     def act_trace_clear(self, p: dict) -> None:
@@ -5802,6 +5809,7 @@ class Bench:
             # with a capture open, "clear" closes it and goes back to live
             # data — the record is not the view's to erase
             self._trace_import = None
+            self._capture_stats = None
             self.trace_loaded = None
             self.trace_paused = False
             return
@@ -6152,6 +6160,9 @@ class Bench:
             key = (row["cls"], row["node"])
             counts[key] = counts.get(key, 0) + 1
         self._trace_import = (rows, counts)
+        # worked out once, here: the Stats view is rebuilt into every
+        # snapshot, and a capture is up to TRACE_CAP frames
+        self._capture_stats = self._capture_stats_of(rows, name)
         self._trace_freeze = None
         self.trace_paused = True
         self.trace_loaded = name
@@ -6170,6 +6181,7 @@ class Bench:
         self._refresh_trace_saved()
         if self.trace_loaded == name:  # the open capture is gone: back to live data
             self._trace_import = None
+            self._capture_stats = None
             self.trace_loaded = None
             self.trace_paused = False
         self.log(f"TRACE capture {name} deleted")
@@ -6318,7 +6330,15 @@ class Bench:
     def _trace_stats(self) -> dict:
         """Statistics view: cumulative per-COB counters (since connect or
         trace clear), frames/s over the last ~5 s, per-class totals, the
-        bus-load history and the error-frame counter."""
+        bus-load history and the error-frame counter.
+
+        A capture that is open describes itself instead, worked out once
+        when it was opened (`_capture_stats`). The whole view switches
+        together, the way the trace panel does: half these numbers from a
+        file and half from this session would be a reading of neither.
+        """
+        if self._capture_stats is not None:
+            return self._capture_stats
         now = time.monotonic()
         rate_span = (now - self._rate_win[0][0]
                      if len(self._rate_win) > 1 else TICK_S)
@@ -6326,10 +6346,20 @@ class Bench:
         for _, counts in self._rate_win:
             for cob, n in counts.items():
                 rates[cob] = rates.get(cob, 0) + n
-        ordered = sorted(self._cob_stats.items(),
-                         key=lambda kv: (-kv[1]["n"], kv[0]))
+        span = max(rate_span, TICK_S)
+        return self._stats_view(
+            self._cob_stats, {cob: n / span for cob, n in rates.items()},
+            observed=round(now - self._stats_t0, 1) if self._stats_t0 else 0.0,
+            err=self.err_frames, load_hist=list(self._load_hist),
+            blocks=self._stats_blocks())
+
+    def _stats_view(self, cob_stats: dict, rates: dict, observed: float, err: int,
+                    load_hist: list, blocks: list) -> dict:
+        """The shape the Stats view reads, from counters and frames/s —
+        whether those were measured on the bus or read out of a file."""
+        ordered = sorted(cob_stats.items(), key=lambda kv: (-kv[1]["n"], kv[0]))
         top = [{"cob": cob, "dec": st["dec"], "cls": st["cls"], "n": st["n"],
-                "rate": round(rates.get(cob, 0) / max(rate_span, TICK_S), 1)}
+                "rate": round(rates.get(cob, 0.0), 1)}
                for cob, st in ordered[:self._STATS_TOP]]
         rest = ordered[self._STATS_TOP:]
         classes: dict[str, int] = {}
@@ -6340,12 +6370,75 @@ class Bench:
                 "restN": sum(st["n"] for _, st in rest), "restCobs": len(rest),
                 "classes": classes,
                 "total": sum(st["n"] for _, st in ordered),
-                "rate": round(sum(rates.values()) / max(rate_span, TICK_S), 1),
-                "span": round(now - self._stats_t0, 1) if self._stats_t0 else 0.0,
-                "loadHist": list(self._load_hist), "err": self.err_frames,
-                "blocks": self._stats_blocks()}
+                "rate": round(sum(rates.values()), 1),
+                "span": observed, "loadHist": load_hist, "err": err,
+                "blocks": blocks}
 
-    def _stats_blocks(self) -> list[dict]:
+    def _capture_stats_of(self, rows: list[dict], name: str) -> dict:
+        """What an opened capture says about itself, worked out once.
+
+        Everything here is counted from the file. Bus load is not: it is
+        frame bits against a bitrate, and a file carries no bitrate —
+        shown against this session's, a capture from a slower bus would
+        read as half the load it was. The view says "not measured" rather
+        than a number that looks like one.
+        """
+        cob_stats: dict[str, dict] = {}
+        err = 0
+        first = last = None
+        providers = self._fresh_stats_providers()
+        for row in rows:
+            st = cob_stats.get(row["cob"])
+            if st is None:
+                st = cob_stats[row["cob"]] = {"n": 0, "dec": "", "cls": row.get("cls", "")}
+            st["n"] += 1
+            st["dec"] = row.get("dec", "")
+            if row.get("flag") == "red":
+                err += 1
+            when = _trace_time_to_seconds(row.get("time", ""))
+            if when is not None:
+                first = when if first is None else first
+                last = when
+            self._observe_stats(row, providers)
+        # the rows are in the order the bus carried them, so this is the
+        # first and the last stamp rather than the smallest and the
+        # largest — a capture running past midnight would otherwise
+        # measure as the wrong way round and come out nearly a day long
+        span = 0.0
+        if first is not None and last is not None:
+            span = round(last - first + (86400 if last < first else 0), 1)
+        div = span or 1.0
+        rates = {cob: st["n"] / div for cob, st in cob_stats.items()}
+        view = self._stats_view(cob_stats, rates, observed=span, err=err, load_hist=[],
+                                blocks=self._stats_blocks(providers, controls=False))
+        return view | {"of": name}
+
+    def _fresh_stats_providers(self) -> list[tuple[str, object]]:
+        """A second set of providers, for a capture — the ones the bench
+        holds are counting this session and must not be handed a file's
+        frames on top of it. Each is asked for one of its own, and a
+        provider that hands its live self back is left out: a block
+        missing from a capture is a gap, two measurements added together
+        is a wrong number nobody can see is wrong."""
+        out = []
+        live = {id(prov) for _key, prov in self._stats_providers}
+        for key, prov in self._stats_providers:
+            try:
+                other = prov.fresh()
+            except Exception as exc:
+                self.log(f'PLG  stats block "{key}" has no second reader ({exc})', "emcy0")
+                continue
+            if other is None or id(other) in live:
+                # counting a file into the session's own numbers is worse
+                # than not reading the file
+                self.log(f'PLG  stats block "{key}" reads the bus only — '
+                         f"fresh() gave back the live provider", "emcy0")
+                continue
+            out.append((key, other))
+        return out
+
+    def _stats_blocks(self, providers: list | None = None,
+                      controls: bool = True) -> list[dict]:
         """What the plugins have measured, as blocks under the COB table.
 
         The plugin formats every value; this only takes the shape apart and
@@ -6356,7 +6449,7 @@ class Bench:
         runs on every snapshot and a line per tick is not a report.
         """
         out = []
-        for key, prov in self._stats_providers:
+        for key, prov in (self._stats_providers if providers is None else providers):
             if key in self._stats_broken:
                 continue
             try:
@@ -6384,12 +6477,14 @@ class Bench:
                 rows = [[str(cell) for cell in row[:len(cols)]]
                         for row in (t.get("rows") or [])[:self._BLOCK_ROWS]]
                 tables.append({"title": str(t.get("title", "")), "cols": cols, "rows": rows})
-            controls = [{"id": str(c["id"]), "label": str(c.get("label", "")),
-                         "title": str(c.get("title", ""))}
-                        for c in (data.get("controls") or [])[:self._BLOCK_CONTROLS]
-                        if c.get("id")]
-            if controls and data.get("action"):
-                block["controls"] = controls
+            # a capture is read, not driven: a button here would act on the
+            # bus, which is not what these numbers are about
+            buttons = [{"id": str(c["id"]), "label": str(c.get("label", "")),
+                        "title": str(c.get("title", ""))}
+                       for c in (data.get("controls") or [])[:self._BLOCK_CONTROLS]
+                       if c.get("id")] if controls else []
+            if buttons and data.get("action"):
+                block["controls"] = buttons
                 block["action"] = str(data["action"])
             if fields:
                 block["fields"] = fields

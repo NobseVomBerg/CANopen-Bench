@@ -138,7 +138,16 @@ browser):
   rather than a trace row. The provider is handed every *recorded* frame
   exactly once, from the drain rather than the view, and hands back
   strings it has formatted itself: the core lays the block out and
-  learns nothing about the device from it.
+  learns nothing about the device from it. Such a block may carry
+  controls — buttons dispatching one of the plugin's own actions — so
+  that what starts a measurement sits beside what it measures.
+  An opened capture makes the *whole* Stats view describe that file
+  (`Bench._capture_stats_of`, worked out once on open, dropped when the
+  capture closes): counters, classes and the plugin blocks come out of
+  the rows, the blocks from a second set of providers (`fresh()`) so the
+  live ones keep counting only the bus, and bus load reads "not
+  measured" — a file carries no bitrate to measure it against. Half a
+  file and half a session would be a reading of neither.
   The table draws newest-first and only the rows on screen, placing them
   by index against a full-height spacer — 200k rows is not something a
   browser lays out. The newest `core.TRACE_VIEW` ride along in the state
