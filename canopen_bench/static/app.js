@@ -2083,6 +2083,12 @@ function StatsBlock({ b }) {
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <span style="${lbl}">${(b.title || '').toUpperCase()}</span>
       ${b.note && html`<span style="font:10.5px ${MONO};color:var(--dim)">${b.note}</span>`}
+      ${b.action && (b.controls || []).length > 0 && html`
+      <span style="margin-left:auto;display:flex;gap:6px">
+        ${b.controls.map((c) => html`
+        <span class="hv-chip" onClick=${() => send(b.action, { id: c.id })} title=${c.title || ''}
+          style="${btn.ghost}padding:2px 9px;border-radius:5px;font:600 10.5px ${MONO};cursor:pointer">${c.label}</span>`)}
+      </span>`}
     </div>
     ${(b.fields || []).length > 0 && html`
     <div style="display:flex;flex-wrap:wrap;gap:4px 20px">

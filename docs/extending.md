@@ -167,6 +167,14 @@ class LoadStats(StatsProvider):
         ...
 ```
 
+A block may also carry controls — `controls: [{id, label, title?}]`
+together with `action` — drawn as small buttons beside its heading, each
+dispatching that action with its own `id`. What a measurement is started
+and stopped by belongs next to the measurement: somebody reading the
+numbers should not have to know which object turns them on. The core
+neither knows nor checks what a control does, exactly as with a panel's
+buttons.
+
 `observe()` sees live frames only, each exactly once and in bus order: it
 sits in the drain, where the queue is emptied, not in the view — so a
 pause does not hide frames from it, and a loaded or imported capture,

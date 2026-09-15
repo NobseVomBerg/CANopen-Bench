@@ -124,6 +124,16 @@ class StatsProvider:
                     — ``align`` is "r" for a column of numbers. Cells are
                     strings the plugin has formatted; a row shorter than
                     ``cols`` leaves the remaining cells blank.
+        ``controls`` [{id, label, title?}] with ``action`` — small buttons
+                    beside the heading. Clicking dispatches ``action``
+                    (normally one of this plugin's own namespaced actions)
+                    with {id}. What a measurement is started and stopped
+                    by belongs next to the measurement: an operator who
+                    can read the numbers here should not have to know
+                    which object turns them on. The core neither knows
+                    nor checks what a control does — the action does the
+                    talking to the device, and must not block (see
+                    ``bench.spawn``).
 
         A provider that raises is dropped for the rest of the session and
         logged once; it can never take a snapshot (and with it the whole
