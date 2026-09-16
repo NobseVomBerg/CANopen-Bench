@@ -49,7 +49,8 @@ only what you provide.
 | `adapters()` | `list[dict]` | Extra adapter cards on the Setup page (listed before the built-ins) |
 | `adapter_backends()` | `dict` | Adapter key → (python-can interface, default channel) for those cards; the python-can driver itself ships via python-can's own `can.interface` group |
 | `seed_eds()` | `list[dict]` | EDS registry rows seeded once into an empty workspace; a row may bring its `commands` and its `variant` (`{index, sub, map?}` — where this family keeps its variant number) instead of the operator configuring both by hand |
-| `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
+| `firmware()` | `list[dict]` | Firmware library entries for the SWDL page that have no file of their own — a fixed list, shown beside the folder |
+| `describe_firmware(path)` | `dict \| None` | What one file in the firmware folder is: `{ver, tag?, meta?}` for a file of this vendor's format, `None` for anything else. The core lists the folder and knows no format; first plugin with an answer wins, and a file nobody claims is listed as unknown and cannot be selected |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits. A fresh workspace picks one of these as its addressing procedure over the standard-LSS flow the core ships — by where the file came from, not by what it is called, since how a device family is addressed is that family's business. A flow that declares a `button:` is a procedure somebody presses instead ([the format](ablaeufe/testfall-format.md)) |
 | `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables. Copied into the workspace on every start, over whatever is there: a header belongs to its plugin the way its panels do, and the plugin is where an edit to one belongs. A header no plugin ships — the firmware actually under test, under a name of its own — is left where it was put |
 | `eds_dirs()` | `list[Path]` | Directories with the family's own EDS files, copied into the workspace EDS folder like flows and headers. `seed_eds()` registers the rows; this brings the files those rows name |
@@ -250,6 +251,25 @@ went badly for. **Stop** dispatches `swdl_stop`, which reaches
 `SwdlStrategy.stop(bench)`: cooperative, so a transfer in flight finishes
 its segment and the strategy leaves the device somewhere it can describe
 — and gives whoever is left unfinished an `swdl_err`.
+
+The bytes come out of a folder. The SWDL page lists
+`paths["fw"]` — configurable on the Setup page, by default
+`<workspace>/firmware`, and in practice often the build output of the
+firmware project — and asks every plugin what each file in it is
+(**`describe_firmware(path)`**). Return `{ver, tag?, meta?}` for a file
+of your format and `None` for everything else; the first plugin with an
+answer describes the file, and one nobody claims is listed greyed out
+and cannot be selected. The answer is cached until that file changes on
+disk, so reading the file here — a header, a magic number, a length — is
+what the hook is for. The drop zone on the page writes into the same
+folder, under the name the file was dropped with, and selects it if
+something knows it.
+
+What the operator picked is then **`bench.fw_path()`**: the selected
+file, or `None` when the selection is one of the entries `firmware()`
+lists, which have no file behind them. A strategy reads the bytes there
+and parses them itself — the format is the vendor's, and the core never
+looks inside.
 
 The image goes down through **`bus.sdo_download(node, index, sub, data,
 progress=..., timeout=...)`** — a segmented CiA-301 domain download that
