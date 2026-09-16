@@ -20,6 +20,7 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+from .bus.interface import SdoResult
 from .values import Field, Quantity
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,31 @@ class DemoHook:
         """The operator pressed a demo device button (Setup page, demo mode
         only). Return True when handled."""
         return False
+
+    def on_sdo_read(self, bus, node: int, index: str, sub: str) -> SdoResult | None:
+        """The device side of a vendor protocol that answers over SDO — a
+        bootloader is the example: the objects it serves exist while it
+        runs and nowhere in the EDS, and what it answers depends on what
+        was written to it before.
+
+        Return an ``SdoResult`` to answer this read, or None for "not
+        mine" — then the next hook is asked and the EDS store answers
+        last, exactly as without any hook.
+        """
+        return None
+
+    def on_sdo_write(self, bus, node: int, index: str, sub: str,
+                     value: str) -> SdoResult | None:
+        """A write that the vendor protocol takes as a command rather than
+        as a value (see ``on_sdo_read``). ``SdoResult`` or None."""
+        return None
+
+    def on_sdo_download(self, bus, node: int, index: str, sub: str,
+                        data: bytes) -> SdoResult | None:
+        """A block of bytes written to one object (``bus.sdo_download`` —
+        a firmware image on its way into a bootloader). ``SdoResult`` or
+        None."""
+        return None
 
 
 class TraceDecoder:
@@ -277,7 +303,24 @@ class SwdlStrategy:
     ships a simulation (``core.SimSwdlStrategy``); a real vendor download
     protocol replaces it via ``BenchPlugin.swdl_strategy()``. All state
     lives on the bench (``swdl_run``/``swdl_done``/``swdl_prog``/
-    ``fw_sel``/``swdl_mode``), so the UI stays snapshot-driven."""
+    ``swdl_phase``/``swdl_err``/``fw_sel``/``swdl_mode``), so the UI stays
+    snapshot-driven.
+
+    A real download takes minutes, and everything here runs on the event
+    loop: ``start()`` hands the work to ``bench.spawn(coro)`` and returns,
+    and ``step()`` — which keeps being called every tick while
+    ``swdl_run`` — stays cheap, watching the task rather than doing the
+    transfer. A strategy that flashes inside ``step()`` stops the tick
+    loop, and with it the trace, the heartbeat watch and the page that is
+    meant to show the progress.
+
+    What the page shows per node: ``swdl_prog[node]`` 0..100,
+    ``swdl_phase[node]`` the phase in words ("erasing", "flashing"), and
+    ``swdl_err[node]`` the reason a node did not make it — a node with an
+    entry there is drawn as failed. ``swdl_done`` means the run is over,
+    not that it went well; ``swdl_err`` says which nodes it went badly
+    for.
+    """
 
     name = "unnamed"
 
@@ -292,6 +335,13 @@ class SwdlStrategy:
         ``bench.swdl_prog`` per node (0..100) and clear ``swdl_run`` /
         set ``swdl_done`` when finished."""
         raise NotImplementedError
+
+    def stop(self, bench) -> None:
+        """The operator pressed Stop. Cooperative: this asks, it does not
+        kill — a transfer in flight finishes its segment, the strategy
+        leaves the device in a state it can say something about, and
+        whoever is left unfinished gets an ``swdl_err``. Default: nothing,
+        which is what a strategy that cannot be interrupted should do."""
 
 
 class BenchPlugin:
@@ -340,9 +390,32 @@ class BenchPlugin:
         return []
 
     def firmware(self) -> list[dict]:
-        """Firmware library entries ({ver, file, tag, meta}); listed
-        before the core's demo entries."""
+        """Firmware library entries with no file behind them
+        (``{ver, tag?, meta?}``) — listed after the firmware folder,
+        which is where files live (``describe_firmware``). Having no
+        file, they answer to their version: that is the name the page
+        selects them by, and ``bench.fw_path()`` is None while one of
+        them is selected."""
         return []
+
+    def describe_firmware(self, path: Path) -> dict | None:
+        """What one file in the firmware folder is. The format of a
+        firmware file is the vendor's — magic bytes, a header, a version
+        somewhere inside it — and the core knows none of that: it knows
+        the folder, lists what is in it and asks here.
+
+        Return ``{"ver": str, "tag"?: str, "meta"?: str}`` for a file of
+        this vendor's format — ``ver`` is what the page calls it, ``tag``
+        a short marker beside it ("latest"), ``meta`` a line of detail
+        (size, build date, what the header says it is). Return None for
+        anything else, including a file of this format that is damaged:
+        a file nobody claims is listed as unknown and cannot be selected,
+        which is the honest answer. First plugin with an answer wins.
+
+        Called per file, and again whenever that file changed on disk —
+        reading it here is fine, the result is cached until it does.
+        """
+        return None
 
     def object_fields(self, symbols) -> dict[str, list[Field]]:
         """How to read an object's value symbolically: "0x2007:09" -> the

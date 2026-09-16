@@ -68,8 +68,11 @@ and every access shows up in the Trace like real bus traffic.
   keeps an under-voltage case automated instead of asking an operator to
   turn a knob. Serial port, `pip install ".[serial]"`; drivers in
   `canopen_bench/instruments/`.
-- **SWDL** — firmware download; protocols are manufacturer-specific and
-  ship as vendor extension packages (see the note on the page).
+- **SWDL** — firmware download; the files come from a folder you point at
+  (often the firmware project's build output, drag & drop works too), and
+  what each one is comes from the extension that knows the format.
+  Download protocols are manufacturer-specific and ship as vendor
+  extension packages (see the note on the page).
 - **Trace** — live monitor, newest frame at the top, scrollable back
   through the whole 200k-frame ring buffer or an opened capture rather
   than a screenful. Class + device filters, ms/µs timestamps, capture

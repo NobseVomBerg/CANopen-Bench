@@ -13,7 +13,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 
 import can
@@ -127,6 +128,32 @@ def _bytes_to_hex(data: bytes) -> str:
 def _abort_text(exc: canopen.SdoAbortedError) -> str:
     text = canopen.SdoAbortedError.CODES.get(exc.code, "")
     return f"0x{exc.code:08X}" + (f" {text}" if text else "")
+
+
+#: How much of a domain download is handed to the SDO stream at once. The
+#: wire carries 7 bytes per segment whatever this is — the chunk only
+#: decides how often the caller's ``progress`` hears about it.
+_DOWNLOAD_CHUNK = 4096
+
+
+@contextmanager
+def _response_timeout(node: canopen.RemoteNode, timeout: float | None) -> Iterator[None]:
+    """Lend one transfer its own SDO response timeout.
+
+    ``RESPONSE_TIMEOUT`` is a property of the client, so the old value has
+    to come back even when the transfer raised: the next caller is asking
+    about an ordinary object and would otherwise wait out an erase's
+    patience for it.
+    """
+    if timeout is None:
+        yield
+        return
+    previous = node.sdo.RESPONSE_TIMEOUT
+    node.sdo.RESPONSE_TIMEOUT = timeout
+    try:
+        yield
+    finally:
+        node.sdo.RESPONSE_TIMEOUT = previous
 
 
 class _TraceListener(can.Listener):
@@ -472,12 +499,15 @@ class CanopenBus(BusInterface):
         except (can.CanError, OSError, RuntimeError) as exc:
             self._connection_lost(exc)
 
-    def sdo_read(self, node: int, index: str, sub: str) -> SdoResult:
+    def sdo_read(self, node: int, index: str, sub: str,
+                 timeout: float | None = None) -> SdoResult:
         net = self.network
         if net is None:
             return SdoResult(ok=False, abort="0x05030000 not connected")
         try:
-            data = self._node(net, node).sdo.upload(int(index, 16), int(sub, 16))
+            target = self._node(net, node)
+            with _response_timeout(target, timeout):
+                data = target.sdo.upload(int(index, 16), int(sub, 16))
         except canopen.SdoAbortedError as exc:
             return SdoResult(ok=False, abort=_abort_text(exc))
         except canopen.SdoCommunicationError:
@@ -487,12 +517,15 @@ class CanopenBus(BusInterface):
             return SdoResult(ok=False, abort="connection lost")
         return SdoResult(ok=True, value=_bytes_to_hex(data))
 
-    def sdo_write(self, node: int, index: str, sub: str, value: str) -> SdoResult:
+    def sdo_write(self, node: int, index: str, sub: str, value: str,
+                  timeout: float | None = None) -> SdoResult:
         net = self.network
         if net is None:
             return SdoResult(ok=False, abort="0x05030000 not connected")
         try:
-            self._node(net, node).sdo.download(int(index, 16), int(sub, 16), _hex_to_bytes(value))
+            target = self._node(net, node)
+            with _response_timeout(target, timeout):
+                target.sdo.download(int(index, 16), int(sub, 16), _hex_to_bytes(value))
         except canopen.SdoAbortedError as exc:
             return SdoResult(ok=False, abort=_abort_text(exc))
         except canopen.SdoCommunicationError:
@@ -501,6 +534,47 @@ class CanopenBus(BusInterface):
             self._connection_lost(exc)
             return SdoResult(ok=False, abort="connection lost")
         return SdoResult(ok=True, value=value)
+
+    def sdo_download(self, node: int, index: str, sub: str, data: bytes,
+                     progress: Callable[[int, int], bool] | None = None,
+                     timeout: float | None = None) -> SdoResult:
+        net = self.network
+        if net is None:
+            return SdoResult(ok=False, abort="0x05030000 not connected")
+        total = len(data)
+        cancelled = False
+
+        def failed(abort: str) -> SdoResult:
+            # after a cancellation the server is complaining about the
+            # transfer we just walked out of — that is an answer to the
+            # stop, not to what the caller asked for
+            return SdoResult(ok=False, abort="cancelled" if cancelled else abort)
+
+        try:
+            target = self._node(net, node)
+            with _response_timeout(target, timeout):
+                # size up front (the server can refuse an image that does not
+                # fit before a byte of it is sent) and segmented even when the
+                # data would fit an expedited transfer, so one code path serves
+                # a 70-byte header and a 300 kB image
+                with target.sdo.open(int(index, 16), int(sub, 16), "wb",
+                                     size=total, force_segment=True) as stream:
+                    for pos in range(0, total, _DOWNLOAD_CHUNK):
+                        stream.write(data[pos:pos + _DOWNLOAD_CHUNK])
+                        sent = min(pos + _DOWNLOAD_CHUNK, total)
+                        if progress is not None and not progress(sent, total):
+                            cancelled = True
+                            break
+        except canopen.SdoAbortedError as exc:
+            return failed(_abort_text(exc))
+        except canopen.SdoCommunicationError:
+            return failed("0x05040000 timeout")
+        except (can.CanError, OSError, RuntimeError) as exc:
+            self._connection_lost(exc)
+            return SdoResult(ok=False, abort="connection lost")
+        if cancelled:
+            return SdoResult(ok=False, abort="cancelled")
+        return SdoResult(ok=True, value=str(total))
 
     def lss_assign(self, count: int) -> int:
         """Assign node-IDs 1..count via standard LSS (CiA 305).

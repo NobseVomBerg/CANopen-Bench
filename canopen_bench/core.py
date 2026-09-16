@@ -827,6 +827,8 @@ class SimSwdlStrategy(SwdlStrategy):
         bench.swdl_run = True
         bench.swdl_done = False
         bench.swdl_prog = {}
+        bench.swdl_phase = {}
+        bench.swdl_err = {}
         mode = bench.swdl_mode.upper() + (" parallel" if bench.swdl_mode == "pdo" else " serial")
         bench.log(f"SWDL v{bench.fw_sel} → {bench._sel_names()} ({mode})")
 
@@ -841,6 +843,10 @@ class SimSwdlStrategy(SwdlStrategy):
             for d in targets:
                 n = d["node"]
                 bench.swdl_prog[n] = min(100, bench.swdl_prog.get(n, 0) + 6 + random.random() * 6)
+        for d in targets:
+            prog = bench.swdl_prog.get(d["node"], 0)
+            if prog:  # a node still queued has nothing to say yet
+                bench.swdl_phase[d["node"]] = "done" if prog >= 100 else "simulating"
         if targets and all(bench.swdl_prog.get(d["node"], 0) >= 100 for d in targets):
             bench.swdl_run = False
             bench.swdl_done = True
@@ -848,6 +854,17 @@ class SimSwdlStrategy(SwdlStrategy):
                 if d["sel"]:
                     d["fw"] = bench.fw_sel
             bench.log(f"SWDL complete — {len(targets)} device(s) now on v{bench.fw_sel}")
+
+    def stop(self, bench) -> None:
+        """Nothing is in flight to wait for here, so the simulation ends
+        where it stands: whoever was not finished is a device the operator
+        stopped, and says so instead of sitting at 60 % forever."""
+        bench.swdl_run = False
+        unfinished = [d["node"] for d in bench.sel_devices
+                      if bench.swdl_prog.get(d["node"], 0) < 100]
+        for node in unfinished:
+            bench.swdl_err[node] = "stopped by operator"
+        bench.log(f"SWDL stopped — {len(unfinished)} device(s) unfinished")
 
 
 class Bench:
@@ -893,8 +910,9 @@ class Bench:
                               + list(data.ADAPTERS))
         extra_backends = {key: backend for p in self.plugins
                           for key, backend in p.adapter_backends().items()}
+        # firmware entries a plugin lists without a file of their own —
+        # the library itself is the folder (paths["fw"], see _fw_catalog)
         self._plugin_fw = [f for p in self.plugins for f in p.firmware()]
-        self.fw_list = self._plugin_fw + list(data.FIRMWARE)
         # first plugin (entry-point order) providing addressing support wins
         self.addressing = next((ap for p in self.plugins
                                 if (ap := p.addressing_provider()) is not None), None)
@@ -1106,11 +1124,26 @@ class Bench:
         self._hb_seen: dict[int, float] = {}
         self._hb_lost: set[int] = set()
         self._hb_monitor_since = 0.0
-        self.fw_sel = self.fw_list[0]["ver"] if self.fw_list else ""
+        #: the file name of the selected firmware. Repaired against the
+        #: library every time that is read (_fw_catalog): the folder is
+        #: somebody else's — a build writes into it — and a selection
+        #: pointing at a file that is gone must not survive one listing.
+        self.fw_sel = ""
+        #: file name -> ((mtime, size), what the plugins said about it),
+        #: so the snapshot can list the firmware folder without reading
+        #: every file in it ten times a second (_fw_files)
+        self._fw_cache: dict[str, tuple[tuple[int, int], dict]] = {}
+        #: plugins whose describe_firmware raised — asked once, then never
+        #: again this session (same rule as the panels and stats blocks)
+        self._fw_broken: set[str] = set()
         self.swdl_mode = "sdo"
         self.swdl_run = False
         self.swdl_done = False
         self.swdl_prog: dict[int, float] = {}
+        #: what each node is busy with, and why one of them did not make it
+        #: — a node named in swdl_err is drawn as failed (plugin.SwdlStrategy)
+        self.swdl_phase: dict[int, str] = {}
+        self.swdl_err: dict[int, str] = {}
         #: The record of what the bus carried. Fills whenever the interface
         #: is connected and is never emptied or replaced by the trace panel:
         #: test steps read it (`wait_for` with a `cob`), so a frame missing
@@ -1198,10 +1231,21 @@ class Bench:
         stored_paths = db.get("paths")
         if stored_paths is None:
             stored_paths = {"tc": str(db.path.parent / "testcases"),
-                            "res": str(db.path.parent / "results")}
+                            "res": str(db.path.parent / "results"),
+                            "fw": str(db.path.parent / "firmware")}
             for p in stored_paths.values():
                 Path(p).mkdir(parents=True, exist_ok=True)
+        elif "fw" not in stored_paths:
+            # a workspace configured before the firmware folder existed:
+            # it gets the default a fresh one gets, written back so the
+            # setup page shows a folder rather than an empty field
+            stored_paths["fw"] = str(db.path.parent / "firmware")
+            Path(stored_paths["fw"]).mkdir(parents=True, exist_ok=True)
+            db.set("paths", stored_paths)
         self.paths = stored_paths
+        # the firmware library, once, so a download started before the
+        # page was ever drawn still has a version selected
+        self._fw_catalog()
         self.testcases: dict[str, tclib.TestCase] = {}
         self._seed_packaged_testcases()
         self._load_testcases(log=False)
@@ -2791,6 +2835,10 @@ class Bench:
             self.db.set("paths", self.paths)
             if which == "tc":
                 self._load_testcases()
+            elif which == "fw":
+                # the cache is keyed by file name, and another folder may
+                # hold the same name — nothing of the old one survives
+                self._fw_cache.clear()
 
     def _set_eds_dir(self, value: str) -> None:
         """Move the EDS folder (empty = back to the workspace default) and
@@ -5716,8 +5764,157 @@ class Bench:
         return "error", f"unknown step {key!r}"
 
     # -- SWDL ---------------------------------------------------------------------
+    def _describe_fw(self, path: Path) -> dict:
+        """What the installed extensions make of one file in the firmware
+        folder — the first one with an answer describes it.
+
+        A file nobody claims is described here as unknown rather than
+        left out of the listing: "the file I copied there is not on the
+        page" is a question about the folder, the file name or the tool,
+        and only one of the three is the answer. Listed and greyed says
+        it in one line.
+        """
+        for plugin in self.plugins:
+            if plugin.name in self._fw_broken:
+                continue
+            try:
+                desc = plugin.describe_firmware(path)
+            except Exception as exc:  # a firmware file is a file, not a promise
+                self._fw_broken.add(plugin.name)
+                self.log(f'PLG  "{plugin.name}" failed on a firmware file — '
+                         f"asked no more this session ({exc})", "emcy0")
+                continue
+            if desc:
+                return {"ver": str(desc.get("ver", "")), "tag": str(desc.get("tag", "")),
+                        "meta": str(desc.get("meta", "")), "known": True}
+        return {"ver": "", "tag": "", "known": False,
+                "meta": "no installed extension knows this format"}
+
+    def _fw_files(self) -> list[dict]:
+        """The firmware folder, described — ``{file, ver, tag, meta,
+        known}`` per file, sorted by name.
+
+        Read from the folder on every snapshot, because that folder is
+        somebody else's: it is often the build output of the firmware
+        project, and the file that was not there a minute ago is the one
+        the operator came to flash. Describing it is the expensive half
+        (a plugin reads the file), so that answer is kept per file until
+        its mtime or size moves — the same bargain ``_flow_buttons()``
+        makes with the flow folder, and for the same reason: this runs
+        ten times a second.
+
+        A folder that does not exist is empty, not an error. It is a
+        path somebody typed on the setup page, on a machine that may not
+        be the one they typed it on.
+        """
+        folder = Path(self.paths.get("fw", ""))
+        try:
+            files = sorted((f for f in folder.iterdir()
+                            if f.is_file() and not f.name.startswith(".")),
+                           key=lambda f: f.name)
+        except OSError:
+            return []
+        out: list[dict] = []
+        for path in files:
+            try:
+                info = path.stat()
+                stamp = (info.st_mtime_ns, info.st_size)
+            except OSError:  # deleted between listing and stat
+                continue
+            known = self._fw_cache.get(path.name)
+            if known is None or known[0] != stamp:
+                self._fw_cache[path.name] = known = (stamp, self._describe_fw(path))
+            out.append({"file": path.name} | known[1])
+        return out
+
+    def _fw_catalog(self) -> list[dict]:
+        """The firmware library the SWDL page offers, and the place where
+        ``fw_sel`` is kept honest.
+
+        Three sources, in the order they are worth something: the files
+        in the folder, the entries a plugin lists without a file of their
+        own, and the demo catalog in demo mode. The last two have no file
+        to be named by, so they answer to their version — the selection
+        is one name for all three.
+
+        Reading the library repairs the selection, because reading it is
+        the only moment the bench learns that the folder changed: a file
+        that was selected and has since been deleted, renamed or rebuilt
+        into something no extension knows would otherwise still be what
+        Start downloads.
+        """
+        static = [{**f, "file": f["ver"], "known": True} for f in self._plugin_fw]
+        if self.adapter == "demo":
+            static += [{**f, "file": f["ver"], "known": True} for f in data.FIRMWARE]
+        entries = self._fw_files() + static
+        if not any(e["file"] == self.fw_sel and e["known"] for e in entries):
+            self.fw_sel = next((e["file"] for e in entries if e["known"]), "")
+        return entries
+
+    def fw_path(self) -> Path | None:
+        """The selected firmware as a file on disk, for a strategy that
+        has to read it — None when the selection names no file (the
+        entries a plugin or the demo catalog lists are display entries;
+        there is nothing to open)."""
+        name = Path(self.fw_sel).name
+        folder = self.paths.get("fw", "")
+        if not name or not folder:
+            return None
+        path = Path(folder) / name
+        return path if path.is_file() else None
+
+    def act_fw_upload(self, p: dict) -> None:
+        """A firmware file from the browser, as base64 of its own bytes —
+        the way an EDS arrives, and here it is not a preference: an image
+        is binary, and a browser reading it as text hands over whatever a
+        UTF-8 decoder made of the bytes it did not recognise.
+
+        It lands in the firmware folder, which is the whole library: a
+        file the tool kept somewhere of its own would be one the build
+        that produced its successor never overwrites.
+        """
+        name = Path(str(p.get("filename", ""))).name
+        try:
+            raw = base64.b64decode(str(p.get("content", "")), validate=True)
+        except Exception:
+            raw = b""
+        if not name or name in (".", "..") or not raw:
+            self.log(f'SWDL "{p.get("filename", "")}" rejected — unreadable upload',
+                     "emcy0")
+            return
+        folder = Path(self.paths.get("fw", ""))
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(raw)
+        except OSError as exc:
+            self.log(f'SWDL "{name}" rejected — {exc}', "emcy0")
+            return
+        self._fw_cache.pop(name, None)  # same name, other bytes: ask again
+        entry = next((e for e in self._fw_catalog() if e["file"] == name), None)
+        known = bool(entry and entry["known"])
+        if known:
+            self.fw_sel = name
+        size = f"{len(raw) // 1024} kB" if len(raw) >= 1024 else f"{len(raw)} bytes"
+        # said in the line that reports the upload, not in a second one:
+        # the file arrived, and the reason it is greyed out on the page is
+        # usually a missing extension package rather than a bad file
+        note = "" if known else " — no installed extension knows this format"
+        self.log(f'SWDL "{name}" uploaded ({size}){note}', "info" if known else "emcy0")
+
     def act_swdl_fw(self, p: dict) -> None:
-        self.fw_sel = p["ver"]
+        """Select a firmware by file name. ``ver`` is what the page sent
+        before the library became a folder, and means the same thing —
+        taken for one release."""
+        name = str(p.get("file") or p.get("ver") or "")
+        entry = next((e for e in self._fw_catalog() if e["file"] == name), None)
+        if entry is None or not entry["known"]:
+            # refusing rather than selecting and failing at Start: what
+            # the bench would do with those bytes is nothing anybody can
+            # say, and the row is greyed out for exactly this reason
+            self.log(f'SWDL "{name}" — no installed extension knows this format',
+                     "emcy0")
+            return
+        self.fw_sel = name
 
     def act_swdl_mode(self, p: dict) -> None:
         self.swdl_mode = p["mode"]
@@ -5731,6 +5928,12 @@ class Bench:
                      "update needs a vendor extension package", "emcy0")
             return
         self._swdl.start(self)
+
+    def act_swdl_stop(self, p: dict) -> None:
+        # asking, not killing: what a stopped download leaves on the
+        # device is the strategy's business, and only it can say
+        if self.swdl_run:
+            self._swdl.stop(self)
 
     # -- trace --------------------------------------------------------------------
     def _match_traced(self, pairs: list[tuple[int, bytes]], max_age: float) -> int | None:
@@ -6845,6 +7048,9 @@ class Bench:
         sel = self.sel_devices
         first = sel[0] if sel else None
         demo = self.adapter == "demo"
+        # before "sel" below is read: listing the library is what notices
+        # that the selected file is gone, and repairs the selection
+        fw_catalog = self._fw_catalog()
         catalog, obj_groups, obj_hint = self._object_catalog()
         eds_files = self._eds_rows()
         conflicts = self._eds_conflicts()
@@ -6947,7 +7153,8 @@ class Bench:
                 "activeSuite": self.active_suite,
             },
             "swdl": {
-                "fw": self._plugin_fw + (list(data.FIRMWARE) if demo else []),
+                "fw": fw_catalog,
+                "folder": self.paths.get("fw", ""),
                 "strategy": self._swdl.name,
                 "vendor": not isinstance(self._swdl, SimSwdlStrategy),
                 "sel": self.fw_sel,
@@ -6955,6 +7162,8 @@ class Bench:
                 "run": self.swdl_run,
                 "done": self.swdl_done,
                 "prog": {str(k): round(v) for k, v in self.swdl_prog.items()},
+                "phase": {str(k): v for k, v in self.swdl_phase.items()},
+                "err": {str(k): v for k, v in self.swdl_err.items()},
             },
             "trace": self._trace_snapshot(),
         }
