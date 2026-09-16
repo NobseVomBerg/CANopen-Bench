@@ -20,6 +20,7 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+from .bus.interface import SdoResult
 from .values import Field, Quantity
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,31 @@ class DemoHook:
         """The operator pressed a demo device button (Setup page, demo mode
         only). Return True when handled."""
         return False
+
+    def on_sdo_read(self, bus, node: int, index: str, sub: str) -> SdoResult | None:
+        """The device side of a vendor protocol that answers over SDO — a
+        bootloader is the example: the objects it serves exist while it
+        runs and nowhere in the EDS, and what it answers depends on what
+        was written to it before.
+
+        Return an ``SdoResult`` to answer this read, or None for "not
+        mine" — then the next hook is asked and the EDS store answers
+        last, exactly as without any hook.
+        """
+        return None
+
+    def on_sdo_write(self, bus, node: int, index: str, sub: str,
+                     value: str) -> SdoResult | None:
+        """A write that the vendor protocol takes as a command rather than
+        as a value (see ``on_sdo_read``). ``SdoResult`` or None."""
+        return None
+
+    def on_sdo_download(self, bus, node: int, index: str, sub: str,
+                        data: bytes) -> SdoResult | None:
+        """A block of bytes written to one object (``bus.sdo_download`` —
+        a firmware image on its way into a bootloader). ``SdoResult`` or
+        None."""
+        return None
 
 
 class TraceDecoder:
@@ -277,7 +303,24 @@ class SwdlStrategy:
     ships a simulation (``core.SimSwdlStrategy``); a real vendor download
     protocol replaces it via ``BenchPlugin.swdl_strategy()``. All state
     lives on the bench (``swdl_run``/``swdl_done``/``swdl_prog``/
-    ``fw_sel``/``swdl_mode``), so the UI stays snapshot-driven."""
+    ``swdl_phase``/``swdl_err``/``fw_sel``/``swdl_mode``), so the UI stays
+    snapshot-driven.
+
+    A real download takes minutes, and everything here runs on the event
+    loop: ``start()`` hands the work to ``bench.spawn(coro)`` and returns,
+    and ``step()`` — which keeps being called every tick while
+    ``swdl_run`` — stays cheap, watching the task rather than doing the
+    transfer. A strategy that flashes inside ``step()`` stops the tick
+    loop, and with it the trace, the heartbeat watch and the page that is
+    meant to show the progress.
+
+    What the page shows per node: ``swdl_prog[node]`` 0..100,
+    ``swdl_phase[node]`` the phase in words ("erasing", "flashing"), and
+    ``swdl_err[node]`` the reason a node did not make it — a node with an
+    entry there is drawn as failed. ``swdl_done`` means the run is over,
+    not that it went well; ``swdl_err`` says which nodes it went badly
+    for.
+    """
 
     name = "unnamed"
 
@@ -292,6 +335,13 @@ class SwdlStrategy:
         ``bench.swdl_prog`` per node (0..100) and clear ``swdl_run`` /
         set ``swdl_done`` when finished."""
         raise NotImplementedError
+
+    def stop(self, bench) -> None:
+        """The operator pressed Stop. Cooperative: this asks, it does not
+        kill — a transfer in flight finishes its segment, the strategy
+        leaves the device in a state it can say something about, and
+        whoever is left unfinished gets an ``swdl_err``. Default: nothing,
+        which is what a strategy that cannot be interrupted should do."""
 
 
 class BenchPlugin:

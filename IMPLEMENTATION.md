@@ -119,7 +119,12 @@ browser):
   ("step 3/9 …"), PASS/FAIL/ERROR/SKIP verdicts, tool filter, repeats,
   stop-on-error and report history.
 - **SWDL** — firmware library, SDO-serial or PDO-parallel download to the
-  devices selected in the Devices box, per-device progress.
+  devices selected in the Devices box, per-device progress, the phase
+  each node is in and the reason one of them failed. **Stop** asks the
+  download strategy to give up cooperatively (`SwdlStrategy.stop`); the
+  bytes themselves go down through `bus.sdo_download`, a segmented domain
+  download that writes them in the order it is given — which the hex
+  string `sdo_write` takes does not.
 - **Trace** — the record of what the bus carried, and a view onto it.
   That split is the whole design. Recording runs whenever the interface
   is connected and test steps read it (`wait_for` with a `cob` matches

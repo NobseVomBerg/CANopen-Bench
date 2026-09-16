@@ -67,7 +67,7 @@ only what you provide.
 | `emcy_mec_text(mec)` | `str` | What the device calls the manufacturer error code — the number in the five manufacturer bytes of an EMCY, which the standard leaves entirely to the device. The bench reads the frame, this names what it found. `""` for a code the plugin does not know; first plugin with an answer wins |
 | `actions(bench)` | `dict[str, callable]` | Extra API actions, dispatched as `<plugin>.<action>` — collision-free with core actions |
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
-| `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation; first plugin wins |
+| `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation — the transfer itself, the phase and the failure it reports per node, and what Stop does; first plugin wins |
 
 A plugin's action is dispatched on the event loop with the browser
 waiting for it to return, so anything that has to wait for the device
@@ -232,6 +232,35 @@ brings it back when the device is selected again. A value written into
 the table directly lasts until the next device switch and no longer;
 that is how a display panel's whole reading used to vanish.
 
+### Firmware download
+
+A real download takes minutes, and a `SwdlStrategy` runs where the UI
+does. So `start()` hands the work to `bench.spawn(coro)` and returns,
+and `step()` — called every tick while `bench.swdl_run` — stays cheap
+and only watches. A strategy that flashes inside `step()` stops the tick
+loop, and with it the trace, the heartbeat watch and the page that was
+meant to show the progress.
+
+The page draws three things per node, all written by the strategy:
+`bench.swdl_prog[node]` (0..100), `bench.swdl_phase[node]` — the phase
+in words, "erasing", "flashing", "verifying" — and `bench.swdl_err[node]`,
+which turns that node's row red and prints the reason. `swdl_done` means
+the run is over, not that it went well; the errors say which nodes it
+went badly for. **Stop** dispatches `swdl_stop`, which reaches
+`SwdlStrategy.stop(bench)`: cooperative, so a transfer in flight finishes
+its segment and the strategy leaves the device somewhere it can describe
+— and gives whoever is left unfinished an `swdl_err`.
+
+The image goes down through **`bus.sdo_download(node, index, sub, data,
+progress=..., timeout=...)`** — a segmented CiA-301 domain download that
+puts the bytes on the wire in the order they are given. `sdo_write` will
+not do: it takes a hex *string* and reads it as one little-endian number,
+which arrives at the device backwards. `progress(sent, total)` is called
+after every chunk and returning False cancels the transfer, which is how
+a strategy's `stop()` reaches the bytes; `timeout` lends this one
+transfer a longer response timeout, for the steps that answer in seconds
+rather than milliseconds (an erase).
+
 ## Minimal example
 
 A plugin that adds one trace decoder and one custom step type:
@@ -278,7 +307,13 @@ active in the trace, and flows can use `- acme.blink: {times: 3}`.
 ## Testing without hardware
 
 Pair your protocol code with a `DemoHook` that simulates the device
-side on the demo bus (`on_raw_frame`, `press_button`). For a public,
+side on the demo bus: `on_raw_frame` and `press_button` for the raw
+telegrams, `on_sdo_read`, `on_sdo_write` and `on_sdo_download` for a
+protocol that speaks SDO. Those three are asked before the EDS store is
+and answer `None` for anything that is not theirs, so a hook can serve
+objects no EDS describes — a bootloader's do not exist until it is
+running — and leave every other object to the demo device. With one of
+those a firmware download runs end to end without hardware. For a public,
 worked example of a plugin package — python-can driver plus adapter
 card, entry points, tests — see
 [`plugins/cob-cpcusb/`](../plugins/cob-cpcusb/) (MIT) in this

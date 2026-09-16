@@ -1221,6 +1221,38 @@ def test_swdl_serial_updates_firmware(connected_bench):
     assert bench.devices[1]["fw"] == "1.0.0-demo"  # not selected, untouched
 
 
+def test_the_simulation_says_what_a_node_is_busy_with(connected_bench):
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("swdl_start", {})
+    bench._swdl.step(bench)
+    assert bench.swdl_phase[1] == "simulating"
+
+    for _ in range(200):
+        if not bench.swdl_run:
+            break
+        bench._swdl.step(bench)
+    assert bench.swdl_phase[1] == "done"
+
+
+def test_a_stopped_download_says_who_did_not_make_it(connected_bench):
+    """Stop ends the run where it stands. A node left half-flashed is not
+    a node at 60 %, it is one nobody finished — and the page has to say
+    which, or the next operator reads the bar as progress that stalled."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("dev_toggle", {"node": 2})
+    bench.dispatch("swdl_start", {})
+    bench._swdl.step(bench)  # node 1 gets going, node 2 is still queued (SDO serial)
+
+    bench.dispatch("swdl_stop", {})
+
+    assert bench.swdl_run is False
+    assert bench.swdl_err == {1: "stopped by operator", 2: "stopped by operator"}
+    assert bench.snapshot()["swdl"]["err"]["1"] == "stopped by operator"
+    assert "SWDL stopped" in bench.logs[-1]["msg"]
+
+
 def test_add_eds_file_parses_real_eds(bench):
     ok, msg = bench.add_eds_file("test_device.eds", MINIMAL_EDS)
     assert ok, msg

@@ -389,3 +389,45 @@ def test_the_stats_view_says_when_it_is_reading_a_capture():
     assert "not measured for a capture" in stats
     assert "These numbers are the open capture" in stats
     assert "${of ? 'in the capture' : 'since connect'}" in stats
+
+
+def test_the_swdl_page_can_stop_what_it_started():
+    """Only while something is running: a Stop that would do nothing is a
+    button somebody presses, sees nothing happen, and stops believing."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "send('swdl_stop')" in swdl
+    assert "${w.run && html`<span" in swdl, "the Stop button is not tied to a running download"
+
+
+def test_a_failed_node_is_not_a_node_stuck_at_some_percent():
+    """A bar standing at 40 % reads as a download still going. The row
+    says FAILED, the bar turns red and the reason stands under it — all
+    three off the one thing the server sent about that node."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "const errs = w.err || {}" in swdl, "a server without errors must still render"
+    assert "const err = errs[String(d.node)]" in swdl
+    assert "'FAILED'" in swdl
+    assert "${err ? 'var(--red)'" in swdl, "the bar of a failed node keeps its colour"
+    assert "const done = !err && p >= 100" in swdl, "a failed node at 100 % would read as done"
+
+
+def test_the_swdl_page_says_what_a_node_is_busy_with():
+    """Minutes of a bar moving without a word for what is happening is
+    where somebody pulls the plug during an erase."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "const phases = w.phase || {}" in swdl
+    assert "const phase = phases[String(d.node)]" in swdl
+    assert ": phase && html`<div" in swdl, "the phase line is not drawn under the bar"
+
+
+def test_a_finished_download_is_not_the_same_as_a_good_one():
+    """``done`` says the run is over. Whether it went well is what the
+    error count says, so the line reads the counts and not the flag."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "'all targets verified ✓'" in swdl
+    assert "finished with errors" in swdl
+    assert "${failed ? ` · ${failed} failed` : ''}" in swdl
