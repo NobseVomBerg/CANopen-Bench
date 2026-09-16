@@ -398,6 +398,10 @@ def test_the_step_line_shows_the_payload_it_waits_for(tc_bench):
     assert _step_text("wait_for", {"cob": "R14", "data": "00 32 04 00 0B"}) \
         == "wait for frame R14 = 00 32 04 00 0B"
     assert _step_text("wait_for", {"cob": "0x181"}) == "wait for frame 0x181"
+    # and in one spelling, whatever the file writes: a payload the report
+    # prints three ways is a payload the reader has to transcribe
+    assert _step_text("wait_for", {"cob": "R14", "data": "0B00043200"}) \
+        == "wait for frame R14 = 0B 00 04 32 00"
 
 
 # -- sdo_write expect_abort: mirrors sdo_read's expect_abort handling --
