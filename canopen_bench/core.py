@@ -524,7 +524,7 @@ def _step_text(key: str, val) -> str:
             cobs = val["cob"] if isinstance(val["cob"], list) else [val["cob"]]
             data = val.get("data")
             datas = data if isinstance(data, list) else [data] * len(cobs)
-            parts = [f"{c} = {d}" if d else str(c)
+            parts = [f"{c} = {_frame_text(_hex_bytes(d) or b'') or d}" if d else str(c)
                      for c, d in zip(cobs, datas)] if len(datas) == len(cobs) \
                 else [str(c) for c in cobs]
             return f"wait for frame {' or '.join(parts)}"
@@ -765,6 +765,20 @@ def _frame_text(data: bytes) -> str:
     same order — so a report line and a trace row can be read against
     each other without transcribing either."""
     return " ".join(f"{b:02X}" for b in data)
+
+
+def _hex_bytes(text: object) -> bytes | None:
+    """A written payload as bytes, or None where it is not clean hex.
+
+    A case may write a frame "0B00043200" or "0B 00 04 32 00"; both mean
+    the same five bytes and both have to end up spelled the one way, or a
+    report shows three spellings of one payload and the reader is left
+    transcribing between them instead of comparing.
+    """
+    try:
+        return bytes.fromhex(str(text).replace(" ", ""))
+    except ValueError:
+        return None
 
 
 def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
