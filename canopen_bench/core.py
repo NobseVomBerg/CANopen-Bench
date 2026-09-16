@@ -818,6 +818,8 @@ class SimSwdlStrategy(SwdlStrategy):
         bench.swdl_run = True
         bench.swdl_done = False
         bench.swdl_prog = {}
+        bench.swdl_phase = {}
+        bench.swdl_err = {}
         mode = bench.swdl_mode.upper() + (" parallel" if bench.swdl_mode == "pdo" else " serial")
         bench.log(f"SWDL v{bench.fw_sel} → {bench._sel_names()} ({mode})")
 
@@ -832,6 +834,10 @@ class SimSwdlStrategy(SwdlStrategy):
             for d in targets:
                 n = d["node"]
                 bench.swdl_prog[n] = min(100, bench.swdl_prog.get(n, 0) + 6 + random.random() * 6)
+        for d in targets:
+            prog = bench.swdl_prog.get(d["node"], 0)
+            if prog:  # a node still queued has nothing to say yet
+                bench.swdl_phase[d["node"]] = "done" if prog >= 100 else "simulating"
         if targets and all(bench.swdl_prog.get(d["node"], 0) >= 100 for d in targets):
             bench.swdl_run = False
             bench.swdl_done = True
@@ -839,6 +845,17 @@ class SimSwdlStrategy(SwdlStrategy):
                 if d["sel"]:
                     d["fw"] = bench.fw_sel
             bench.log(f"SWDL complete — {len(targets)} device(s) now on v{bench.fw_sel}")
+
+    def stop(self, bench) -> None:
+        """Nothing is in flight to wait for here, so the simulation ends
+        where it stands: whoever was not finished is a device the operator
+        stopped, and says so instead of sitting at 60 % forever."""
+        bench.swdl_run = False
+        unfinished = [d["node"] for d in bench.sel_devices
+                      if bench.swdl_prog.get(d["node"], 0) < 100]
+        for node in unfinished:
+            bench.swdl_err[node] = "stopped by operator"
+        bench.log(f"SWDL stopped — {len(unfinished)} device(s) unfinished")
 
 
 class Bench:
@@ -1102,6 +1119,10 @@ class Bench:
         self.swdl_run = False
         self.swdl_done = False
         self.swdl_prog: dict[int, float] = {}
+        #: what each node is busy with, and why one of them did not make it
+        #: — a node named in swdl_err is drawn as failed (plugin.SwdlStrategy)
+        self.swdl_phase: dict[int, str] = {}
+        self.swdl_err: dict[int, str] = {}
         #: The record of what the bus carried. Fills whenever the interface
         #: is connected and is never emptied or replaced by the trace panel:
         #: test steps read it (`wait_for` with a `cob`), so a frame missing
@@ -5713,6 +5734,12 @@ class Bench:
             return
         self._swdl.start(self)
 
+    def act_swdl_stop(self, p: dict) -> None:
+        # asking, not killing: what a stopped download leaves on the
+        # device is the strategy's business, and only it can say
+        if self.swdl_run:
+            self._swdl.stop(self)
+
     # -- trace --------------------------------------------------------------------
     def _match_traced(self, pairs: list[tuple[int, bytes]], max_age: float) -> int | None:
         """Which of `pairs` is satisfied by the newest frame its COB-ID
@@ -6902,6 +6929,8 @@ class Bench:
                 "run": self.swdl_run,
                 "done": self.swdl_done,
                 "prog": {str(k): round(v) for k, v in self.swdl_prog.items()},
+                "phase": {str(k): v for k, v in self.swdl_phase.items()},
+                "err": {str(k): v for k, v in self.swdl_err.items()},
             },
             "trace": self._trace_snapshot(),
         }

@@ -13,11 +13,13 @@ matching traffic and out-of-range writes abort like a real device would.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from canopen.objectdictionary import ObjectDictionary, ODVariable
 
 from ..db import Db
 from ..eds_od import RAW_TYPES, OdCache, find_var, pdo_mapping
-from .canopen_bus import _decode_cob
+from .canopen_bus import _bytes_to_hex, _decode_cob
 from .interface import BusInterface, FoundDevice, Frame, SdoResult
 
 _NMT_TO_STATE = {"start": "Operational", "preop": "Pre-Operational",
@@ -200,8 +202,22 @@ class EdsDemoBus(BusInterface):
         mask = (1 << (len(var) or 8)) - 1
         return f"0x{int(value) & mask:0{width}X}"
 
-    def sdo_read(self, node: int, index: str, sub: str) -> SdoResult:
-        res = self._read(node, index, sub)
+    def _hooked(self, method: str, *args) -> SdoResult | None:
+        """What an installed DemoHook answers to this transfer, or None
+        when none of them owns it — a bootloader's objects exist while it
+        runs and in no EDS, so a hook is asked before the EDS store is.
+        First answer wins, like the raw-frame hooks."""
+        for hook in self._hooks:
+            res = getattr(hook, method)(self, *args)
+            if res is not None:
+                return res
+        return None
+
+    def sdo_read(self, node: int, index: str, sub: str,
+                 timeout: float | None = None) -> SdoResult:
+        res = self._hooked("on_sdo_read", node, index, sub)
+        if res is None:
+            res = self._read(node, index, sub)
         self._trace_sdo(node, index, sub, write=False, written=None, res=res)
         return res
 
@@ -233,8 +249,11 @@ class EdsDemoBus(BusInterface):
         value = var.value if var.value is not None else var.default
         return SdoResult(ok=True, value=self._format(var, value))
 
-    def sdo_write(self, node: int, index: str, sub: str, value: str) -> SdoResult:
-        res = self._write(node, index, sub, value)
+    def sdo_write(self, node: int, index: str, sub: str, value: str,
+                  timeout: float | None = None) -> SdoResult:
+        res = self._hooked("on_sdo_write", node, index, sub, value)
+        if res is None:
+            res = self._write(node, index, sub, value)
         self._trace_sdo(node, index, sub, write=True, written=value, res=res)
         return res
 
@@ -258,6 +277,40 @@ class EdsDemoBus(BusInterface):
                 return SdoResult(ok=False, abort="0x06090032 value below minimum")
         self._store_value(node, idx, s, value)
         return SdoResult(ok=True, value=value)
+
+    def sdo_download(self, node: int, index: str, sub: str, data: bytes,
+                     progress: Callable[[int, int], bool] | None = None,
+                     timeout: float | None = None) -> SdoResult:
+        """``progress`` is never called: nothing is streamed here, the
+        block arrives in one piece and there is no transfer to cancel."""
+        res = self._hooked("on_sdo_download", node, index, sub, data)
+        if res is None:
+            res = self._download(node, index, sub, data)
+        # the trace shows the first bytes of the block, the same four an
+        # expedited write would carry: the point of the row is that the
+        # transfer happened and where it went
+        self._trace_sdo(node, index, sub, write=True,
+                        written=_bytes_to_hex(data[:4]), res=res)
+        return res
+
+    def _download(self, node: int, index: str, sub: str, data: bytes) -> SdoResult:
+        """A domain download nobody simulates: the EDS says whether the
+        object is there and writable, and that is all the demo bus can
+        honestly answer. Nothing is stored — a domain has no single value
+        a later read could return, and inventing one would put a number
+        into the object browser that no device ever sent."""
+        dev = self._devices.get(node)
+        if not self.connected or dev is None:
+            return SdoResult(ok=False, abort="0x05040000 timeout")
+        idx, s = int(index, 16), int(sub or "0", 16)
+        od = self._load_od(dev["entry"]["file"])
+        var = self._find_var(od, idx, s) if od else None
+        if var is None:
+            return SdoResult(ok=False, abort=self._missing_abort(od, idx) if od
+                              else "0x06020000 object does not exist")
+        if not var.writable:
+            return SdoResult(ok=False, abort="0x06010002 write to read-only object")
+        return SdoResult(ok=True, value=str(len(data)))
 
     def _store_value(self, node: int, idx: int, sub: int, value: str) -> None:
         """One write into the device's value store (SDO write or applied

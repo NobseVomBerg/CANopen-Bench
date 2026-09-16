@@ -1915,8 +1915,16 @@ function SwdlPage({ s }) {
       </div>
     </div>`;
   }
-  const status = w.run ? `transfer via ${w.mode.toUpperCase()} running…`
-    : w.done ? 'all targets verified ✓' : `${selDevs.length} target(s) · v${w.sel}`;
+  const errs = w.err || {};
+  const phases = w.phase || {};
+  const failed = selDevs.filter((d) => errs[String(d.node)]).length;
+  const ready = selDevs.filter((d) => !errs[String(d.node)] && (w.prog[String(d.node)] || 0) >= 100).length;
+  const counts = `${ready}/${selDevs.length} done${failed ? ` · ${failed} failed` : ''}`;
+  // "done" is the run being over, not it having gone well — the errors say which
+  const status = w.done && !failed ? 'all targets verified ✓'
+    : w.done ? `finished with errors — ${counts}`
+    : w.run || failed ? counts
+    : `${selDevs.length} target(s) · v${w.sel}`;
   return html`
   <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-content:start;min-height:0">
     <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
@@ -1945,16 +1953,20 @@ function SwdlPage({ s }) {
       <div style="display:flex;flex-direction:column;gap:8px">
         ${selDevs.map((d) => {
           const p = Math.round(w.prog[String(d.node)] || 0);
-          const done = p >= 100;
+          const err = errs[String(d.node)];
+          const phase = phases[String(d.node)];
+          const done = !err && p >= 100;
           return html`
           <div style="border:1px solid var(--bd2);border-radius:7px;padding:9px 12px">
             <div style="display:flex;align-items:center;gap:10px">
               <span style="font:600 12px ${MONO};color:var(--acc)">${String(d.node).padStart(2, '0')}</span>
               <span style="font-weight:600;flex:1">${d.name}</span>
               <span style="font:11px ${MONO};color:var(--faint)">v${d.fw} → v${w.sel}</span>
-              <span style="font-weight:600;font-size:11px;color:${done ? 'var(--grn)' : p > 0 ? 'var(--acc)' : 'var(--faint)'}">${done ? 'DONE ✓' : p > 0 ? p + '%' : w.run ? 'queued' : 'ready'}</span>
+              <span style="font-weight:600;font-size:11px;color:${err ? 'var(--red)' : done ? 'var(--grn)' : p > 0 ? 'var(--acc)' : 'var(--faint)'}">${err ? 'FAILED' : done ? 'DONE ✓' : p > 0 ? p + '%' : w.run ? 'queued' : 'ready'}</span>
             </div>
-            <div style="height:5px;border-radius:3px;background:var(--bd);overflow:hidden;margin-top:7px"><span style="display:block;width:${p}%;height:100%;background:${done ? 'var(--grn)' : 'var(--acc)'};transition:width .4s"></span></div>
+            <div style="height:5px;border-radius:3px;background:var(--bd);overflow:hidden;margin-top:7px"><span style="display:block;width:${p}%;height:100%;background:${err ? 'var(--red)' : done ? 'var(--grn)' : 'var(--acc)'};transition:width .4s"></span></div>
+            ${err ? html`<div style="font-size:10.5px;color:var(--red);margin-top:6px">${err}</div>`
+              : phase && html`<div style="font-size:10.5px;color:var(--faint);margin-top:6px">${phase}</div>`}
           </div>`;
         })}
       </div>
@@ -1968,6 +1980,7 @@ function SwdlPage({ s }) {
       </div>
       <div style="display:flex;align-items:center;gap:12px">
         <span class="hv-b" onClick=${() => send('swdl_start')} style="background:${w.run || !selDevs.length ? 'var(--faint)' : 'var(--acc)'};color:#fff;font-weight:600;padding:8px 22px;border-radius:7px;cursor:pointer">${w.run ? 'Downloading…' : '⇩ Start download'}</span>
+        ${w.run && html`<span class="hv" onClick=${() => send('swdl_stop')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;padding:8px 14px;border-radius:7px;cursor:pointer">■ Stop</span>`}
         <span style="font:11px ${MONO};color:var(--dim)">${status}</span>
       </div>
     </div>

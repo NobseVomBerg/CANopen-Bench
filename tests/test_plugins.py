@@ -17,6 +17,7 @@ import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
 import canopen_bench.testcases as tclib
+from canopen_bench.bus.interface import SdoResult
 from canopen_bench.core import Bench, _resolve
 from canopen_bench.db import Db
 from canopen_bench.plugin import (
@@ -255,6 +256,118 @@ def test_demo_hook_press_button_is_reached_from_bench(tmp_path):
     assert hook.pressed is True
 
 
+class _SdoDemoHook(DemoHook):
+    """The shape a bootloader takes on the demo bus: one object that no
+    EDS describes, answered by the hook while it is running. Everything
+    else is None — not this hook's object, not this hook's business."""
+
+    name = "fake-sdo-hook"
+    OWN = "0x5F00"
+
+    def __init__(self):
+        self.read = []
+        self.written = []
+        self.downloaded = b""
+
+    def on_sdo_read(self, bus, node, index, sub):
+        if index != self.OWN:
+            return None
+        self.read.append((node, sub))
+        return SdoResult(ok=True, value="0x2A")
+
+    def on_sdo_write(self, bus, node, index, sub, value):
+        if index != self.OWN:
+            return None
+        self.written.append((node, sub, value))
+        return SdoResult(ok=True, value=value)
+
+    def on_sdo_download(self, bus, node, index, sub, data):
+        if index != self.OWN:
+            return None
+        self.downloaded = data
+        return SdoResult(ok=True, value=str(len(data)))
+
+
+def _hooked_demo_bench(tmp_path, hook):
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_ExtPlugin("fake", hook=hook)])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    return bench
+
+
+def test_a_demo_hook_answers_the_sdo_objects_it_owns(tmp_path):
+    """An object the hook owns exists nowhere in the EDS — without the
+    hook every one of these three would abort."""
+    hook = _SdoDemoHook()
+    bench = _hooked_demo_bench(tmp_path, hook)
+
+    assert bench.bus.sdo_read(1, hook.OWN, "02").value == "0x2A"
+    assert bench.bus.sdo_write(1, hook.OWN, "02", "0x03").ok
+    res = bench.bus.sdo_download(1, hook.OWN, "02", b"firmware")
+
+    assert hook.read == [(1, "02")]
+    assert hook.written == [(1, "02", "0x03")]
+    assert hook.downloaded == b"firmware"
+    assert (res.ok, res.value) == (True, "8")
+
+
+def test_a_demo_hook_is_asked_before_the_eds_store(tmp_path):
+    """The hook wins over an object the EDS does describe: a device in its
+    bootloader answers for itself, whatever the file says it is."""
+    class _Overriding(_SdoDemoHook):
+        OWN = "0x2000"  # the seed EDS's writable counter, default 42
+
+    hook = _Overriding()
+    bench = _hooked_demo_bench(tmp_path, hook)
+
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x2A"
+
+
+def test_a_hook_that_answers_none_leaves_the_eds_answering(tmp_path):
+    hook = _SdoDemoHook()
+    bench = _hooked_demo_bench(tmp_path, hook)
+
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x0000002A"  # EDS default 42
+    assert bench.bus.sdo_write(1, "0x2000", "00", "0x63").ok
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x63"
+    assert hook.read == [] and hook.written == []
+
+
+def test_a_domain_download_nobody_hooks_is_taken_but_stored_nowhere(tmp_path):
+    """The EDS says the object is there and writable, which is as far as
+    the demo bus can honestly go — a domain has no single value to read
+    back afterwards."""
+    bench = _hooked_demo_bench(tmp_path, _SdoDemoHook())
+
+    res = bench.bus.sdo_download(1, "0x2000", "00", b"\x01\x02\x03\x04\x05")
+
+    assert (res.ok, res.value) == (True, "5")
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x0000002A"  # untouched
+
+
+def test_a_domain_download_refuses_like_a_write_does(tmp_path):
+    bench = _hooked_demo_bench(tmp_path, _SdoDemoHook())
+
+    missing = bench.bus.sdo_download(1, "0x7777", "00", b"x")
+    read_only = bench.bus.sdo_download(1, "0x1000", "00", b"x")
+
+    assert missing.abort.startswith("0x0602")
+    assert read_only.abort.startswith("0x0601")
+
+
+def test_a_domain_download_reaches_the_trace(tmp_path):
+    """Like every other transfer on this bus: the row is what says the
+    image went out, and where."""
+    bench = _hooked_demo_bench(tmp_path, _SdoDemoHook())
+    bench.bus.poll_frames(64)  # drop the scan's own traffic
+
+    bench.bus.sdo_download(1, "0x2000", "00", bytes(range(16)))
+    frames = bench.bus.poll_frames(64)
+
+    request = next(f for f in frames if f.cob_id == "0x601")
+    assert request.data.startswith("23 00 20 00 00 01 02 03")  # first bytes, in order
+
+
 def test_first_plugins_addressing_provider_wins(tmp_path):
     first = _FakeAddressingProvider()
     second = _OtherAddressingProvider()
@@ -474,6 +587,7 @@ class _RecordingSwdlStrategy(SwdlStrategy):
     def __init__(self):
         self.started = False
         self.step_calls = 0
+        self.stopped = False
 
     def start(self, bench) -> None:
         self.started = True
@@ -484,6 +598,9 @@ class _RecordingSwdlStrategy(SwdlStrategy):
         self.step_calls += 1
         bench.swdl_run = False
         bench.swdl_done = True
+
+    def stop(self, bench) -> None:
+        self.stopped = True
 
 
 class _SwdlPlugin(BenchPlugin):
@@ -516,6 +633,40 @@ def test_plugin_swdl_strategy_selected_and_act_swdl_start_guards_still_hold(tmp_
     bench._swdl.step(bench)
     assert strategy.step_calls == 1
     assert bench.swdl_done is True
+
+
+def test_swdl_stop_reaches_the_strategy_only_while_it_runs(tmp_path):
+    """Stop is cooperative — the bench asks the strategy and nothing else.
+    A press with no download running asks nobody: there is no state on the
+    bench to tidy up, and a strategy would be told to abandon a transfer
+    it never started."""
+    strategy = _RecordingSwdlStrategy()
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_SwdlPlugin("fake", strategy)])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+
+    bench.dispatch("swdl_stop", {})
+    assert strategy.stopped is False
+
+    bench.dispatch("swdl_start", {})
+    bench.dispatch("swdl_stop", {})
+    assert strategy.stopped is True
+
+
+def test_the_swdl_snapshot_carries_phase_and_failure_per_node(tmp_path):
+    """Both are the strategy's to write and the page's to draw, keyed by
+    node like the progress beside them."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_SwdlPlugin("fake", _RecordingSwdlStrategy())])
+    bench.swdl_prog = {2: 40, 3: 12}
+    bench.swdl_phase = {2: "flashing", 3: "erasing"}
+    bench.swdl_err = {3: "no answer after the erase"}
+
+    w = bench.snapshot()["swdl"]
+
+    assert w["prog"] == {"2": 40, "3": 12}
+    assert w["phase"] == {"2": "flashing", "3": "erasing"}
+    assert w["err"] == {"3": "no answer after the erase"}
 
 
 def test_first_plugins_swdl_strategy_wins(tmp_path):
