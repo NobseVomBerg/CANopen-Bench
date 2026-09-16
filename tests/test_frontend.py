@@ -431,3 +431,35 @@ def test_a_finished_download_is_not_the_same_as_a_good_one():
     assert "'all targets verified ✓'" in swdl
     assert "finished with errors" in swdl
     assert "${failed ? ` · ${failed} failed` : ''}" in swdl
+
+
+def test_the_drop_zone_actually_takes_a_file():
+    """It looked like a drop zone for a year and was a rectangle with
+    text in it. Both ways in are wired now — dragging a file onto it and
+    clicking it — because a drop zone that only reacts to a drag is one
+    half of the people never getting a file in."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "onDrop=" in swdl and "onDragOver=" in swdl
+    assert "e.dataTransfer.files[0]" in swdl
+    assert 'type="file"' in swdl and "fwInput.current.click()" in swdl
+    assert "send('fw_upload'," in swdl
+    assert "readAsDataURL" in swdl, "an image read as text is an image rewritten"
+    assert ".bin" not in swdl and ".hex" not in swdl, \
+        "the page must not name a firmware format — the core knows none"
+
+
+def test_the_firmware_list_picks_a_file_and_refuses_the_ones_nobody_knows():
+    """The selection is a file name now, not a version — several files in
+    a build folder can carry the same version. A row no extension
+    recognises is listed (the file *is* there) and cannot be picked."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "send('swdl_fw', { file: f.file })" in swdl
+    assert "const on = w.sel === f.file" in swdl
+    assert "const unknown = f.known === false" in swdl
+    assert "onClick=${unknown ? null :" in swdl, "an unknown row must not be selectable"
+    assert "cursor:${unknown ? 'not-allowed'" in swdl
+    assert "title=${unknown ? 'no installed extension knows this format'" in swdl
+    assert "${f.ver || f.file}" in swdl, "an unknown file still shows its name"
+    assert "${w.folder}" in swdl, "the page has to say which folder it is listing"

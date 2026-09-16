@@ -390,9 +390,32 @@ class BenchPlugin:
         return []
 
     def firmware(self) -> list[dict]:
-        """Firmware library entries ({ver, file, tag, meta}); listed
-        before the core's demo entries."""
+        """Firmware library entries with no file behind them
+        (``{ver, tag?, meta?}``) — listed after the firmware folder,
+        which is where files live (``describe_firmware``). Having no
+        file, they answer to their version: that is the name the page
+        selects them by, and ``bench.fw_path()`` is None while one of
+        them is selected."""
         return []
+
+    def describe_firmware(self, path: Path) -> dict | None:
+        """What one file in the firmware folder is. The format of a
+        firmware file is the vendor's — magic bytes, a header, a version
+        somewhere inside it — and the core knows none of that: it knows
+        the folder, lists what is in it and asks here.
+
+        Return ``{"ver": str, "tag"?: str, "meta"?: str}`` for a file of
+        this vendor's format — ``ver`` is what the page calls it, ``tag``
+        a short marker beside it ("latest"), ``meta`` a line of detail
+        (size, build date, what the header says it is). Return None for
+        anything else, including a file of this format that is damaged:
+        a file nobody claims is listed as unknown and cannot be selected,
+        which is the honest answer. First plugin with an answer wins.
+
+        Called per file, and again whenever that file changed on disk —
+        reading it here is fine, the result is cached until it does.
+        """
+        return None
 
     def object_fields(self, symbols) -> dict[str, list[Field]]:
         """How to read an object's value symbolically: "0x2007:09" -> the

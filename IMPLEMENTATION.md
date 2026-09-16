@@ -35,8 +35,9 @@ browser):
   timeout — deliberately MC-only, the Devices box itself never tracks
   this), startup options), an Extensions box showing loaded plugins with
   GUI install/remove of plugin packages (upload a `.whl`, active
-  immediately — see "Plugin install" below), and the test configuration
-  paths (defaulting into the workspace folder).
+  immediately — see "Plugin install" below), and the folders the tool
+  reads — TestCases, Results and the firmware folder the SWDL page lists
+  (all defaulting into the workspace folder).
   `data/` is gitignored, so a fresh checkout ships no real .eds files; on
   the workspace's first run (`Db.is_first_run`) `Bench` installs
   `canopen_bench/seed/DemoDevice.eds` the same way an upload would
@@ -120,7 +121,11 @@ browser):
   stop-on-error and report history.
 - **SWDL** — firmware library, SDO-serial or PDO-parallel download to the
   devices selected in the Devices box, per-device progress, the phase
-  each node is in and the reason one of them failed. **Stop** asks the
+  each node is in and the reason one of them failed. The library is a
+  folder (`paths["fw"]`, configurable, often a build output directory):
+  the core lists the files and knows no firmware format, a plugin says
+  what each one is (`describe_firmware`) and a file nobody claims is
+  listed but cannot be selected. **Stop** asks the
   download strategy to give up cooperatively (`SwdlStrategy.stop`); the
   bytes themselves go down through `bus.sdo_download`, a segmented domain
   download that writes them in the order it is given — which the hex

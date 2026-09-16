@@ -918,8 +918,8 @@ function SetupPage({ s }) {
     </div>
 
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
-      <div style="font-weight:600;font-size:13px">Test configuration</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="font-weight:600;font-size:13px">Folders</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim);font-weight:600">TESTCASES FOLDER</span>
           <div style="display:flex;gap:6px">
@@ -935,6 +935,15 @@ function SetupPage({ s }) {
             <span class="hv" onClick=${() => send('browse_open', { which: 'res' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>
           </div>
           <span style="font:10.5px ${MONO};color:var(--faint)">${s.tests.reports.length} report${s.tests.reports.length === 1 ? '' : 's'}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px"
+          title="The folder the SWDL page lists firmware files from — often the build output folder of the firmware project. What each file is comes from the extension that knows the format.">
+          <span style="font-size:11px;color:var(--dim);font-weight:600">FIRMWARE FOLDER</span>
+          <div style="display:flex;gap:6px">
+            <${SyncInput} value=${s.paths.fw || ''} onCommit=${(v) => send('set_path', { which: 'fw', value: v })} style="flex:1;${inputStyle}" />
+            <span class="hv" onClick=${() => send('browse_open', { which: 'fw' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>
+          </div>
+          <span style="font:10.5px ${MONO};color:var(--faint)">listed on the SWDL page</span>
         </div>
       </div>
     </div>
@@ -1896,6 +1905,17 @@ function OverviewBox({ ov, dir }) {
 function SwdlPage({ s }) {
   const selDevs = s.devices.filter((d) => d.sel);
   const w = s.swdl;
+  const fwInput = useRef(null);
+  // the file's own bytes, like the EDS upload and for a harder reason: a
+  // firmware image is binary, and readAsText would hand over whatever a
+  // UTF-8 decoder made of the bytes it did not recognise
+  const sendFw = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => send('fw_upload',
+      { filename: file.name, content: String(reader.result).split(',')[1] || '' });
+    reader.readAsDataURL(file);
+  };
   if (s.adapter !== 'demo' && !w.vendor) {
     return html`
     <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;align-content:start">
@@ -1917,6 +1937,10 @@ function SwdlPage({ s }) {
   }
   const errs = w.err || {};
   const phases = w.phase || {};
+  // the selection is a file name; what to call it is the entry's own word
+  // for itself, so a row does not read "v acme_1.2.3.fwpkg"
+  const selEntry = w.fw.find((f) => f.file === w.sel);
+  const selLabel = (selEntry && selEntry.ver) || w.sel;
   const failed = selDevs.filter((d) => errs[String(d.node)]).length;
   const ready = selDevs.filter((d) => !errs[String(d.node)] && (w.prog[String(d.node)] || 0) >= 100).length;
   const counts = `${ready}/${selDevs.length} done${failed ? ` · ${failed} failed` : ''}`;
@@ -1924,26 +1948,46 @@ function SwdlPage({ s }) {
   const status = w.done && !failed ? 'all targets verified ✓'
     : w.done ? `finished with errors — ${counts}`
     : w.run || failed ? counts
-    : `${selDevs.length} target(s) · v${w.sel}`;
+    : `${selDevs.length} target(s) · v${selLabel}`;
   return html`
   <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-content:start;min-height:0">
     <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
       <div style="font-weight:600;font-size:13px">Firmware library</div>
-      <div class="hv-drop" style="border:1.5px dashed var(--inp);border-radius:8px;padding:18px;text-align:center;color:var(--faint);font-size:12px">Drop firmware file (.bin / .hex) here to add a version</div>
+      <!-- the input stays beside the zone, not inside it: a click on the
+           input bubbles back to whatever contains it, and a drop zone that
+           opens the file picker would then reopen it from its own click -->
+      <input ref=${fwInput} type="file" style="display:none"
+        onChange=${(e) => { sendFw(e.target.files[0]); e.target.value = ''; }} />
+      <div class="hv-drop" onClick=${() => fwInput.current && fwInput.current.click()}
+        onDragOver=${(e) => e.preventDefault()}
+        onDrop=${(e) => { e.preventDefault(); sendFw(e.dataTransfer.files[0]); }}
+        style="border:1.5px dashed var(--inp);border-radius:8px;padding:18px;text-align:center;color:var(--faint);font-size:12px;cursor:pointer">
+        Drop a firmware file here, or click to choose — it is copied into the folder below
+      </div>
       <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
         ${w.fw.map((f) => {
-          const on = w.sel === f.ver;
+          const on = w.sel === f.file;
+          // a file no installed extension recognises is listed, because a
+          // file that is in the folder and not on the page asks a question
+          // about three things at once — but it cannot be picked: what the
+          // bench would do with those bytes is nobody's to say
+          const unknown = f.known === false;
           return html`
-          <div class="hv" onClick=${() => send('swdl_fw', { ver: f.ver })}
-            style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--bd2);background:${on ? 'var(--sel)' : 'transparent'};cursor:pointer">
-            <span style="width:12px;height:12px;border-radius:50%;border:1.5px solid ${on ? 'var(--acc)' : 'var(--inp)'};display:grid;place-items:center;flex:none"><span style="width:6px;height:6px;border-radius:50%;background:${on ? 'var(--acc)' : 'transparent'}"></span></span>
-            <span style="font:11.5px ${MONO};flex:1;color:var(--tx)">${f.file}</span>
-            <span style="font:600 10.5px ${MONO};color:${f.tag === 'latest' ? 'var(--grn)' : 'var(--dim)'};background:${f.tag === 'latest' ? 'var(--grn-soft)' : 'var(--chip)'};padding:1px 7px;border-radius:4px">${f.tag}</span>
+          <div class=${unknown ? '' : 'hv'} onClick=${unknown ? null : () => send('swdl_fw', { file: f.file })}
+            title=${unknown ? 'no installed extension knows this format' : f.file}
+            style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--bd2);background:${on ? 'var(--sel)' : 'transparent'};cursor:${unknown ? 'not-allowed' : 'pointer'}">
+            <span style="width:12px;height:12px;border-radius:50%;border:1.5px solid ${on ? 'var(--acc)' : 'var(--inp)'};display:grid;place-items:center;flex:none;opacity:${unknown ? '.4' : '1'}"><span style="width:6px;height:6px;border-radius:50%;background:${on ? 'var(--acc)' : 'transparent'}"></span></span>
+            <span style="font:11.5px ${MONO};flex:1;color:${unknown ? 'var(--faint)' : 'var(--tx)'}">${f.ver || f.file}</span>
+            ${f.tag && html`<span style="font:600 10.5px ${MONO};color:${f.tag === 'latest' ? 'var(--grn)' : 'var(--dim)'};background:${f.tag === 'latest' ? 'var(--grn-soft)' : 'var(--chip)'};padding:1px 7px;border-radius:4px">${f.tag}</span>`}
             <span style="font:10.5px ${MONO};color:var(--faint)">${f.meta}</span>
           </div>`;
         })}
+        ${!w.fw.length && html`<div style="padding:14px;text-align:center;color:var(--faint);font-size:12px">No firmware files in the folder.</div>`}
       </div>
-      <div style="font-size:10.5px;color:var(--faint)">Versions are managed by the tool — checksum, device type and version are read from the file header.</div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span style="font-size:10.5px;color:var(--faint)">The files in this folder — what each one is comes from the extension that knows the format.</span>
+        <span style="font:10.5px ${MONO};color:var(--faint)">${w.folder}</span>
+      </div>
     </div>
 
     <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
@@ -1961,7 +2005,7 @@ function SwdlPage({ s }) {
             <div style="display:flex;align-items:center;gap:10px">
               <span style="font:600 12px ${MONO};color:var(--acc)">${String(d.node).padStart(2, '0')}</span>
               <span style="font-weight:600;flex:1">${d.name}</span>
-              <span style="font:11px ${MONO};color:var(--faint)">v${d.fw} → v${w.sel}</span>
+              <span style="font:11px ${MONO};color:var(--faint)">v${d.fw} → v${selLabel}</span>
               <span style="font-weight:600;font-size:11px;color:${err ? 'var(--red)' : done ? 'var(--grn)' : p > 0 ? 'var(--acc)' : 'var(--faint)'}">${err ? 'FAILED' : done ? 'DONE ✓' : p > 0 ? p + '%' : w.run ? 'queued' : 'ready'}</span>
             </div>
             <div style="height:5px;border-radius:3px;background:var(--bd);overflow:hidden;margin-top:7px"><span style="display:block;width:${p}%;height:100%;background:${err ? 'var(--red)' : done ? 'var(--grn)' : 'var(--acc)'};transition:width .4s"></span></div>

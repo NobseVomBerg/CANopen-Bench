@@ -48,13 +48,14 @@ SEED_REPORTS = [
     {"name": "run_0713_0910.html", "score": "28/28", "ok": True},
 ]
 
-# Firmware library: version, file, tag, meta. Neutral demo entries only —
-# demo DUTs report fw 1.0.0-demo, so 1.1.0 gives the simulated SWDL an
-# upgrade story; real vendor firmware catalogs come from plugins
-# (BenchPlugin.firmware) and are listed first.
+# Firmware library: version, tag, meta. Neutral demo entries only — demo
+# DUTs report fw 1.0.0-demo, so 1.1.0 gives the simulated SWDL an upgrade
+# story. There is no file behind these (the real library is the firmware
+# folder, Bench._fw_files), so they answer to their version: the core
+# gives them file = ver, which is the one name the page selects by.
 FIRMWARE = [
-    {"ver": "1.1.0", "file": "demo_device_v1.1.0.bin", "tag": "latest", "meta": "180 KB · 2026-07-01"},
-    {"ver": "1.0.0", "file": "demo_device_v1.0.0.bin", "tag": "released", "meta": "178 KB · 2026-05-12"},
+    {"ver": "1.1.0", "tag": "latest", "meta": "180 KB · 2026-07-01"},
+    {"ver": "1.0.0", "tag": "released", "meta": "178 KB · 2026-05-12"},
 ]
 
 # CiA-301 EMCY error codes: exact codes plus 0xXX00/0xX000 class entries
