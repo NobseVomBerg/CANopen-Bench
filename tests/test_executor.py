@@ -344,6 +344,62 @@ def test_wait_for_list_form_on_timeout_fires_when_neither_cob_matches(tc_bench):
     assert tc_bench.results == {"0014": "PASS"}
 
 
+# -- a wait that times out has to say what the bus did carry ---------------
+
+WAIT_FOR_PREFIX_TC = """\
+id: "0016"
+name: "the frame arrives, one byte of it is not the one waited for"
+steps:
+  - wait_for: {cob: "0x181", data: "00 32 04 00 0B", timeout: 0.3}
+  - end:
+"""
+
+
+def _tpdo1(bench: Bench) -> None:
+    """The TPDO1 the device really sends — last byte 0C, not the 0B waited
+    for. Every other byte agrees."""
+    bench.bus.queue_raw(0x181, bytes.fromhex("003204000C"))
+
+
+def test_a_wait_that_times_out_names_the_frame_that_did_arrive(tc_bench):
+    """"timeout after 0.3s" about a COB-ID reads as "nothing came", and
+    that is what it was taken for: a report said `wait_for 0x181 — timeout`
+    four times over while the trace, open in the next tab, showed frames on
+    0x181 throughout. A wait is on a COB-ID *and* a payload prefix, and the
+    line named only the first half — so the half that actually failed, one
+    byte in five, was the half nobody could see.
+
+    Both halves are in the line now: what was waited for, and what the bus
+    carried on that COB-ID inside the same window the match looked at.
+    """
+    _add_tc(tc_bench, "TC0016_wait_prefix.yaml", WAIT_FOR_PREFIX_TC)
+    run_selected(tc_bench, {"0016"}, during=_once(_tpdo1))
+    assert tc_bench.results == {"0016": "FAIL"}
+    said = " ".join(ln["msg"] for ln in tc_bench.logs)
+    assert "00 32 04 00 0B" in said, f"what it waited for is missing: {said}"
+    assert "saw 0x181 00 32 04 00 0C" in said, f"what arrived is missing: {said}"
+
+
+def test_a_wait_on_a_silent_cob_id_still_says_so(tc_bench):
+    """The other half of the same line: nothing arrived, and it says that
+    rather than listing an empty "saw"."""
+    _add_tc(tc_bench, "TC0016_wait_prefix.yaml",
+            WAIT_FOR_PREFIX_TC.replace('"0x181"', '"0x182"'))
+    run_selected(tc_bench, {"0016"}, during=_once(_tpdo1))
+    assert tc_bench.results == {"0016": "FAIL"}
+    said = " ".join(ln["msg"] for ln in tc_bench.logs)
+    assert "nothing arrived on it at all" in said, said
+
+
+def test_the_step_line_shows_the_payload_it_waits_for(tc_bench):
+    """The report's own line, not just the failure: a step that waits on a
+    prefix has to show it, or the reader is comparing the trace against a
+    condition the page does not state."""
+    assert _step_text("wait_for", {"cob": "R14", "data": "00 32 04 00 0B"}) \
+        == "wait for frame R14 = 00 32 04 00 0B"
+    assert _step_text("wait_for", {"cob": "0x181"}) == "wait for frame 0x181"
+
+
 # -- sdo_write expect_abort: mirrors sdo_read's expect_abort handling --
 
 SDO_WRITE_EXPECT_ABORT_MATCH_TC = """\
