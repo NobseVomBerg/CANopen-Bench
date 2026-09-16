@@ -517,8 +517,17 @@ def _step_text(key: str, val) -> str:
         return f"wait {secs:g}s" if isinstance(secs, (int, float)) else f"wait {secs}s"
     if key == "wait_for":
         if "cob" in val:
+            # the payload prefix belongs in the line, not only in the YAML:
+            # a wait is on a COB-ID *and* on what the frame says, and a
+            # report that names only the COB-ID describes a step failing
+            # over a byte it never mentions
             cobs = val["cob"] if isinstance(val["cob"], list) else [val["cob"]]
-            return f"wait for frame {' or '.join(str(c) for c in cobs)}"
+            data = val.get("data")
+            datas = data if isinstance(data, list) else [data] * len(cobs)
+            parts = [f"{c} = {d}" if d else str(c)
+                     for c, d in zip(cobs, datas)] if len(datas) == len(cobs) \
+                else [str(c) for c in cobs]
+            return f"wait for frame {' or '.join(parts)}"
         return f"wait for heartbeat {val['heartbeat']}"
     if key == "can_send":
         return f"send frame {val['cob']}"
@@ -5654,8 +5663,18 @@ class Bench:
                     await asyncio.sleep(min(0.01, left))
                 if on_timeout:
                     return "jump", on_timeout
-                cobs_str = " / ".join(f"0x{c:03X}" for c, _ in pairs)
-                return "fail", f"wait_for {cobs_str} — timeout after {timeout:g}s"
+                # What was waited for *and* what the bus carried. A wait is
+                # on a COB-ID and a payload prefix, and naming only the
+                # first turns "the last byte differs" into a line that
+                # reads as "the frame never came" — about frames sitting in
+                # the trace, in the window, on that very COB-ID.
+                want = " / ".join(f"0x{c:03X}" + (f" {_frame_text(p)}" if p else "")
+                                  for c, p in pairs)
+                seen = self._traced_seen({c for c, _ in pairs},
+                                         FRAME_LOOKBACK_S + (loop.time() - started))
+                note = ("; saw " + ", ".join(f"0x{c:03X} {seen[c]}" for c in seen)
+                        if seen else "; nothing arrived on it at all")
+                return "fail", f"wait_for {want} — timeout after {timeout:g}s{note}"
             target = val["heartbeat"]
             n = _resolve(val["node"], regs, builtins) if "node" in val else node
             while loop.time() < deadline:
@@ -5985,6 +6004,40 @@ class Bench:
                 if row.get("cls") == "PDO":
                     answered.add(cob)
         return None
+
+    def _traced_seen(self, cobs: set[int], max_age: float) -> dict[int, str]:
+        """The newest frame each of `cobs` carried inside the window, as the
+        trace spells its data — for saying what did arrive when a wait times
+        out on what did not.
+
+        Same bounds and the same TX rule as `_match_traced`, because it
+        answers about the same window: a line reporting frames the match
+        never looked at would be worse than no line.
+        """
+        if self._sequence_started_at:
+            max_age = min(max_age, time.monotonic() - self._sequence_started_at)
+        now_tod = _tod_seconds(now_us_str()) or 0.0
+        seen: dict[int, str] = {}
+        for row in reversed(self.trace):
+            stamp = _tod_seconds(row["time"])
+            if stamp is None:
+                continue
+            age = now_tod - stamp
+            if age < 0.0:
+                age += 86400.0      # the record crossed midnight
+            if age > max_age:
+                break
+            if row["dir"] != "RX":
+                continue
+            try:
+                cob = int(row["cob"], 16)
+            except ValueError:
+                continue
+            if cob in cobs and cob not in seen:
+                seen[cob] = row["data"]
+                if len(seen) == len(cobs):
+                    break
+        return seen
 
     def _trace_view(self) -> tuple[list[dict], dict]:
         """The (rows, counts) the trace panel shows: an opened capture file
