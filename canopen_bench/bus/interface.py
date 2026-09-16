@@ -105,10 +105,41 @@ class BusInterface(ABC):
         """command: start | preop | stop | reset | resetcomm; node None = all."""
 
     @abstractmethod
-    def sdo_read(self, node: int, index: str, sub: str) -> SdoResult: ...
+    def sdo_read(self, node: int, index: str, sub: str,
+                 timeout: float | None = None) -> SdoResult:
+        """``timeout`` is how long this one transfer may wait for the
+        answer, in seconds; None leaves the backend's default alone. Per
+        call, because the waiting time belongs to the operation and not to
+        the bus: a flash erase answers after seconds, while an ordinary
+        read that takes that long is a fault."""
 
     @abstractmethod
-    def sdo_write(self, node: int, index: str, sub: str, value: str) -> SdoResult: ...
+    def sdo_write(self, node: int, index: str, sub: str, value: str,
+                  timeout: float | None = None) -> SdoResult:
+        """``timeout``: see ``sdo_read``."""
+
+    def sdo_download(self, node: int, index: str, sub: str, data: bytes,
+                     progress: Callable[[int, int], bool] | None = None,
+                     timeout: float | None = None) -> SdoResult:
+        """Write a block of bytes to one object — segmented CiA-301 domain
+        download, the way a firmware image reaches a bootloader. Default:
+        not supported.
+
+        Never block transfer. A server may refuse it (the bench has seen
+        one answer the block-initiate with an abort), and there is no
+        falling back to segmented from inside the library call — the
+        transfer is over by then.
+
+        ``progress(sent, total) -> bool`` is called after every chunk;
+        returning False cancels the download, which comes back as
+        ``SdoResult(ok=False, abort="cancelled")``.
+
+        The bytes go on the wire in the order they are given. That is the
+        reason this exists next to ``sdo_write``, which takes a hex
+        *string*: ``_hex_to_bytes`` reads it as one little-endian integer,
+        and a sequence of bytes comes out of that reversed.
+        """
+        return SdoResult(ok=False, abort="not supported")
 
     @abstractmethod
     def poll_frames(self, max_frames: int = 8) -> list[Frame]:

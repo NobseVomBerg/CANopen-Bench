@@ -49,7 +49,8 @@ only what you provide.
 | `adapters()` | `list[dict]` | Extra adapter cards on the Setup page (listed before the built-ins) |
 | `adapter_backends()` | `dict` | Adapter key → (python-can interface, default channel) for those cards; the python-can driver itself ships via python-can's own `can.interface` group |
 | `seed_eds()` | `list[dict]` | EDS registry rows seeded once into an empty workspace; a row may bring its `commands` and its `variant` (`{index, sub, map?}` — where this family keeps its variant number) instead of the operator configuring both by hand |
-| `firmware()` | `list[dict]` | Firmware library entries for the SWDL page |
+| `firmware()` | `list[dict]` | Firmware library entries for the SWDL page that have no file of their own — a fixed list, shown beside the folder |
+| `describe_firmware(path)` | `dict \| None` | What one file in the firmware folder is: `{ver, tag?, meta?}` for a file of this vendor's format, `None` for anything else. The core lists the folder and knows no format; first plugin with an answer wins, and a file nobody claims is listed as unknown and cannot be selected |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir, never overwriting local edits. A fresh workspace picks one of these as its addressing procedure over the standard-LSS flow the core ships — by where the file came from, not by what it is called, since how a device family is addressed is that family's business. A flow that declares a `button:` is a procedure somebody presses instead ([the format](ablaeufe/testfall-format.md)) |
 | `symbol_dirs()` | `list[Path]` | Directories with the device's C headers, parsed into symbol tables. Copied into the workspace on every start, over whatever is there: a header belongs to its plugin the way its panels do, and the plugin is where an edit to one belongs. A header no plugin ships — the firmware actually under test, under a name of its own — is left where it was put |
 | `eds_dirs()` | `list[Path]` | Directories with the family's own EDS files, copied into the workspace EDS folder like flows and headers. `seed_eds()` registers the rows; this brings the files those rows name |
@@ -67,7 +68,7 @@ only what you provide.
 | `emcy_mec_text(mec)` | `str` | What the device calls the manufacturer error code — the number in the five manufacturer bytes of an EMCY, which the standard leaves entirely to the device. The bench reads the frame, this names what it found. `""` for a code the plugin does not know; first plugin with an answer wins |
 | `actions(bench)` | `dict[str, callable]` | Extra API actions, dispatched as `<plugin>.<action>` — collision-free with core actions |
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
-| `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation; first plugin wins |
+| `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation — the transfer itself, the phase and the failure it reports per node, and what Stop does; first plugin wins |
 
 A plugin's action is dispatched on the event loop with the browser
 waiting for it to return, so anything that has to wait for the device
@@ -232,6 +233,54 @@ brings it back when the device is selected again. A value written into
 the table directly lasts until the next device switch and no longer;
 that is how a display panel's whole reading used to vanish.
 
+### Firmware download
+
+A real download takes minutes, and a `SwdlStrategy` runs where the UI
+does. So `start()` hands the work to `bench.spawn(coro)` and returns,
+and `step()` — called every tick while `bench.swdl_run` — stays cheap
+and only watches. A strategy that flashes inside `step()` stops the tick
+loop, and with it the trace, the heartbeat watch and the page that was
+meant to show the progress.
+
+The page draws three things per node, all written by the strategy:
+`bench.swdl_prog[node]` (0..100), `bench.swdl_phase[node]` — the phase
+in words, "erasing", "flashing", "verifying" — and `bench.swdl_err[node]`,
+which turns that node's row red and prints the reason. `swdl_done` means
+the run is over, not that it went well; the errors say which nodes it
+went badly for. **Stop** dispatches `swdl_stop`, which reaches
+`SwdlStrategy.stop(bench)`: cooperative, so a transfer in flight finishes
+its segment and the strategy leaves the device somewhere it can describe
+— and gives whoever is left unfinished an `swdl_err`.
+
+The bytes come out of a folder. The SWDL page lists
+`paths["fw"]` — configurable on the Setup page, by default
+`<workspace>/firmware`, and in practice often the build output of the
+firmware project — and asks every plugin what each file in it is
+(**`describe_firmware(path)`**). Return `{ver, tag?, meta?}` for a file
+of your format and `None` for everything else; the first plugin with an
+answer describes the file, and one nobody claims is listed greyed out
+and cannot be selected. The answer is cached until that file changes on
+disk, so reading the file here — a header, a magic number, a length — is
+what the hook is for. The drop zone on the page writes into the same
+folder, under the name the file was dropped with, and selects it if
+something knows it.
+
+What the operator picked is then **`bench.fw_path()`**: the selected
+file, or `None` when the selection is one of the entries `firmware()`
+lists, which have no file behind them. A strategy reads the bytes there
+and parses them itself — the format is the vendor's, and the core never
+looks inside.
+
+The image goes down through **`bus.sdo_download(node, index, sub, data,
+progress=..., timeout=...)`** — a segmented CiA-301 domain download that
+puts the bytes on the wire in the order they are given. `sdo_write` will
+not do: it takes a hex *string* and reads it as one little-endian number,
+which arrives at the device backwards. `progress(sent, total)` is called
+after every chunk and returning False cancels the transfer, which is how
+a strategy's `stop()` reaches the bytes; `timeout` lends this one
+transfer a longer response timeout, for the steps that answer in seconds
+rather than milliseconds (an erase).
+
 ## Minimal example
 
 A plugin that adds one trace decoder and one custom step type:
@@ -278,7 +327,13 @@ active in the trace, and flows can use `- acme.blink: {times: 3}`.
 ## Testing without hardware
 
 Pair your protocol code with a `DemoHook` that simulates the device
-side on the demo bus (`on_raw_frame`, `press_button`). For a public,
+side on the demo bus: `on_raw_frame` and `press_button` for the raw
+telegrams, `on_sdo_read`, `on_sdo_write` and `on_sdo_download` for a
+protocol that speaks SDO. Those three are asked before the EDS store is
+and answer `None` for anything that is not theirs, so a hook can serve
+objects no EDS describes — a bootloader's do not exist until it is
+running — and leave every other object to the demo device. With one of
+those a firmware download runs end to end without hardware. For a public,
 worked example of a plugin package — python-can driver plus adapter
 card, entry points, tests — see
 [`plugins/cob-cpcusb/`](../plugins/cob-cpcusb/) (MIT) in this

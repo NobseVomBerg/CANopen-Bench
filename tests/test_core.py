@@ -1207,10 +1207,30 @@ def test_eds_toggle_and_code(bench):
     assert reloaded["dut_beta_v7.eds"]["code"] == "X24"
 
 
+def test_the_swdl_library_is_a_folder_of_files_something_knows(connected_bench):
+    """Every row on the page answers to a file name, whether there is a
+    file behind it or not, and the page is told which folder it is
+    looking at — a listing that is empty because nobody built anything
+    yet looks exactly like one pointed at the wrong place."""
+    bench = connected_bench
+    (Path(bench.paths["fw"])).mkdir(parents=True, exist_ok=True)
+    (Path(bench.paths["fw"]) / "dut_alpha_1.4.0.fwpkg").write_bytes(b"ACME")
+
+    w = bench.snapshot()["swdl"]
+
+    assert w["folder"] == bench.paths["fw"]
+    assert [f["file"] for f in w["fw"]] == ["dut_alpha_1.4.0.fwpkg", "1.1.0", "1.0.0"]
+    # nothing here knows a firmware format — the core never claims to
+    assert [f["known"] for f in w["fw"]] == [False, True, True]
+    assert w["fw"][0]["meta"] == "no installed extension knows this format"
+    assert w["sel"] in {f["file"] for f in w["fw"] if f["known"]}
+
+
 def test_swdl_serial_updates_firmware(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("swdl_fw", {"ver": "1.0.0"})
+    bench.dispatch("swdl_fw", {"file": "1.0.0"})  # a demo entry: no file behind it
+    assert bench.fw_path() is None
     bench.dispatch("swdl_start", {})
     for _ in range(200):
         if not bench.swdl_run:
@@ -1219,6 +1239,38 @@ def test_swdl_serial_updates_firmware(connected_bench):
     assert bench.swdl_done
     assert bench.devices[0]["fw"] == "1.0.0"
     assert bench.devices[1]["fw"] == "1.0.0-demo"  # not selected, untouched
+
+
+def test_the_simulation_says_what_a_node_is_busy_with(connected_bench):
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("swdl_start", {})
+    bench._swdl.step(bench)
+    assert bench.swdl_phase[1] == "simulating"
+
+    for _ in range(200):
+        if not bench.swdl_run:
+            break
+        bench._swdl.step(bench)
+    assert bench.swdl_phase[1] == "done"
+
+
+def test_a_stopped_download_says_who_did_not_make_it(connected_bench):
+    """Stop ends the run where it stands. A node left half-flashed is not
+    a node at 60 %, it is one nobody finished — and the page has to say
+    which, or the next operator reads the bar as progress that stalled."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("dev_toggle", {"node": 2})
+    bench.dispatch("swdl_start", {})
+    bench._swdl.step(bench)  # node 1 gets going, node 2 is still queued (SDO serial)
+
+    bench.dispatch("swdl_stop", {})
+
+    assert bench.swdl_run is False
+    assert bench.swdl_err == {1: "stopped by operator", 2: "stopped by operator"}
+    assert bench.snapshot()["swdl"]["err"]["1"] == "stopped by operator"
+    assert "SWDL stopped" in bench.logs[-1]["msg"]
 
 
 def test_add_eds_file_parses_real_eds(bench):

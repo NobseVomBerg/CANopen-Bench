@@ -17,6 +17,7 @@ import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
 import canopen_bench.testcases as tclib
+from canopen_bench.bus.interface import SdoResult
 from canopen_bench.core import Bench, _resolve
 from canopen_bench.db import Db
 from canopen_bench.plugin import (
@@ -53,7 +54,7 @@ class FakePlugin(BenchPlugin):
                  "code": "FAK", "enabled": True}]
 
     def firmware(self) -> list[dict]:
-        return [{"ver": "9.9.9", "file": "fake_v9.9.9.bin", "tag": "latest", "meta": "1 KB"}]
+        return [{"ver": "9.9.9", "tag": "latest", "meta": "1 KB"}]
 
     def flow_dirs(self) -> list[Path]:
         return [self._flow_dir] if self._flow_dir else []
@@ -173,9 +174,15 @@ def test_plugin_flow_seeded_and_not_overwritten(tmp_path):
 
 
 def test_firmware_aggregation(tmp_path):
+    """A plugin's own entries have no file behind them, so they answer to
+    their version — one name for every row on the page, whether it came
+    from the folder, from a plugin or from the demo catalog."""
     bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
-    assert bench.fw_list[0]["ver"] == "9.9.9"
+    listed = bench.snapshot()["swdl"]["fw"]
+    assert listed[0] == {"ver": "9.9.9", "file": "9.9.9", "tag": "latest",
+                         "meta": "1 KB", "known": True}
     assert bench.fw_sel == "9.9.9"
+    assert [f["file"] for f in listed[1:]] == ["1.1.0", "1.0.0"]  # demo catalog
 
     neutral = Bench(Db(tmp_path / "y.db"), plugins=[])
     assert neutral.fw_sel == "1.1.0"
@@ -253,6 +260,118 @@ def test_demo_hook_press_button_is_reached_from_bench(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[plugin])
     bench._demo_bus.press_button()
     assert hook.pressed is True
+
+
+class _SdoDemoHook(DemoHook):
+    """The shape a bootloader takes on the demo bus: one object that no
+    EDS describes, answered by the hook while it is running. Everything
+    else is None — not this hook's object, not this hook's business."""
+
+    name = "fake-sdo-hook"
+    OWN = "0x5F00"
+
+    def __init__(self):
+        self.read = []
+        self.written = []
+        self.downloaded = b""
+
+    def on_sdo_read(self, bus, node, index, sub):
+        if index != self.OWN:
+            return None
+        self.read.append((node, sub))
+        return SdoResult(ok=True, value="0x2A")
+
+    def on_sdo_write(self, bus, node, index, sub, value):
+        if index != self.OWN:
+            return None
+        self.written.append((node, sub, value))
+        return SdoResult(ok=True, value=value)
+
+    def on_sdo_download(self, bus, node, index, sub, data):
+        if index != self.OWN:
+            return None
+        self.downloaded = data
+        return SdoResult(ok=True, value=str(len(data)))
+
+
+def _hooked_demo_bench(tmp_path, hook):
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_ExtPlugin("fake", hook=hook)])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    return bench
+
+
+def test_a_demo_hook_answers_the_sdo_objects_it_owns(tmp_path):
+    """An object the hook owns exists nowhere in the EDS — without the
+    hook every one of these three would abort."""
+    hook = _SdoDemoHook()
+    bench = _hooked_demo_bench(tmp_path, hook)
+
+    assert bench.bus.sdo_read(1, hook.OWN, "02").value == "0x2A"
+    assert bench.bus.sdo_write(1, hook.OWN, "02", "0x03").ok
+    res = bench.bus.sdo_download(1, hook.OWN, "02", b"firmware")
+
+    assert hook.read == [(1, "02")]
+    assert hook.written == [(1, "02", "0x03")]
+    assert hook.downloaded == b"firmware"
+    assert (res.ok, res.value) == (True, "8")
+
+
+def test_a_demo_hook_is_asked_before_the_eds_store(tmp_path):
+    """The hook wins over an object the EDS does describe: a device in its
+    bootloader answers for itself, whatever the file says it is."""
+    class _Overriding(_SdoDemoHook):
+        OWN = "0x2000"  # the seed EDS's writable counter, default 42
+
+    hook = _Overriding()
+    bench = _hooked_demo_bench(tmp_path, hook)
+
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x2A"
+
+
+def test_a_hook_that_answers_none_leaves_the_eds_answering(tmp_path):
+    hook = _SdoDemoHook()
+    bench = _hooked_demo_bench(tmp_path, hook)
+
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x0000002A"  # EDS default 42
+    assert bench.bus.sdo_write(1, "0x2000", "00", "0x63").ok
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x63"
+    assert hook.read == [] and hook.written == []
+
+
+def test_a_domain_download_nobody_hooks_is_taken_but_stored_nowhere(tmp_path):
+    """The EDS says the object is there and writable, which is as far as
+    the demo bus can honestly go — a domain has no single value to read
+    back afterwards."""
+    bench = _hooked_demo_bench(tmp_path, _SdoDemoHook())
+
+    res = bench.bus.sdo_download(1, "0x2000", "00", b"\x01\x02\x03\x04\x05")
+
+    assert (res.ok, res.value) == (True, "5")
+    assert bench.bus.sdo_read(1, "0x2000", "00").value == "0x0000002A"  # untouched
+
+
+def test_a_domain_download_refuses_like_a_write_does(tmp_path):
+    bench = _hooked_demo_bench(tmp_path, _SdoDemoHook())
+
+    missing = bench.bus.sdo_download(1, "0x7777", "00", b"x")
+    read_only = bench.bus.sdo_download(1, "0x1000", "00", b"x")
+
+    assert missing.abort.startswith("0x0602")
+    assert read_only.abort.startswith("0x0601")
+
+
+def test_a_domain_download_reaches_the_trace(tmp_path):
+    """Like every other transfer on this bus: the row is what says the
+    image went out, and where."""
+    bench = _hooked_demo_bench(tmp_path, _SdoDemoHook())
+    bench.bus.poll_frames(64)  # drop the scan's own traffic
+
+    bench.bus.sdo_download(1, "0x2000", "00", bytes(range(16)))
+    frames = bench.bus.poll_frames(64)
+
+    request = next(f for f in frames if f.cob_id == "0x601")
+    assert request.data.startswith("23 00 20 00 00 01 02 03")  # first bytes, in order
 
 
 def test_first_plugins_addressing_provider_wins(tmp_path):
@@ -474,6 +593,7 @@ class _RecordingSwdlStrategy(SwdlStrategy):
     def __init__(self):
         self.started = False
         self.step_calls = 0
+        self.stopped = False
 
     def start(self, bench) -> None:
         self.started = True
@@ -484,6 +604,9 @@ class _RecordingSwdlStrategy(SwdlStrategy):
         self.step_calls += 1
         bench.swdl_run = False
         bench.swdl_done = True
+
+    def stop(self, bench) -> None:
+        self.stopped = True
 
 
 class _SwdlPlugin(BenchPlugin):
@@ -518,6 +641,40 @@ def test_plugin_swdl_strategy_selected_and_act_swdl_start_guards_still_hold(tmp_
     assert bench.swdl_done is True
 
 
+def test_swdl_stop_reaches_the_strategy_only_while_it_runs(tmp_path):
+    """Stop is cooperative — the bench asks the strategy and nothing else.
+    A press with no download running asks nobody: there is no state on the
+    bench to tidy up, and a strategy would be told to abandon a transfer
+    it never started."""
+    strategy = _RecordingSwdlStrategy()
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_SwdlPlugin("fake", strategy)])
+    write_seed_eds_files(bench)
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+
+    bench.dispatch("swdl_stop", {})
+    assert strategy.stopped is False
+
+    bench.dispatch("swdl_start", {})
+    bench.dispatch("swdl_stop", {})
+    assert strategy.stopped is True
+
+
+def test_the_swdl_snapshot_carries_phase_and_failure_per_node(tmp_path):
+    """Both are the strategy's to write and the page's to draw, keyed by
+    node like the progress beside them."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_SwdlPlugin("fake", _RecordingSwdlStrategy())])
+    bench.swdl_prog = {2: 40, 3: 12}
+    bench.swdl_phase = {2: "flashing", 3: "erasing"}
+    bench.swdl_err = {3: "no answer after the erase"}
+
+    w = bench.snapshot()["swdl"]
+
+    assert w["prog"] == {"2": 40, "3": 12}
+    assert w["phase"] == {"2": "flashing", "3": "erasing"}
+    assert w["err"] == {"3": "no answer after the erase"}
+
+
 def test_first_plugins_swdl_strategy_wins(tmp_path):
     first = _RecordingSwdlStrategy()
     second = _RecordingSwdlStrategy()
@@ -525,6 +682,281 @@ def test_first_plugins_swdl_strategy_wins(tmp_path):
     p2 = _SwdlPlugin("p2", second)
     bench = Bench(Db(tmp_path / "x.db"), plugins=[p1, p2])
     assert bench._swdl is first
+
+
+# -- the firmware folder, described by plugins (Bench._fw_files/_fw_catalog) --
+
+class _FwPlugin(BenchPlugin):
+    """An extension that knows one firmware format: a ``.fwpkg`` file
+    starting with four magic bytes. Anything else in the folder belongs
+    to somebody else — a note, a map file, another vendor's image — and
+    is answered with None, which is what makes the file unknown rather
+    than this plugin's."""
+
+    MAGIC = b"ACME"
+
+    def __init__(self, name: str = "acme", tag: str = "latest"):
+        self.name = name
+        self._tag = tag
+        self.asked: list[str] = []
+
+    def describe_firmware(self, path: Path) -> dict | None:
+        self.asked.append(path.name)
+        if path.suffix != ".fwpkg" or path.read_bytes()[:4] != self.MAGIC:
+            return None
+        return {"ver": path.stem, "tag": self._tag,
+                "meta": f"{path.stat().st_size} bytes · {self.name}"}
+
+
+class _AngryFwPlugin(BenchPlugin):
+    """The file was not what it expected, and it says so by raising."""
+
+    name = "angry"
+
+    def __init__(self):
+        self.asked = 0
+
+    def describe_firmware(self, path: Path) -> dict | None:
+        self.asked += 1
+        raise ValueError("that is not a header")
+
+
+def _fw_bench(tmp_path, plugins, files: dict[str, bytes] | None = None):
+    """A bench whose firmware folder is a folder of this test's own —
+    configured the way the setup page configures it."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=plugins)
+    folder = tmp_path / "build_output"
+    folder.mkdir(exist_ok=True)
+    for name, content in (files or {}).items():
+        (folder / name).write_bytes(content)
+    bench.dispatch("set_path", {"which": "fw", "value": str(folder)})
+    return bench, folder
+
+
+def _fw_row(bench, file: str) -> dict:
+    return next(f for f in bench.snapshot()["swdl"]["fw"] if f["file"] == file)
+
+
+def test_a_plugin_says_what_the_files_in_the_firmware_folder_are(tmp_path):
+    """The core lists the folder and reads nothing: what a file is comes
+    from whoever knows the format. A file nobody knows is listed too —
+    and says why it cannot be used."""
+    plugin = _FwPlugin()
+    bench, _ = _fw_bench(tmp_path, [plugin], {
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x01" * 60,
+        "notes.txt": b"flash this one next",
+    })
+
+    files = bench._fw_files()
+
+    assert [f["file"] for f in files] == ["dut_alpha_1.4.0.fwpkg", "notes.txt"]
+    assert files[0] == {"file": "dut_alpha_1.4.0.fwpkg", "ver": "dut_alpha_1.4.0",
+                        "tag": "latest", "meta": "64 bytes · acme", "known": True}
+    assert files[1] == {"file": "notes.txt", "ver": "", "tag": "", "known": False,
+                        "meta": "no installed extension knows this format"}
+
+
+def test_the_firmware_folder_is_read_again_only_when_it_changed(tmp_path):
+    """A build writes into this folder while the page is open, so the
+    listing has to follow it — but the snapshot asks ten times a second,
+    and reading every image in a build directory that often is a cost
+    nobody would find afterwards."""
+    plugin = _FwPlugin()
+    bench, folder = _fw_bench(tmp_path, [plugin],
+                              {"dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8})
+
+    bench.snapshot()
+    bench.snapshot()
+    assert plugin.asked == ["dut_alpha_1.4.0.fwpkg"], "described once, then cached"
+
+    (folder / "dut_alpha_1.5.0.fwpkg").write_bytes(b"ACME" + b"\x00" * 16)
+    assert [f["file"] for f in bench._fw_files()] == \
+        ["dut_alpha_1.4.0.fwpkg", "dut_alpha_1.5.0.fwpkg"]
+    assert plugin.asked == ["dut_alpha_1.4.0.fwpkg", "dut_alpha_1.5.0.fwpkg"]
+
+
+def test_a_firmware_folder_that_is_not_there_is_empty_and_not_an_error(tmp_path):
+    """The path was typed on another machine, or the build has not run
+    yet. Neither is a reason for the page not to come up."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_FwPlugin()])
+    bench.dispatch("set_path", {"which": "fw", "value": str(tmp_path / "nowhere")})
+
+    assert bench._fw_files() == []
+    assert bench.snapshot()["swdl"]["folder"] == str(tmp_path / "nowhere")
+
+
+def test_the_firmware_listing_leaves_hidden_files_alone(tmp_path):
+    """An editor's swap file and a half-finished copy are not firmware,
+    and the operator never put them there."""
+    bench, _ = _fw_bench(tmp_path, [_FwPlugin()], {
+        ".dut_alpha_1.4.0.fwpkg.part": b"ACME" + b"\x00" * 8,
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+    })
+
+    assert [f["file"] for f in bench._fw_files()] == ["dut_alpha_1.4.0.fwpkg"]
+
+
+def test_the_first_plugin_that_knows_a_firmware_file_describes_it(tmp_path):
+    first, second = _FwPlugin("acme", tag="latest"), _FwPlugin("beta", tag="old")
+    bench, _ = _fw_bench(tmp_path, [first, second],
+                         {"dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8})
+
+    row = _fw_row(bench, "dut_alpha_1.4.0.fwpkg")
+
+    assert row["tag"] == "latest" and row["meta"].endswith("acme")
+    assert second.asked == [], "the second plugin is not asked about a described file"
+
+
+def test_a_plugin_that_raises_over_a_firmware_file_is_asked_no_more(tmp_path):
+    """Same rule as a panel or a stats block: it is said once, and the
+    page comes up. A plugin that raises on one file raises on the next
+    one too, and a log filling with the same line is a log nobody reads."""
+    angry, good = _AngryFwPlugin(), _FwPlugin()
+    bench, _ = _fw_bench(tmp_path, [angry, good], {
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+        "dut_alpha_1.5.0.fwpkg": b"ACME" + b"\x00" * 8,
+    })
+
+    files = bench._fw_files()
+
+    assert [f["known"] for f in files] == [True, True], "the good plugin still answers"
+    assert angry.asked == 1, "asked about the first file, then never again"
+    assert sum("angry" in row["msg"] for row in bench.logs) == 1
+    assert bench.logs[-1]["type"] == "emcy0"
+
+
+def test_the_selection_falls_back_to_the_first_file_something_knows(tmp_path):
+    """A file nobody knows is not a default anybody wants to press Start
+    on, and neither is a file that has since been deleted. On a real
+    adapter the folder is the whole library, so there is nothing else to
+    fall back to."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()], {
+        "aaa_notes.txt": b"not firmware",
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+    })
+    bench.dispatch("set_adapter", {"adapter": "ixxat"})  # no demo catalog
+
+    assert bench.snapshot()["swdl"]["sel"] == "dut_alpha_1.4.0.fwpkg"
+
+    (folder / "dut_alpha_1.4.0.fwpkg").unlink()
+    snap = bench.snapshot()["swdl"]
+    assert snap["sel"] == "", "one unknown file is no selection at all"
+    assert [f["file"] for f in snap["fw"]] == ["aaa_notes.txt"]
+
+
+def test_a_firmware_file_nobody_knows_cannot_be_selected(tmp_path):
+    """The row is greyed out for the same reason the action refuses it:
+    what the bench would do with those bytes is nobody's to say."""
+    bench, _ = _fw_bench(tmp_path, [_FwPlugin()], {
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+        "notes.txt": b"not firmware",
+    })
+    bench.dispatch("swdl_fw", {"file": "dut_alpha_1.4.0.fwpkg"})
+
+    bench.dispatch("swdl_fw", {"file": "notes.txt"})
+
+    assert bench.fw_sel == "dut_alpha_1.4.0.fwpkg", "the selection is left alone"
+    assert "no installed extension knows this format" in bench.logs[-1]["msg"]
+    assert bench.logs[-1]["type"] == "emcy0"
+
+
+def test_selecting_a_firmware_file_names_the_file(tmp_path):
+    bench, _ = _fw_bench(tmp_path, [_FwPlugin()], {
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+        "dut_alpha_1.5.0.fwpkg": b"ACME" + b"\x00" * 8,
+    })
+
+    bench.dispatch("swdl_fw", {"file": "dut_alpha_1.5.0.fwpkg"})
+    assert bench.fw_sel == "dut_alpha_1.5.0.fwpkg"
+
+    # the page used to send the version, and a demo entry is still one
+    bench.dispatch("swdl_fw", {"ver": "1.0.0"})
+    assert bench.fw_sel == "1.0.0"
+
+
+def test_fw_path_is_the_file_and_nothing_for_an_entry_without_one(tmp_path):
+    """A strategy reads the bytes itself, so it needs the path — and a
+    demo entry has none: there is nothing behind it to open."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()],
+                              {"dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8})
+
+    bench.dispatch("swdl_fw", {"file": "dut_alpha_1.4.0.fwpkg"})
+    assert bench.fw_path() == folder / "dut_alpha_1.4.0.fwpkg"
+
+    bench.dispatch("swdl_fw", {"file": "1.1.0"})  # the demo catalog's entry
+    assert bench.fw_path() is None
+
+
+def test_an_uploaded_firmware_file_lands_in_the_folder_byte_for_byte(tmp_path):
+    """The bytes are the firmware. Anything that rewrites one of them —
+    a text decode, a newline translation — produces a file that flashes
+    and a device that does not come back."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()])
+    raw = b"ACME" + bytes(range(256))
+
+    bench.dispatch("fw_upload", {"filename": "dut_alpha_2.0.0.fwpkg",
+                                 "content": base64.b64encode(raw).decode()})
+
+    assert (folder / "dut_alpha_2.0.0.fwpkg").read_bytes() == raw
+    assert bench.fw_sel == "dut_alpha_2.0.0.fwpkg", "and is what Start would send"
+    assert 'SWDL "dut_alpha_2.0.0.fwpkg" uploaded' in bench.logs[-1]["msg"]
+    assert _fw_row(bench, "dut_alpha_2.0.0.fwpkg")["ver"] == "dut_alpha_2.0.0"
+
+
+def test_an_upload_nobody_knows_is_kept_and_said_so(tmp_path):
+    """Keeping it is the point: the operator can see the file arrived,
+    and the line says why it is greyed out — which is usually a missing
+    extension package rather than a bad file."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()])
+
+    bench.dispatch("fw_upload", {"filename": "stranger.dat",
+                                 "content": base64.b64encode(b"NOTACME1").decode()})
+
+    assert (folder / "stranger.dat").exists()
+    assert bench.fw_sel != "stranger.dat"
+    last = bench.logs[-1]["msg"]
+    assert "uploaded" in last and "no installed extension knows this format" in last
+
+
+def test_an_unreadable_upload_is_refused_rather_than_written(tmp_path):
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()])
+
+    bench.dispatch("fw_upload", {"filename": "dut_alpha_2.0.0.fwpkg", "content": "not base64!"})
+
+    assert list(folder.iterdir()) == []
+    assert "unreadable upload" in bench.logs[-1]["msg"]
+
+
+def test_an_upload_keeps_only_the_name_of_what_was_dropped(tmp_path):
+    """A browser sends the name the file had on the other machine, and a
+    path in it would write outside the folder."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()])
+
+    bench.dispatch("fw_upload", {"filename": "../../dut_alpha_2.0.0.fwpkg",
+                                 "content": base64.b64encode(b"ACME1234").decode()})
+
+    assert [f.name for f in folder.iterdir()] == ["dut_alpha_2.0.0.fwpkg"]
+
+
+def test_moving_the_firmware_folder_moves_the_library(tmp_path):
+    """The folder is the library — there is nowhere else a file could be
+    kept, and pointing the bench at the next build directory is the whole
+    configuration step."""
+    bench, _ = _fw_bench(tmp_path, [_FwPlugin()],
+                         {"dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8})
+    bench.dispatch("swdl_fw", {"file": "dut_alpha_1.4.0.fwpkg"})
+
+    other = tmp_path / "other_build"
+    other.mkdir()
+    (other / "dut_alpha_9.0.0.fwpkg").write_bytes(b"ACME" + b"\x00" * 8)
+    bench.dispatch("set_path", {"which": "fw", "value": str(other)})
+
+    snap = bench.snapshot()["swdl"]
+    assert [f["file"] for f in snap["fw"]][0] == "dut_alpha_9.0.0.fwpkg"
+    assert snap["sel"] == "dut_alpha_9.0.0.fwpkg", \
+        "the file that was selected is not in this folder"
+    assert snap["folder"] == str(other)
+    assert Bench(Db(bench.db.path), plugins=[_FwPlugin()]).paths["fw"] == str(other)
 
 
 # -- GUI plugin install (Setup > Extensions) ---------------------------------

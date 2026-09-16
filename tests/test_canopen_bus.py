@@ -562,3 +562,145 @@ def test_a_stepped_clock_drops_the_correction_with_the_offset(unplugged):
 
     assert unplugged._ts_bias == 0.0
     assert frames[0].time == datetime.fromtimestamp(host + 0.5).strftime("%H:%M:%S.%f")
+
+
+# -- domain download / per-call timeout --------------------------------------
+# A canopen node stands in for the real one here. What these cover is how the
+# bytes are handed to the SDO client and what the caller is told about it —
+# the wire below that is the library's, and the tests above already run it.
+
+class _FakeStream:
+    """The writable end of ``SdoClient.open(..., "wb")``: takes bytes and
+    keeps them in the order they arrived."""
+
+    def __init__(self, raises: Exception | None = None, after: int = 0):
+        self.written = bytearray()
+        self.closed = False
+        self._raises = raises
+        self._after = after
+
+    def write(self, chunk) -> int:
+        if self._raises is not None and len(self.written) >= self._after:
+            raise self._raises
+        self.written += chunk
+        return len(chunk)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.closed = True
+        return False
+
+
+class _FakeSdo:
+    RESPONSE_TIMEOUT = 0.3
+
+    def __init__(self, stream: _FakeStream | None = None, raises: Exception | None = None):
+        self.stream = stream or _FakeStream()
+        self.opened: dict | None = None
+        self.downloaded: list[tuple] = []
+        self.patience: list[float] = []  # RESPONSE_TIMEOUT as each transfer saw it
+        self._raises = raises
+
+    def open(self, index, subindex, mode, size=None, force_segment=False, **kw):
+        self.opened = {"index": index, "subindex": subindex, "mode": mode,
+                       "size": size, "force_segment": force_segment}
+        self.patience.append(self.RESPONSE_TIMEOUT)
+        return self.stream
+
+    def download(self, index, subindex, data):
+        self.patience.append(self.RESPONSE_TIMEOUT)
+        if self._raises is not None:
+            raise self._raises
+        self.downloaded.append((index, subindex, data))
+
+    def upload(self, index, subindex):
+        self.patience.append(self.RESPONSE_TIMEOUT)
+        return b"\x2a"
+
+
+class _FakeNode:
+    def __init__(self, sdo: _FakeSdo):
+        self.sdo = sdo
+
+
+def _bus_with(node: _FakeNode) -> CanopenBus:
+    bus = CanopenBus()
+    bus.network = object()  # only ever null-checked: _node is the way to the node
+    bus._node = lambda net, node_id: node
+    return bus
+
+
+def test_a_domain_download_hands_over_every_byte_in_order():
+    sdo = _FakeSdo()
+    data = bytes(range(256)) * 41  # 10496 bytes: three chunks, the last a part one
+    res = _bus_with(_FakeNode(sdo)).sdo_download(5, "0x1F50", "02", data)
+
+    assert bytes(sdo.stream.written) == data
+    assert (res.ok, res.value) == (True, str(len(data)))
+    assert sdo.opened == {"index": 0x1F50, "subindex": 2, "mode": "wb",
+                          "size": len(data), "force_segment": True}
+
+
+def test_a_domain_download_says_how_far_it_has_got():
+    sdo = _FakeSdo()
+    seen: list[tuple[int, int]] = []
+    data = bytes(9000)
+
+    def note(sent: int, total: int) -> bool:
+        seen.append((sent, total))
+        return True
+
+    _bus_with(_FakeNode(sdo)).sdo_download(5, "0x1F50", "02", data, progress=note)
+
+    assert [s for s, _ in seen] == [4096, 8192, 9000]
+    assert {t for _, t in seen} == {len(data)}
+
+
+def test_a_download_the_caller_stops_stops_writing():
+    """``progress`` returning False is the Stop button. What the operator
+    asked for is that nothing more goes to the device, so the answer is
+    the cancellation and not whatever the half-written transfer ends as."""
+    sdo = _FakeSdo()
+    res = _bus_with(_FakeNode(sdo)).sdo_download(
+        5, "0x1F50", "02", bytes(9000), progress=lambda sent, total: False)
+
+    assert (res.ok, res.abort) == (False, "cancelled")
+    assert len(sdo.stream.written) == 4096  # the chunk that was already out, no more
+
+
+def test_an_aborted_domain_download_reports_what_the_server_said():
+    sdo = _FakeSdo(_FakeStream(raises=canopen.SdoAbortedError(0x08000022), after=4096))
+    res = _bus_with(_FakeNode(sdo)).sdo_download(5, "0x1F50", "02", bytes(9000))
+
+    assert not res.ok
+    assert res.abort.startswith("0x08000022")
+
+
+def test_a_domain_download_without_a_connection_is_inert():
+    assert CanopenBus().sdo_download(5, "0x1F50", "02", b"x").abort == "0x05030000 not connected"
+
+
+def test_a_transfer_may_wait_longer_than_the_bus_default():
+    """An erase answers after seconds. The patience is lent to that one
+    transfer and handed back, because the read after it is an ordinary
+    object again and a bench that waits 15 s for it looks hung."""
+    sdo = _FakeSdo()
+    bus = _bus_with(_FakeNode(sdo))
+
+    bus.sdo_write(5, "0x1F51", "02", "0x03", timeout=15.0)
+    bus.sdo_read(5, "0x1018", "01")
+
+    assert sdo.patience == [15.0, 0.3]
+    assert sdo.RESPONSE_TIMEOUT == 0.3
+
+
+def test_a_transfer_that_failed_hands_the_patience_back_too():
+    sdo = _FakeSdo(raises=canopen.SdoCommunicationError("no response"))
+    bus = _bus_with(_FakeNode(sdo))
+
+    res = bus.sdo_write(5, "0x1F51", "02", "0x03", timeout=15.0)
+
+    assert res.abort == "0x05040000 timeout"
+    assert sdo.RESPONSE_TIMEOUT == 0.3
