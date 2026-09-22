@@ -272,12 +272,18 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if "on_timeout" in val and not (isinstance(val["on_timeout"], str) and val["on_timeout"]):
             return "wait_for: on_timeout needs a target label"
         if "cob" in val:  # frame form (v2)
-            if unknown := set(val) - {"cob", "timeout", "data", "on_timeout", "into"} - _NOTE:
+            if unknown := (set(val) - {"cob", "timeout", "data", "on_timeout", "into", "value_into"}
+                           - _NOTE):
                 return f"wait_for: unknown field(s) {sorted(unknown)}"
             if "timeout" not in val:
                 return "wait_for: missing timeout"
-            if "into" in val and not (isinstance(val["into"], str) and val["into"] in REGISTERS):
-                return f"wait_for: invalid into {val['into']!r}"
+            # `into` takes the index of the pair that matched, `value_into`
+            # the payload of the frame that did — two registers, because a
+            # case racing two COB-IDs may need to know both which one
+            # answered and what it said
+            for key in ("into", "value_into"):
+                if key in val and not (isinstance(val[key], str) and val[key] in REGISTERS):
+                    return f"wait_for: invalid {key} {val[key]!r}"
             # cob (and, in lockstep, data) may be a single value or a list —
             # a list races every (cob, prefix) pair in the same wait
             cobs = val["cob"] if isinstance(val["cob"], list) else [val["cob"]]
