@@ -75,6 +75,9 @@ development; the version counts from here.
   frame's payload into a register as the number it carries (low byte
   first, over every byte of the frame), so a case can compute with a
   PDO's value instead of only matching it
+- Tests page: the Result filter's `not run · 30 d` lists the cases the
+  results folder has no run of in that window — the ones that are due —
+  so `all` and Start run exactly those; a SKIP does not count as a run
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;

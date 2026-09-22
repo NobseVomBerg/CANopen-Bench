@@ -18,9 +18,11 @@ from canopen_bench import report
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.report import (
+    ERROR,
     FAIL,
     OVERVIEW,
     PASS,
+    SKIP,
     STYLESHEET,
     SUMMARY_GLOB,
     CaseRecord,
@@ -29,6 +31,7 @@ from canopen_bench.report import (
     case_html,
     collect_overview,
     default_css,
+    executed_ids,
     last_verdicts,
     load_runs,
     overview_html,
@@ -719,6 +722,20 @@ def test_a_run_with_nothing_readable_in_it_is_skipped_not_fatal():
     assert last_verdicts([{"cases": ["not a case", None]},
                           {"cases": [{"verdict": FAIL}]},        # no id
                           {"nonsense": 1}]) == {}
+
+
+def test_a_skip_is_not_a_run_but_an_earlier_pass_is():
+    """The "not run" window asks whether a case ran at all, which the
+    newest verdict cannot answer: a SKIP on Tuesday over a PASS on Monday
+    is a case that ran; a case only ever skipped is one that did not."""
+    runs = [_summary("2026-01-01T09:00", [{"id": "7", "verdict": PASS},
+                                          {"id": "8", "verdict": SKIP}]),
+            _summary("2026-01-02T09:00", [{"id": "7", "verdict": SKIP},
+                                          {"id": "9", "verdict": ERROR}])]
+    assert executed_ids(runs) == {"7", "9"}
+    assert last_verdicts(runs)["7"] == SKIP      # which is why it is not asked
+    assert executed_ids([{"cases": ["not a case", {"verdict": FAIL}]},
+                         {"nonsense": 1}]) == set()
 
 
 # -- written as the run goes: the pieces have to add up ----------------------
