@@ -344,6 +344,52 @@ def test_wait_for_list_form_on_timeout_fires_when_neither_cob_matches(tc_bench):
     assert tc_bench.results == {"0014": "PASS"}
 
 
+# -- wait_for value_into: the frame's payload, as the number it carries -----
+
+WAIT_FOR_VALUE_TC = """\
+id: "0054"
+name: "wait_for hands the matched frame's payload to a register"
+steps:
+  - wait_for: {cob: "0x1A1", timeout: 2.0, into: R5, value_into: R1}
+  - jump_ne: {a: R5, b: 0, to: bad}
+  - jump_eq: {a: R1, b: "0x12345678", to: ok}
+  - label: bad
+  - fail: "the payload did not arrive as the number it carries"
+  - label: ok
+  - end:
+"""
+
+
+def test_wait_for_value_into_takes_the_payload_low_byte_first(tc_bench):
+    # 78 56 34 12 on the wire is the U32 0x12345678 — the same reading an
+    # SDO of that object would give, so a case can compare the two
+    _add_tc(tc_bench, "TC0054_wait_for_value.yaml", WAIT_FOR_VALUE_TC)
+    tc_bench.bus.queue_raw(0x1A1, b"\x78\x56\x34\x12")
+    run_selected(tc_bench, {"0054"})
+    assert tc_bench.results == {"0054": "PASS"}
+
+
+WAIT_FOR_WIDE_VALUE_TC = """\
+id: "0055"
+name: "wait_for value_into spans every byte of the frame, not a fixed width"
+steps:
+  - wait_for: {cob: "0x1A1", timeout: 2.0, value_into: R1}
+  - jump_eq: {a: R1, b: "0x0200000001", to: ok}
+  - fail: "a fifth byte was cut off"
+  - label: ok
+  - end:
+"""
+
+
+def test_wait_for_value_into_is_as_wide_as_the_frame(tc_bench):
+    # a 5-byte PDO is a 40-bit number; a register has no width, so nothing
+    # decides for the case which four of the five bytes it meant
+    _add_tc(tc_bench, "TC0055_wait_for_wide_value.yaml", WAIT_FOR_WIDE_VALUE_TC)
+    tc_bench.bus.queue_raw(0x1A1, b"\x01\x00\x00\x00\x02")
+    run_selected(tc_bench, {"0055"})
+    assert tc_bench.results == {"0055": "PASS"}
+
+
 # -- a wait that times out has to say what the bus did carry ---------------
 
 WAIT_FOR_PREFIX_TC = """\

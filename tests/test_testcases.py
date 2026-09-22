@@ -324,9 +324,24 @@ def test_parse_wait_for_into_invalid_register_rejected():
     assert tc.error and "invalid into" in tc.error
 
 
+def test_parse_wait_for_value_into_valid_register_accepted():
+    text = ('id: "1"\nname: x\nsteps:\n'
+            '  - wait_for: {cob: "0x1A1", timeout: 0.5, value_into: R1}\n')
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error is None
+
+
+def test_parse_wait_for_value_into_invalid_register_rejected():
+    text = ('id: "1"\nname: x\nsteps:\n'
+            '  - wait_for: {cob: "0x1A1", timeout: 0.5, value_into: 7}\n')
+    tc = parse_testcase(text, "TC1_x.yaml")
+    assert tc.error and "invalid value_into" in tc.error
+
+
 def test_parse_wait_for_frame_form_still_rejects_unknown_field():
-    # regression: adding `into` to the allowlist must not accidentally widen
-    # it beyond {cob, timeout, data, on_timeout, into}
+    # regression: adding `into`/`value_into` to the allowlist must not
+    # accidentally widen it beyond {cob, timeout, data, on_timeout, into,
+    # value_into}
     text = ('id: "1"\nname: x\nsteps:\n'
             '  - wait_for: {cob: "0x700", timeout: 0.5, bogus: 1}\n')
     tc = parse_testcase(text, "TC1_x.yaml")

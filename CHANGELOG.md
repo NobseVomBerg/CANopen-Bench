@@ -71,6 +71,10 @@ development; the version counts from here.
   already computes — no separate polling
 - Test executor for YAML test cases (format v2: registers, jumps,
   arithmetic, `wait_for`, manual steps, `lss_assign`) with reports
+- `wait_for` can keep what it heard: `value_into: Rn` puts the matched
+  frame's payload into a register as the number it carries (low byte
+  first, over every byte of the frame), so a case can compute with a
+  PDO's value instead of only matching it
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;
