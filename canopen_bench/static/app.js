@@ -1506,8 +1506,16 @@ function ObjectsPage({ s, ui, setUi }) {
 //: What the Result filter offers, all of it out of the results folder —
 //: the only thing that remembers a run at all. "run" is the last run that
 //: finished, whenever that was; the rest are spans of days.
+//: [value, label] for the Result chip. The value is the window the
+//: server is asked for — "run" or a number of days — with a leading "!"
+//: for the other side of the answer: "!30" is every case *without* a run
+//: in the last 30 days, the ones that are due. Same request either way;
+//: which side of it a row falls on is decided where the list is built.
 const RESULT_WINDOWS = [['run', 'failed · last run'], ['1', 'failed · 1 d'],
-                        ['7', 'failed · 7 d'], ['30', 'failed · 30 d']];
+                        ['7', 'failed · 7 d'], ['30', 'failed · 30 d'],
+                        ['!30', 'not run · 30 d']];
+const resultWindow = (v) => (v || '').replace(/^!/, '');
+const notRunMode = (v) => (v || '').startsWith('!');
 
 //: FAIL and ERROR are both red; SKIP is not. A case nobody ran is not a
 //: case that went wrong, and selecting it to "run the failures" would put
@@ -1545,8 +1553,18 @@ function TestsPage({ s, ui, setUi }) {
   // are cleared when a run starts: pressing Start emptied the list and
   // let the rows back in one at a time as they failed again.
   const history = t.history || {};
-  const verdicts = String(history.window || '') === ui.resultFilter
-    ? (history.verdicts || {}) : {};
+  const wanted = resultWindow(ui.resultFilter);
+  const due = notRunMode(ui.resultFilter);
+  const loaded = String(history.window || '');
+  const current = !!wanted && loaded === wanted;
+  const verdicts = current ? (history.verdicts || {}) : {};
+  // The other side of the same answer: the cases the window has no run
+  // of. Out of `ran`, not out of `verdicts` — the newest verdict of a
+  // case may be a SKIP over a PASS earlier in the window, and a case that
+  // was only ever skipped has not run at all. Nothing loaded means
+  // nothing shown, as for the red ones: every row "due" for one tick is
+  // a wrong list, not a slow one.
+  const ran = new Set(current ? (history.ran || []) : []);
   // The window the chip names has to be the window that is loaded, and
   // picking it was the only thing that ever asked for it. A chip left on
   // "failed · 1 d" while the server restarted came back to an empty list,
@@ -1554,9 +1572,7 @@ function TestsPage({ s, ui, setUi }) {
   // window to correct. So the window is asked for whenever it is not the
   // one loaded — the pick included, which is now the same path as every
   // other way of getting here.
-  const wanted = ui.resultFilter || '';
   const asked = useRef({ want: '', at: 0 });
-  const loaded = String(history.window || '');
   useEffect(() => {
     if (!wanted || loaded === wanted) return undefined;
     // …but not twice in a breath: a server that cannot read the folder
@@ -1573,7 +1589,7 @@ function TestsPage({ s, ui, setUi }) {
     return () => clearTimeout(timer);
   }, [wanted, loaded]);
   const shown = t.catalog
-    .filter(([id]) => !ui.resultFilter || RED.has(verdicts[id]))
+    .filter(([id]) => !ui.resultFilter || (due ? current && !ran.has(id) : RED.has(verdicts[id])))
     .filter(([, , tools]) => t.toolFilter || tools === '—')
     .filter(([, , , , , grade]) => !ui.gradeFilter || grade === ui.gradeFilter)
     .filter(([, , , , , , variants]) => !ui.variantFilter || !variants.length

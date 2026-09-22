@@ -535,6 +535,26 @@ def last_verdicts(runs: list[dict]) -> dict[str, str]:
     return {cid: verdict for cid, (_at, verdict) in seen.items()}
 
 
+def executed_ids(runs: list[dict]) -> set[str]:
+    """The ids of every case these runs executed — any verdict but SKIP.
+
+    The other side of ``last_verdicts``, for the test list's "not run"
+    window: a case is due when no run in the window executed it. The
+    newest verdict cannot say that — it may be a SKIP over a PASS earlier
+    in the window, and a case that was only ever skipped (variant did not
+    match, precondition failed) has not run at all.
+    """
+    ids: set[str] = set()
+    for run in runs:
+        for case in run.get("cases") or []:
+            if not isinstance(case, dict):
+                continue
+            cid = str(case.get("id") or "")
+            if cid and str(case.get("verdict") or "") not in ("", SKIP):
+                ids.add(cid)
+    return ids
+
+
 def collect_overview(runs: list[dict]) -> list[VariantStats]:
     """Fold runs into one entry per hardware variant.
 
