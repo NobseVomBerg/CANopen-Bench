@@ -5652,6 +5652,7 @@ class Bench:
                          bytes.fromhex(str(d).replace(" ", "")) if d else b"")
                         for c, d in zip(cob_list, data_list, strict=True)]
                 into = val.get("into")
+                value_into = val.get("value_into")
                 # Anchored at the step's start, so the window does not
                 # slide while the step waits: FRAME_LOOKBACK_S back from
                 # there, and everything that arrives from there on.
@@ -5665,11 +5666,21 @@ class Bench:
                     # tick — at TICK_S the answer could otherwise arrive in
                     # the trace only after this step has already timed out
                     self._drain_frames()
-                    idx = self._match_traced(
+                    hit = self._match_traced_frame(
                         pairs, FRAME_LOOKBACK_S + (loop.time() - started))
-                    if idx is not None:
+                    if hit is not None:
+                        idx, payload = hit
                         if into:
                             regs[into] = idx
+                        if value_into:
+                            # The payload as the number it carries: low
+                            # byte first, like every CANopen value, over
+                            # every byte the frame had. A 4-byte PDO is
+                            # the U32 the device sent; a longer frame is a
+                            # wider number, and a case wanting one field
+                            # of it masks or divides — a register is an
+                            # int, so nothing is cut off on the way.
+                            regs[value_into] = int.from_bytes(payload, "little")
                         return "ok", ""
                     left = deadline - loop.time()
                     if left <= 0:
@@ -5952,7 +5963,16 @@ class Bench:
     # -- trace --------------------------------------------------------------------
     def _match_traced(self, pairs: list[tuple[int, bytes]], max_age: float) -> int | None:
         """Which of `pairs` is satisfied by the newest frame its COB-ID
-        carried inside `max_age`, or None.
+        carried inside `max_age`, or None — the index alone; the frame
+        that satisfied it comes from `_match_traced_frame`, which has the
+        rules."""
+        hit = self._match_traced_frame(pairs, max_age)
+        return None if hit is None else hit[0]
+
+    def _match_traced_frame(self, pairs: list[tuple[int, bytes]],
+                            max_age: float) -> tuple[int, bytes] | None:
+        """Which of `pairs` is satisfied by the newest frame its COB-ID
+        carried inside `max_age`, with that frame's payload — or None.
 
         Reads the trace, not the wire. A device answers when it is ready,
         not when a step happens to start listening, and the answer to the
@@ -6014,7 +6034,7 @@ class Bench:
                 if cob != want:
                     continue
                 if data.startswith(prefix):
-                    return i
+                    return i, data
                 if row.get("cls") == "PDO":
                     answered.add(cob)
         return None
