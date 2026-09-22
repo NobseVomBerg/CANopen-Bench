@@ -1923,7 +1923,12 @@ class Bench:
         if window == "run":
             runs = reportlib.newest_run(runs)
         return {"window": window, "runs": len(runs),
-                "verdicts": reportlib.last_verdicts(runs)}
+                "verdicts": reportlib.last_verdicts(runs),
+                # the other side of the same window, for "not run · 30 d":
+                # which cases these runs executed at all. A SKIP is not a
+                # run, and the newest verdict may be one over an earlier
+                # PASS — so a list of its own, not read off the verdicts
+                "ran": sorted(reportlib.executed_ids(runs))}
 
     def act_report_overview(self, p: dict) -> None:
         """Fold the last so many days of runs into one page per hardware

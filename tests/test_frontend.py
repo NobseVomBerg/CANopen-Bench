@@ -280,6 +280,11 @@ def test_the_result_filter_is_a_chip_and_not_a_third_verb():
     # this session's verdicts once, which are cleared when a run starts
     assert "t.results" not in app.split("const verdicts")[1].split("\n")[0]
     assert "if (!wanted || loaded === wanted) return undefined;" in app
+    # …and the other side of the same window: the cases without a run in
+    # it, out of the server's `ran` list — never out of the newest verdict,
+    # which may be a SKIP over a run earlier in the window
+    assert "'not run · 30 d'" in app and "history.ran" in app
+    assert "due ? current && !ran.has(id) : RED.has(verdicts[id])" in app
 
 
 def test_a_skipped_case_is_not_a_failed_one():
