@@ -1949,6 +1949,9 @@ def test_the_result_filter_asks_the_folder_for_a_window(tc_bench):
     hist = bench.snapshot()["tests"]["history"]
     assert hist["window"] == "7" and hist["runs"] == 1
     assert hist["verdicts"] == {"0001": "FAIL", "0002": "PASS", "0003": "SKIP"}
+    # the other side of the window, for "not run · 30 d": a SKIP is not a
+    # run, so 0003 is due although it has a verdict
+    assert hist["ran"] == ["0001", "0002"]
 
 
 def test_a_window_outside_the_range_is_pulled_back_in(tc_bench):
@@ -1966,8 +1969,10 @@ def test_a_run_older_than_the_window_does_not_answer(tc_bench):
                    [{"id": "0001", "verdict": "FAIL"}])
     bench.dispatch("tests_history", {"window": "7"})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {}
+    assert bench.snapshot()["tests"]["history"]["ran"] == []      # due
     bench.dispatch("tests_history", {"window": "90"})
     assert bench.snapshot()["tests"]["history"]["verdicts"] == {"0001": "FAIL"}
+    assert bench.snapshot()["tests"]["history"]["ran"] == ["0001"]
 
 
 def test_the_window_follows_the_run_that_just_wrote_into_it(tc_bench):
