@@ -81,6 +81,11 @@ development; the version counts from here.
 - SWDL page: a ✕ on every file in the firmware library deletes it from
   the folder after asking — not the one a running download is reading,
   and not the entries that have no file behind them
+- `bus.send_frames`: a burst of frames on one COB-ID from a worker
+  thread, as fast as the adapter takes them — a full transmit queue is
+  waited out rather than taken for a lost adapter, `stop` is asked before
+  every frame and an optional `gap` is kept exactly by the sending thread.
+  What a PDO firmware download sends its blocks with
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;

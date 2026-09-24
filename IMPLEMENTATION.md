@@ -131,7 +131,10 @@ browser):
   download strategy to give up cooperatively (`SwdlStrategy.stop`); the
   bytes themselves go down through `bus.sdo_download`, a segmented domain
   download that writes them in the order it is given — which the hex
-  string `sdo_write` takes does not.
+  string `sdo_write` takes does not — or, as PDOs to many devices at
+  once, through `bus.send_frames`: a burst from a worker thread that
+  waits for room in the adapter's transmit queue instead of failing on
+  it.
 - **Trace** — the record of what the bus carried, and a view onto it.
   That split is the whole design. Recording runs whenever the interface
   is connected and test steps read it (`wait_for` with a `cob` matches

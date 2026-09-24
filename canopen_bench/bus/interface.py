@@ -7,8 +7,9 @@ never know the difference.
 """
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 #: a device that does not answer 0x1018:04 has no serial number to be told
@@ -73,6 +74,28 @@ class BusInterface(ABC):
     # -- raw frames (format-v2 primitive can_send) --------------------------
     def send_raw(self, cob: int, data: bytes) -> None:
         """Broadcast a raw CAN frame (e.g. the button-teach 0x780/0x781)."""
+
+    def send_frames(self, cob: int, payloads: Iterable[bytes],
+                    stop: Callable[[], bool] | None = None, gap: float = 0.0) -> int:
+        """Many frames on one COB-ID, as fast as the interface takes them,
+        from the calling thread — a firmware image as PDOs, say, where one
+        ``send_raw`` per frame from the event loop costs a thread hop and a
+        timer tick every time. Returns how many went out: fewer than given
+        when ``stop()`` answered True (asked before every frame) or the
+        interface went away.
+
+        ``gap`` is the least time between two frames, kept by the sending
+        thread — ``asyncio.sleep`` cannot keep it, its resolution on Windows
+        is a timer tick of up to 15 ms. 0 sends back to back, paced only by
+        the interface's own transmit queue.
+
+        Default: one ``send_raw`` per frame.
+        """
+        def one(data: bytes) -> bool:
+            self.send_raw(cob, data)
+            return True
+
+        return pace_frames(payloads, one, stop, gap)
 
 
     # -- standard addressing (format-v2 primitive lss_assign) ----------------
@@ -144,3 +167,35 @@ class BusInterface(ABC):
     @abstractmethod
     def poll_frames(self, max_frames: int = 8) -> list[Frame]:
         """Drain received raw frames for the trace monitor."""
+
+
+def pace_frames(payloads: Iterable[bytes], send_one: Callable[[bytes], bool],
+                stop: Callable[[], bool] | None = None, gap: float = 0.0) -> int:
+    """The loop behind every ``send_frames``: ``stop`` asked before each
+    frame, ``gap`` kept between them, and the count of frames ``send_one``
+    took — it answers False when the interface is gone, which ends the
+    burst there."""
+    sent = 0
+    due = time.perf_counter()
+    for data in payloads:
+        if stop is not None and stop():
+            break
+        if gap > 0:
+            _wait_until(due)
+        if not send_one(data):
+            break
+        sent += 1
+        due = time.perf_counter() + gap
+    return sent
+
+
+def _wait_until(deadline: float) -> None:
+    """Sleep through the bulk of the wait and spin through the last
+    millisecond: ``time.sleep`` overshoots by up to a millisecond, which on
+    a gap of a few hundred microseconds is the gap several times over."""
+    while True:
+        left = deadline - time.perf_counter()
+        if left <= 0:
+            return
+        if left > 0.002:
+            time.sleep(left - 0.001)
