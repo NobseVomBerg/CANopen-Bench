@@ -315,6 +315,92 @@ def test_sdo_send_error_returns_connection_lost(master):
     assert lost.wait(5), "on_lost callback did not fire within 5s"
 
 
+# -- a burst waits for the adapter's transmit queue ---------------------------
+
+def _tx_frames(bus: CanopenBus) -> list:
+    return [f for f in bus.poll_frames(4096) if f.direction == "TX"]
+
+
+def test_a_burst_goes_out_in_order_and_into_the_trace(master):
+    payloads = [i.to_bytes(2, "little") + bytes(6) for i in range(40)]
+
+    assert master.send_frames(0x500, payloads) == 40
+
+    sent = _tx_frames(master)
+    assert [f.cob_id for f in sent] == ["0x500"] * 40
+    assert [int(f.data.split()[0], 16) for f in sent] == [i & 0xFF for i in range(40)]
+
+
+def test_a_full_transmit_queue_is_waited_out_not_taken_for_a_lost_adapter(master):
+    """IXXAT posts into a queue of 16 frames and fails when it is full, and
+    a burst gets there at once. A send carries a timeout (IXXAT waits for
+    room then), and a refusal is retried — the queue empties, the adapter
+    is still there, and nothing may call it lost."""
+    lost = threading.Event()
+    master.on_lost = lambda reason: lost.set()
+    real_send, timeouts, refusals = master.network.bus.send, [], [0]
+
+    def sometimes_full(msg, timeout=None):
+        timeouts.append(timeout)
+        if refusals[0] < 5 and len(timeouts) % 2:
+            refusals[0] += 1
+            raise can.CanOperationError("transmit queue full")
+        return real_send(msg, timeout)
+
+    master.network.bus.send = sometimes_full
+
+    assert master.send_frames(0x500, [bytes(8)] * 20) == 20
+    assert refusals[0] == 5
+    assert all(t for t in timeouts), "every frame waits for room, none is posted"
+    assert master.network is not None and not lost.is_set()
+    assert len(_tx_frames(master)) == 20, "a refused try is not a frame on the bus"
+
+
+def test_an_adapter_that_keeps_refusing_is_a_lost_connection(master, monkeypatch):
+    monkeypatch.setattr(cb, "_TX_GIVE_UP_S", 0.05)
+    lost = threading.Event()
+    master.on_lost = lambda reason: lost.set()
+
+    def gone(msg, timeout=None):
+        raise can.CanOperationError("send: port gone")
+
+    master.network.bus.send = gone
+
+    assert master.send_frames(0x500, [bytes(8)] * 5) == 0
+    assert master.network is None
+    assert lost.wait(5), "on_lost callback did not fire within 5s"
+    assert master.send_frames(0x500, [bytes(8)]) == 0, "and nothing after it"
+
+
+def test_stop_ends_a_burst_between_two_frames(master):
+    asked: list[int] = []
+
+    def stop() -> bool:
+        asked.append(1)
+        return len(asked) > 7
+
+    assert master.send_frames(0x500, [bytes(8)] * 20, stop=stop) == 7
+    assert len(_tx_frames(master)) == 7
+
+
+def test_a_gap_is_kept_between_the_frames():
+    """Kept by the sending thread, measured from when the previous frame
+    went out: asyncio.sleep cannot do it, its resolution on Windows is a
+    timer tick of up to 15 ms."""
+    from canopen_bench.bus.interface import pace_frames
+
+    stamps: list[float] = []
+
+    def one(data: bytes) -> bool:
+        stamps.append(time.perf_counter())
+        return True
+
+    assert pace_frames([b"x"] * 6, one, gap=0.003) == 6
+    assert min(b - a for a, b in zip(stamps, stamps[1:])) >= 0.003
+    stamps.clear()
+    assert pace_frames([b"x"] * 3, lambda d: False) == 0, "a lost interface ends it"
+
+
 def test_nmt_send_error_does_not_raise_and_tears_down(master):
     def broken_send(msg, timeout=None):
         raise can.CanOperationError("send: port gone")
