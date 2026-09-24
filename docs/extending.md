@@ -263,7 +263,7 @@ and cannot be selected. The answer is cached until that file changes on
 disk, so reading the file here — a header, a magic number, a length — is
 what the hook is for. The drop zone on the page writes into the same
 folder, under the name the file was dropped with, and selects it if
-something knows it.
+something knows it; the ✕ beside a file deletes it from there again.
 
 What the operator picked is then **`bench.fw_path()`**: the selected
 file, or `None` when the selection is one of the entries `firmware()`
