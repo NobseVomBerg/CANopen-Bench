@@ -281,6 +281,19 @@ a strategy's `stop()` reaches the bytes; `timeout` lends this one
 transfer a longer response timeout, for the steps that answer in seconds
 rather than milliseconds (an erase).
 
+A download that sends the image as PDOs instead — one frame for many
+devices, no answer per frame — sends a block through
+**`bus.send_frames(cob, payloads, stop=..., gap=...)`**, from a worker
+thread (`asyncio.to_thread`). One call per block, not one per frame: a
+frame per call from the event loop costs a thread hop and a timer tick
+each, and `asyncio.sleep` between frames sleeps a Windows timer tick of up
+to 15 ms however little it is asked for. The frames go out as fast as the
+adapter takes them — a full transmit queue is waited out, not reported as
+a lost adapter — `stop()` is asked before every frame, and `gap` is a
+least time between two frames that the sending thread keeps exactly, for
+a receiver that cannot take them back to back. It returns how many went
+out.
+
 ## Minimal example
 
 A plugin that adds one trace decoder and one custom step type:

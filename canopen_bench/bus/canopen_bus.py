@@ -20,7 +20,7 @@ from datetime import datetime
 import can
 import canopen
 
-from .interface import NO_SERIAL, BusInterface, FoundDevice, Frame, SdoResult
+from .interface import NO_SERIAL, BusInterface, FoundDevice, Frame, SdoResult, pace_frames
 
 # app adapter key (canopen_bench.data.ADAPTERS) -> python-can interface name,
 # default channel, and any further keyword arguments that backend needs
@@ -134,6 +134,19 @@ def _abort_text(exc: canopen.SdoAbortedError) -> str:
 #: wire carries 7 bytes per segment whatever this is — the chunk only
 #: decides how often the caller's ``progress`` hears about it.
 _DOWNLOAD_CHUNK = 4096
+
+#: How long one frame of a burst waits for room in the adapter's transmit
+#: queue. IXXAT waits for it when a send carries a timeout and fails at
+#: once when it does not (post instead of send), and its queue holds 16
+#: frames — a burst fills that within microseconds.
+_TX_WAIT_S = 0.1
+#: How long a burst keeps retrying a frame the adapter refuses before that
+#: counts as the adapter gone. PCAN refuses a full queue outright and has
+#: no timeout to wait with; a full queue empties within a few frame times
+#: even at 10 kbit/s, an adapter that was unplugged does not.
+_TX_GIVE_UP_S = 1.0
+#: pause between two such retries
+_TX_RETRY_S = 0.0005
 
 
 @contextmanager
@@ -498,6 +511,52 @@ class CanopenBus(BusInterface):
             net.send_message(cob, data)  # runs through the TX trace hook
         except (can.CanError, OSError, RuntimeError) as exc:
             self._connection_lost(exc)
+
+    def send_frames(self, cob: int, payloads, stop=None, gap: float = 0.0) -> int:
+        """A burst that waits for the adapter instead of failing on it.
+
+        ``send_raw`` hands python-can one frame without a timeout, and a
+        refused frame there is a lost connection. That is right for a frame
+        now and then, and wrong for a burst: IXXAT then *posts* into a
+        transmit queue of 16 frames and fails as soon as it is full, which
+        a burst sent back to back reaches at once. Each frame here is sent
+        with a timeout (IXXAT waits for room), and a refusal is retried for
+        up to ``_TX_GIVE_UP_S`` (PCAN refuses a full queue and ignores the
+        timeout) — only an adapter that keeps refusing is a lost one.
+
+        Mirrored into the trace like every frame this bus sends, once it
+        went out.
+        """
+        net = self.network
+        if net is None:
+            return 0
+        trace = self._trace
+        extended = cob > 0x7FF
+
+        def one(data: bytes) -> bool:
+            msg = can.Message(arbitration_id=cob, data=bytes(data), is_extended_id=extended)
+            give_up = None
+            while True:
+                try:
+                    if net.bus is None:
+                        raise RuntimeError("Not connected to CAN bus")
+                    with net.send_lock:
+                        net.bus.send(msg, timeout=_TX_WAIT_S)
+                    break
+                except (can.CanError, OSError, RuntimeError) as exc:
+                    now = time.monotonic()
+                    give_up = give_up or now + _TX_GIVE_UP_S
+                    if now >= give_up or self.network is not net:
+                        self._connection_lost(exc)
+                        return False
+                    time.sleep(_TX_RETRY_S)
+            if trace is not None:
+                now = time.time()
+                msg.timestamp = now
+                trace.queue.append(("TX", msg, now))
+            return True
+
+        return pace_frames(payloads, one, stop, gap)
 
     def sdo_read(self, node: int, index: str, sub: str,
                  timeout: float | None = None) -> SdoResult:

@@ -41,3 +41,23 @@ def test_send_raw_surfaces_as_a_sent_frame(tmp_path):
     bus.send_raw(0x780, b"\x01")
     frames = bus.poll_frames(8)
     assert [(f.direction, f.cob_id) for f in frames] == [("TX", "0x780")]
+
+
+def test_a_burst_is_one_send_raw_per_frame_until_stop_says_so(tmp_path):
+    """The default ``send_frames``: every frame through ``send_raw``, so a
+    burst reaches the device-side hooks and the trace like any single frame
+    — and ``stop`` is asked before each one, which is what makes a Stop
+    press end a firmware block mid-way."""
+    bus = _bus(tmp_path)
+    payloads = [bytes([i, 0xAA]) for i in range(5)]
+    asked: list[int] = []
+
+    def stop() -> bool:
+        asked.append(1)
+        return len(asked) > 3
+
+    assert bus.send_frames(0x500, payloads, stop=stop) == 3
+    frames = bus.poll_frames(16)
+    assert [f.data for f in frames if f.direction == "TX"] == ["00 AA", "01 AA", "02 AA"]
+    assert bus.send_frames(0x500, payloads) == 5
+
