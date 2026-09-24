@@ -180,7 +180,7 @@ def test_firmware_aggregation(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
     listed = bench.snapshot()["swdl"]["fw"]
     assert listed[0] == {"ver": "9.9.9", "file": "9.9.9", "tag": "latest",
-                         "meta": "1 KB", "known": True}
+                         "meta": "1 KB", "known": True, "disk": False}
     assert bench.fw_sel == "9.9.9"
     assert [f["file"] for f in listed[1:]] == ["1.1.0", "1.0.0"]  # demo catalog
 
@@ -751,9 +751,10 @@ def test_a_plugin_says_what_the_files_in_the_firmware_folder_are(tmp_path):
 
     assert [f["file"] for f in files] == ["dut_alpha_1.4.0.fwpkg", "notes.txt"]
     assert files[0] == {"file": "dut_alpha_1.4.0.fwpkg", "ver": "dut_alpha_1.4.0",
-                        "tag": "latest", "meta": "64 bytes · acme", "known": True}
+                        "tag": "latest", "meta": "64 bytes · acme", "known": True,
+                        "disk": True}
     assert files[1] == {"file": "notes.txt", "ver": "", "tag": "", "known": False,
-                        "meta": "no installed extension knows this format"}
+                        "meta": "no installed extension knows this format", "disk": True}
 
 
 def test_the_firmware_folder_is_read_again_only_when_it_changed(tmp_path):
@@ -936,6 +937,79 @@ def test_an_upload_keeps_only_the_name_of_what_was_dropped(tmp_path):
                                  "content": base64.b64encode(b"ACME1234").decode()})
 
     assert [f.name for f in folder.iterdir()] == ["dut_alpha_2.0.0.fwpkg"]
+
+
+def test_a_firmware_file_can_be_deleted_and_the_selection_moves_on(tmp_path):
+    """Off the disk — the folder is the library, there is no list to
+    take it out of — and the selection moves to what is left, the way
+    it does when the file goes outside the tool."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()], {
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+        "dut_alpha_1.5.0.fwpkg": b"ACME" + b"\x00" * 8,
+    })
+    bench.dispatch("swdl_fw", {"file": "dut_alpha_1.5.0.fwpkg"})
+    assert all(f["disk"] for f in bench.snapshot()["swdl"]["fw"]
+               if f["file"].endswith(".fwpkg"))
+
+    bench.dispatch("fw_delete", {"file": "dut_alpha_1.5.0.fwpkg"})
+
+    assert not (folder / "dut_alpha_1.5.0.fwpkg").exists()
+    assert (folder / "dut_alpha_1.4.0.fwpkg").exists(), "only the one named"
+    assert bench.snapshot()["swdl"]["sel"] == "dut_alpha_1.4.0.fwpkg"
+    assert 'SWDL "dut_alpha_1.5.0.fwpkg" deleted' in bench.logs[-1]["msg"]
+
+
+def test_a_file_nobody_knows_can_be_deleted_too(tmp_path):
+    """It cannot be selected, but it is a file in the folder — a map
+    file dropped there by mistake is exactly what the ✕ is for."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()], {"notes.txt": b"not firmware"})
+
+    bench.dispatch("fw_delete", {"file": "notes.txt"})
+
+    assert list(folder.iterdir()) == []
+
+
+def test_only_a_file_in_the_folder_can_be_deleted(tmp_path):
+    """The page sends the name it listed. A path, or the name of an
+    entry with no file behind it, came from somewhere else."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()],
+                              {"dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8})
+    outside = tmp_path / "keep.fwpkg"
+    outside.write_bytes(b"ACME1234")
+
+    for name in ("../keep.fwpkg", str(outside), "", ".", "1.1.0", "missing.fwpkg"):
+        bench.dispatch("fw_delete", {"file": name})
+        assert "not deleted" in bench.logs[-1]["msg"], name
+        assert bench.logs[-1]["type"] == "emcy0"
+
+    assert outside.exists()
+    assert (folder / "dut_alpha_1.4.0.fwpkg").exists()
+    assert not next(f for f in bench.snapshot()["swdl"]["fw"]
+                    if f["file"] == "1.1.0")["disk"], "a demo entry has no file"
+
+
+def test_the_file_a_download_is_reading_stays(tmp_path):
+    """Deleting it would move the selection to another file mid-run,
+    and the page would show that one as what is being flashed. Every
+    other file may go; this one after the run."""
+    bench, folder = _fw_bench(tmp_path, [_FwPlugin()], {
+        "dut_alpha_1.4.0.fwpkg": b"ACME" + b"\x00" * 8,
+        "dut_alpha_1.5.0.fwpkg": b"ACME" + b"\x00" * 8,
+    })
+    bench.dispatch("swdl_fw", {"file": "dut_alpha_1.5.0.fwpkg"})
+    bench.swdl_run = True
+
+    bench.dispatch("fw_delete", {"file": "dut_alpha_1.5.0.fwpkg"})
+    assert (folder / "dut_alpha_1.5.0.fwpkg").exists()
+    assert "being downloaded" in bench.logs[-1]["msg"]
+
+    bench.dispatch("fw_delete", {"file": "dut_alpha_1.4.0.fwpkg"})
+    assert not (folder / "dut_alpha_1.4.0.fwpkg").exists()
+    assert bench.fw_sel == "dut_alpha_1.5.0.fwpkg"
+
+    bench.swdl_run = False
+    bench.dispatch("fw_delete", {"file": "dut_alpha_1.5.0.fwpkg"})
+    assert not (folder / "dut_alpha_1.5.0.fwpkg").exists()
 
 
 def test_moving_the_firmware_folder_moves_the_library(tmp_path):

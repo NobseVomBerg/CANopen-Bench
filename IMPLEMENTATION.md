@@ -125,7 +125,9 @@ browser):
   folder (`paths["fw"]`, configurable, often a build output directory):
   the core lists the files and knows no firmware format, a plugin says
   what each one is (`describe_firmware`) and a file nobody claims is
-  listed but cannot be selected. **Stop** asks the
+  listed but cannot be selected. Each file row has a ✕ that deletes the
+  file from the disk after asking (`fw_delete`), except the one a
+  running download is reading. **Stop** asks the
   download strategy to give up cooperatively (`SwdlStrategy.stop`); the
   bytes themselves go down through `bus.sdo_download`, a segmented domain
   download that writes them in the order it is given — which the hex
