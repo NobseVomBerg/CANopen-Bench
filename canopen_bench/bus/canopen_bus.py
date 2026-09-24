@@ -135,18 +135,50 @@ def _abort_text(exc: canopen.SdoAbortedError) -> str:
 #: decides how often the caller's ``progress`` hears about it.
 _DOWNLOAD_CHUNK = 4096
 
-#: How long one frame of a burst waits for room in the adapter's transmit
-#: queue. IXXAT waits for it when a send carries a timeout and fails at
-#: once when it does not (post instead of send), and its queue holds 16
-#: frames — a burst fills that within microseconds.
+#: How long one send waits for room in the adapter's transmit queue.
+#: IXXAT waits for it when a send carries a timeout and fails at once when
+#: it does not (post instead of send), and its queue holds 16 frames — a
+#: burst fills that within microseconds, and keeps it full while it runs.
 _TX_WAIT_S = 0.1
-#: How long a burst keeps retrying a frame the adapter refuses before that
+#: How long a send keeps retrying a frame the adapter refuses before that
 #: counts as the adapter gone. PCAN refuses a full queue outright and has
 #: no timeout to wait with; a full queue empties within a few frame times
 #: even at 10 kbit/s, an adapter that was unplugged does not.
 _TX_GIVE_UP_S = 1.0
 #: pause between two such retries
 _TX_RETRY_S = 0.0005
+
+
+def _send_waiting(net: canopen.Network, msg: can.Message) -> None:
+    """Put one frame into the adapter's transmit queue, waiting for room
+    in it rather than failing on a full one — for *every* frame this bench
+    sends, not only a burst's.
+
+    A full queue is not a moment a sender can count on missing. A burst
+    keeps it full for as long as it runs, and it is still full when the
+    burst returns: returning means the last frame is *queued*, not on the
+    wire. The SDO write that closes a firmware block goes out right then,
+    and posted without a timeout it met the full queue and took the whole
+    connection down with it, a few blocks into a download.
+
+    Raises the adapter's error once it has refused for ``_TX_GIVE_UP_S`` —
+    that is an adapter gone, and the caller's to report.
+    """
+    give_up = None
+    while True:
+        bus = net.bus
+        if bus is None:
+            raise RuntimeError("Not connected to CAN bus")
+        try:
+            with net.send_lock:
+                bus.send(msg, timeout=_TX_WAIT_S)
+            return
+        except can.CanError:
+            now = time.monotonic()
+            give_up = give_up or now + _TX_GIVE_UP_S
+            if now >= give_up:
+                raise
+            time.sleep(_TX_RETRY_S)
 
 
 @contextmanager
@@ -360,15 +392,22 @@ class CanopenBus(BusInterface):
         the trace queue at send time."""
         self._trace = _TraceListener()
         network.listeners.append(self._trace)
-        trace, original_send = self._trace, network.send_message
+        trace = self._trace
 
+        # canopen's own send_message, with the one change that matters:
+        # the frame waits for room in the transmit queue (_send_waiting)
+        # instead of being posted into it. Every SDO, NMT and raw frame
+        # goes through here.
         def send_and_trace(can_id: int, data, remote: bool = False):
             now = time.time()
             trace.queue.append(("TX", can.Message(
                 arbitration_id=can_id, data=bytes(data),
                 is_extended_id=can_id > 0x7FF, is_remote_frame=remote,
                 timestamp=now), now))
-            return original_send(can_id, data, remote)
+            _send_waiting(network, can.Message(
+                arbitration_id=can_id, data=bytes(data),
+                is_extended_id=can_id > 0x7FF, is_remote_frame=remote))
+            network.check()
 
         network.send_message = send_and_trace
 
@@ -513,16 +552,11 @@ class CanopenBus(BusInterface):
             self._connection_lost(exc)
 
     def send_frames(self, cob: int, payloads, stop=None, gap: float = 0.0) -> int:
-        """A burst that waits for the adapter instead of failing on it.
-
-        ``send_raw`` hands python-can one frame without a timeout, and a
-        refused frame there is a lost connection. That is right for a frame
-        now and then, and wrong for a burst: IXXAT then *posts* into a
-        transmit queue of 16 frames and fails as soon as it is full, which
-        a burst sent back to back reaches at once. Each frame here is sent
-        with a timeout (IXXAT waits for room), and a refusal is retried for
-        up to ``_TX_GIVE_UP_S`` (PCAN refuses a full queue and ignores the
-        timeout) — only an adapter that keeps refusing is a lost one.
+        """A burst that waits for the adapter instead of failing on it —
+        every frame through ``_send_waiting``, which waits out a full
+        transmit queue and gives up only on an adapter that keeps refusing.
+        A frame per ``send_raw`` would do the same now, one thread hop and
+        one trace-hook call per frame slower.
 
         Mirrored into the trace like every frame this bus sends, once it
         went out.
@@ -535,21 +569,11 @@ class CanopenBus(BusInterface):
 
         def one(data: bytes) -> bool:
             msg = can.Message(arbitration_id=cob, data=bytes(data), is_extended_id=extended)
-            give_up = None
-            while True:
-                try:
-                    if net.bus is None:
-                        raise RuntimeError("Not connected to CAN bus")
-                    with net.send_lock:
-                        net.bus.send(msg, timeout=_TX_WAIT_S)
-                    break
-                except (can.CanError, OSError, RuntimeError) as exc:
-                    now = time.monotonic()
-                    give_up = give_up or now + _TX_GIVE_UP_S
-                    if now >= give_up or self.network is not net:
-                        self._connection_lost(exc)
-                        return False
-                    time.sleep(_TX_RETRY_S)
+            try:
+                _send_waiting(net, msg)
+            except (can.CanError, OSError, RuntimeError) as exc:
+                self._connection_lost(exc)
+                return False
             if trace is not None:
                 now = time.time()
                 msg.timestamp = now

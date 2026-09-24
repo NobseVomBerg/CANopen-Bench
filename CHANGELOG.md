@@ -85,7 +85,9 @@ development; the version counts from here.
   thread, as fast as the adapter takes them — a full transmit queue is
   waited out rather than taken for a lost adapter, `stop` is asked before
   every frame and an optional `gap` is kept exactly by the sending thread.
-  What a PDO firmware download sends its blocks with
+  What a PDO firmware download sends its blocks with. Every other frame
+  the bench sends waits out a full transmit queue the same way, so the
+  SDO request that follows a burst is not taken for a lost adapter
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;
