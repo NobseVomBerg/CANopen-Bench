@@ -468,3 +468,17 @@ def test_the_firmware_list_picks_a_file_and_refuses_the_ones_nobody_knows():
     assert "title=${unknown ? 'no installed extension knows this format'" in swdl
     assert "${f.ver || f.file}" in swdl, "an unknown file still shows its name"
     assert "${w.folder}" in swdl, "the page has to say which folder it is listing"
+
+
+def test_a_firmware_file_has_a_delete_that_asks_first():
+    """The folder is often the firmware project's build output, and the
+    file goes off the disk — so the ✕ asks, names the folder, and does
+    not also select the row it sits in."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    swdl = app.split("function SwdlPage(")[1].split("\nfunction ")[0]
+    assert "send('fw_delete', { file: f.file })" in swdl
+    assert "const canDelete = f.disk && !(w.run && on)" in swdl, \
+        "no ✕ on an entry without a file, nor on the one being downloaded"
+    delete = swdl.split("const del = ")[1].split("};")[0]
+    assert "ev.stopPropagation()" in delete, "a click on ✕ must not select the row"
+    assert "confirm(" in delete and "${w.folder}" in delete

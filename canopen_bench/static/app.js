@@ -1988,6 +1988,17 @@ function SwdlPage({ s }) {
           // about three things at once — but it cannot be picked: what the
           // bench would do with those bytes is nobody's to say
           const unknown = f.known === false;
+          // only a row with a file behind it can be deleted, and not the
+          // one a running download is reading. Asked first: the folder is
+          // often the firmware project's build output, and what goes is
+          // gone from the disk, not from a list
+          const canDelete = f.disk && !(w.run && on);
+          const del = (ev) => {
+            ev.stopPropagation();
+            if (confirm(`Delete "${f.file}" from the firmware folder?\n\n${w.folder}\n\nThe file is removed from the disk.`)) {
+              send('fw_delete', { file: f.file });
+            }
+          };
           return html`
           <div class=${unknown ? '' : 'hv'} onClick=${unknown ? null : () => send('swdl_fw', { file: f.file })}
             title=${unknown ? 'no installed extension knows this format' : f.file}
@@ -1996,6 +2007,11 @@ function SwdlPage({ s }) {
             <span style="font:11.5px ${MONO};flex:1;color:${unknown ? 'var(--faint)' : 'var(--tx)'}">${f.ver || f.file}</span>
             ${f.tag && html`<span style="font:600 10.5px ${MONO};color:${f.tag === 'latest' ? 'var(--grn)' : 'var(--dim)'};background:${f.tag === 'latest' ? 'var(--grn-soft)' : 'var(--chip)'};padding:1px 7px;border-radius:4px">${f.tag}</span>`}
             <span style="font:10.5px ${MONO};color:var(--faint)">${f.meta}</span>
+            ${''/* the column stays where there is no ✕, so the meta
+                  text of every row ends in the same place */}
+            <span class="${canDelete ? 'hv' : ''}" onClick=${canDelete ? del : null}
+              title=${canDelete ? 'Delete this file from the firmware folder' : ''}
+              style="width:14px;flex:none;text-align:center;color:var(--faint);cursor:${canDelete ? 'pointer' : 'default'}">${canDelete ? '✕' : ''}</span>
           </div>`;
         })}
         ${!w.fw.length && html`<div style="padding:14px;text-align:center;color:var(--faint);font-size:12px">No firmware files in the folder.</div>`}
