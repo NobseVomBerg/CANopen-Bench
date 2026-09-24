@@ -290,6 +290,10 @@ dead network down on a background thread and reports through
 `BusInterface.on_lost`; `Bench` then auto-disconnects (state, device list,
 log entry `BUS  connection lost — … — auto-disconnected`) and pushes the
 snapshot to the browsers. Details in `docs/ablaeufe/A-01-verbinden.md`.
+A *full* transmit queue is not that: every frame is sent with a timeout
+and a refusal retried for up to a second (`_send_waiting`), so a burst
+that keeps the adapter's queue full cannot make the next SDO request look
+like an unplugged adapter.
 
 For tests, any `BusInterface` implementation can be injected via
 `Bench(db, bus=...)` / `create_app(bus=...)`; the same goes for plugins
