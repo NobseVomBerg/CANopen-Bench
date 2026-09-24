@@ -5854,7 +5854,10 @@ class Bench:
             known = self._fw_cache.get(path.name)
             if known is None or known[0] != stamp:
                 self._fw_cache[path.name] = known = (stamp, self._describe_fw(path))
-            out.append({"file": path.name} | known[1])
+            # `disk`: there is a file behind this row, so the page may
+            # offer to delete it — the entries a plugin or the demo
+            # catalog lists have none
+            out.append({"file": path.name, "disk": True} | known[1])
         return out
 
     def _fw_catalog(self) -> list[dict]:
@@ -5873,9 +5876,11 @@ class Bench:
         into something no extension knows would otherwise still be what
         Start downloads.
         """
-        static = [{**f, "file": f["ver"], "known": True} for f in self._plugin_fw]
+        static = [{**f, "file": f["ver"], "known": True, "disk": False}
+                  for f in self._plugin_fw]
         if self.adapter == "demo":
-            static += [{**f, "file": f["ver"], "known": True} for f in data.FIRMWARE]
+            static += [{**f, "file": f["ver"], "known": True, "disk": False}
+                       for f in data.FIRMWARE]
         entries = self._fw_files() + static
         if not any(e["file"] == self.fw_sel and e["known"] for e in entries):
             self.fw_sel = next((e["file"] for e in entries if e["known"]), "")
@@ -5930,6 +5935,43 @@ class Bench:
         # usually a missing extension package rather than a bad file
         note = "" if known else " — no installed extension knows this format"
         self.log(f'SWDL "{name}" uploaded ({size}){note}', "info" if known else "emcy0")
+
+    def act_fw_delete(self, p: dict) -> None:
+        """Delete one file from the firmware folder — for real, off the
+        disk, because the folder is the library and there is nowhere else
+        a file could be taken out of it.
+
+        Only a name the listing shows as a file: a bare name, in this
+        folder, and never a path — the page sends the name it listed, and
+        anything with a directory in it came from somewhere else. The
+        entries a plugin or the demo catalog lists have no file and are
+        refused the same way.
+
+        Not the file a download is reading. The strategy opens it when it
+        needs the bytes, and the selection would move on to another file
+        mid-run — which the page would then show as what is being
+        flashed. After the run it can go.
+
+        The selection repairs itself through ``_fw_catalog``, the same
+        way it does when the file is deleted outside the tool.
+        """
+        name = str(p.get("file", ""))
+        folder = Path(self.paths.get("fw", ""))
+        listed = {e["file"] for e in self._fw_files()}
+        if Path(name).name != name or name not in listed:
+            self.log(f'SWDL "{name}" not deleted — no such file in {folder}', "emcy0")
+            return
+        if self.swdl_run and name == self.fw_sel:
+            self.log(f'SWDL "{name}" not deleted — it is being downloaded', "emcy0")
+            return
+        try:
+            (folder / name).unlink()
+        except OSError as exc:  # open in another program, read-only share…
+            self.log(f'SWDL "{name}" not deleted — {exc}', "emcy0")
+            return
+        self._fw_cache.pop(name, None)
+        self._fw_catalog()  # moves the selection off the file that went
+        self.log(f'SWDL "{name}" deleted from {folder}')
 
     def act_swdl_fw(self, p: dict) -> None:
         """Select a firmware by file name. ``ver`` is what the page sent

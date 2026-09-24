@@ -78,6 +78,9 @@ development; the version counts from here.
 - Tests page: the Result filter's `not run · 30 d` lists the cases the
   results folder has no run of in that window — the ones that are due —
   so `all` and Start run exactly those; a SKIP does not count as a run
+- SWDL page: a ✕ on every file in the firmware library deletes it from
+  the folder after asking — not the one a running download is reading,
+  and not the entries that have no file behind them
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;
