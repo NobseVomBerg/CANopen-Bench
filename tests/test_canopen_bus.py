@@ -299,7 +299,8 @@ def test_rx_error_auto_disconnects_and_reports(master):
     master.disconnect()  # must not raise
 
 
-def test_sdo_send_error_returns_connection_lost(master):
+def test_sdo_send_error_returns_connection_lost(master, monkeypatch):
+    monkeypatch.setattr(cb, "_TX_GIVE_UP_S", 0.05)  # refused for good, not full
     lost = threading.Event()
     master.on_lost = lambda reason: lost.set()
 
@@ -401,7 +402,38 @@ def test_a_gap_is_kept_between_the_frames():
     assert pace_frames([b"x"] * 3, lambda d: False) == 0, "a lost interface ends it"
 
 
-def test_nmt_send_error_does_not_raise_and_tears_down(master):
+def test_an_sdo_request_behind_a_full_queue_waits_for_it(master):
+    """What broke a firmware download a few blocks in: a burst returns
+    when its last frame is *queued*, the SDO write that closes the block
+    goes out right then — and posted into the still-full queue, IXXAT
+    refused it and the bench took that for the adapter gone. Every send
+    waits for room now, SDO and NMT as much as a burst."""
+    lost = threading.Event()
+    master.on_lost = lambda reason: lost.set()
+    real_send, timeouts, refusals = master.network.bus.send, [], [0]
+
+    def full_for_a_moment(msg, timeout=None):
+        timeouts.append(timeout)
+        if refusals[0] < 3:
+            refusals[0] += 1
+            raise can.CanOperationError("function canChannelPostMessage failed "
+                                        "(Transmit queue full.)")
+        return real_send(msg, timeout)
+
+    master.network.bus.send = full_for_a_moment
+
+    res = master.sdo_read(SLAVE_NODE_ID, "0x2000", "00")
+    master.nmt("start", SLAVE_NODE_ID)
+    master.send_raw(0x181, b"\x01")
+
+    assert res.ok and res.value == "0x0000002A"
+    assert refusals[0] == 3
+    assert all(t for t in timeouts), "no frame is posted without waiting for room"
+    assert master.network is not None and not lost.is_set()
+
+
+def test_nmt_send_error_does_not_raise_and_tears_down(master, monkeypatch):
+    monkeypatch.setattr(cb, "_TX_GIVE_UP_S", 0.05)  # refused for good, not full
     def broken_send(msg, timeout=None):
         raise can.CanOperationError("send: port gone")
 
