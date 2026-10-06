@@ -161,12 +161,25 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return None
         return None if val in _NMT_COMMANDS else f"nmt: unknown command {val!r}"
     if key == "wait":
-        # the mapping form exists only so a wait can carry its `note`: "wait
+        # the mapping form exists so a wait can carry its `note`: "wait
         # 4 s" in a report says nothing, "waiting for the reset and the
-        # lifter cycle" says why four
+        # lifter cycle" says why four.
+        #
+        # And so it can take its length from a register. `ms` is a value
+        # like any other — a number, a hex string, Rn — resolved when the
+        # step runs: a case reads how long the device holds off (a delay
+        # it reports in ms) and waits exactly that. `s` stays a plain
+        # number; a register holds whole numbers, and whole seconds are
+        # too coarse.
         if isinstance(val, dict):
-            if unknown := set(val) - {"s"} - _NOTE:
+            if unknown := set(val) - {"s", "ms"} - _NOTE:
                 return f"wait: unknown field(s) {sorted(unknown)}"
+            if "s" in val and "ms" in val:
+                return "wait: s or ms, not both"
+            if "ms" in val:
+                ms = val["ms"]
+                return None if _is_value(ms) and not (isinstance(ms, int) and ms < 0) \
+                    else "wait: ms needs a number of milliseconds or a register holding one"
             val = val.get("s")
         return None if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= 0 \
             else "wait: needs a duration in seconds"

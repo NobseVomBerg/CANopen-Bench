@@ -1850,6 +1850,59 @@ def test_loop_steps_read_as_flow_not_as_traffic(tc_bench):
             assert step.state == "flow", step.text
 
 
+# -- a wait as long as a register says ----------------------------------------
+
+WAIT_FROM_REGISTER_TC = """\
+id: "0044"
+name: "a wait the case worked out first"
+steps:
+  - mov: {to: R3, value: 300}
+  - wait: {ms: R3, note: "as long as the device holds off"}
+"""
+
+
+def test_a_wait_may_last_as_long_as_a_register_says(tc_bench):
+    """A case reads how long the device holds off and waits exactly that
+    before it goes on — the device ignores what comes sooner. Written down
+    as a number when the case was converted, that wait came out as 0 s,
+    and the case failed whenever the delay had not run out yet."""
+    _add_tc(tc_bench, "TC0044_wait_register.yaml", WAIT_FROM_REGISTER_TC)
+    run_selected(tc_bench, {"0044"})
+    assert tc_bench.results == {"0044": "PASS"}
+    case = tc_bench._run_cases[0]
+    assert case.seconds >= 0.3
+    wait = case.steps[-1]
+    assert wait.text == "wait R3 = 300 ms"      # the register, and what it held
+    assert wait.note == "as long as the device holds off"
+    assert _step_text("wait", {"ms": "R3"}) == "wait R3 ms"   # the file alone
+
+
+LONG_WAIT_TC = """\
+id: "0045"
+name: "a wait nobody meant"
+steps:
+  - mov: {to: R0, value: 0}
+  - sub: {to: R0, value: 1}
+  - wait: {ms: R0}
+"""
+
+
+def test_a_stop_ends_a_wait_rather_than_sitting_it_out(tc_bench):
+    """A length worked out at run time is in no file to check: a register
+    that wrapped below zero is 49 days. The stop has to end the wait."""
+    _add_tc(tc_bench, "TC0045_long_wait.yaml", LONG_WAIT_TC)
+
+    def stop_while_waiting(bench: Bench) -> None:
+        if (bench.run_prog or {}).get("text", "").startswith("wait"):
+            bench.dispatch("run_stop", {})
+
+    run_selected(tc_bench, {"0045"}, during=stop_while_waiting, timeout=2.0)
+    assert tc_bench.results == {"0045": "ERROR"}
+    wait = tc_bench._run_cases[0].steps[-1]
+    assert wait.text == "wait R0 = 4294967295 ms"
+    assert (wait.state, wait.detail) == ("error", "aborted")
+
+
 # -- how far back an EMCY check may look -------------------------------------
 
 GAP_TC = """\

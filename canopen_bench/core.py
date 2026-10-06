@@ -513,6 +513,8 @@ def _step_text(key: str, val) -> str:
     if key == "sdo_write":
         return f"write {_hexstr(val['index'])}:{_subhex(val['sub'])} = {val['value']}"
     if key == "wait":
+        if isinstance(val, dict) and "ms" in val:
+            return f"wait {val['ms']} ms"
         secs = val.get("s") if isinstance(val, dict) else val
         return f"wait {secs:g}s" if isinstance(secs, (int, float)) else f"wait {secs}s"
     if key == "wait_for":
@@ -1990,6 +1992,12 @@ class Bench:
             count = val.get("n") if isinstance(val, dict) else val
             if isinstance(count, str):
                 text += f" = {_resolve(count, regs, builtins or {})}"
+        if key == "wait" and regs is not None and isinstance(val, dict) \
+                and isinstance(val.get("ms"), str):
+            # the same for a wait: "wait R0 ms" does not say how long this
+            # run held still, and that is the number to hold against the
+            # delay the case read from the device
+            text = f"wait {val['ms']} = {_resolve(val['ms'], regs, builtins or {})} ms"
         if key == "sdo_write" and regs is not None and isinstance(val, dict):
             actual = _write_value(val, regs, builtins or {})
             # only when it says something the value in the line does not —
@@ -5477,7 +5485,24 @@ class Bench:
             self.log(f"TEST {tc.id} · {val}", "test")
             return "ok", ""
         if key == "wait":
-            await asyncio.sleep(float(val["s"] if isinstance(val, dict) else val))
+            if isinstance(val, dict) and "ms" in val:
+                # resolved here and not at load: the length may be a
+                # register the case filled a step earlier — a delay read
+                # from the device, a random one it has just written
+                secs = _resolve(val["ms"], regs, builtins) / 1000
+            else:
+                secs = float(val["s"] if isinstance(val, dict) else val)
+            # in slices, like every other step that waits: a length worked
+            # out at run time is in no file for anybody to check, and a
+            # stop has to end it rather than sit it out
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + secs
+            while (left := deadline - loop.time()) > 0:
+                if should_stop():
+                    return "error", "aborted"
+                if not self.connected:
+                    return "error", "connection lost"
+                await asyncio.sleep(min(0.1, left))
             return "ok", ""
         # -- bus -------------------------------------------------------------
         if key == "nmt":

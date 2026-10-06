@@ -90,6 +90,22 @@ def test_a_loop_count_may_be_a_register_but_not_a_word():
         assert tc.error and "loop" in tc.error, count
 
 
+def test_a_wait_may_take_its_milliseconds_from_a_register():
+    """A case reads how long the device holds off — a delay in ms — and
+    waits exactly that. Fixed as a number when the case was converted, it
+    came out as `wait: 0`, which waits nothing and still reads like a
+    wait. `s` stays a number: whole seconds from a register are too
+    coarse, and one unit that can be a register is enough."""
+    for wait in ("0.5", "{s: 0.5}", "{ms: 500}", "{ms: R0}", '{ms: "0x1F4"}',
+                 "{ms: $node}", '{ms: R3, note: "as long as the device holds off"}'):
+        tc = parse_testcase(f'id: "1"\nname: x\nsteps:\n  - wait: {wait}\n', "TC1_x.yaml")
+        assert tc.error is None, f"{wait}: {tc.error}"
+    for wait in ("R0", "{s: R0}", "{ms: -1}", "{ms: 1.5}", "{ms: nonsense}",
+                 "{ms: true}", "{s: 1, ms: 1000}", "{msec: 5}", '{note: "how long?"}'):
+        tc = parse_testcase(f'id: "1"\nname: x\nsteps:\n  - wait: {wait}\n', "TC1_x.yaml")
+        assert tc.error and "wait" in tc.error, wait
+
+
 def test_parse_rejects_unknown_primitive_and_bad_heartbeat():
     tc = parse_testcase('id: "1"\nname: x\nsteps: [{blink: 3}]\n', "TC1_x.yaml")
     assert tc.error and "blink" in tc.error
