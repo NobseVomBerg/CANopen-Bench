@@ -1708,12 +1708,19 @@ class Bench:
 
         A run writes hundreds of times; a folder that cannot be written
         is worth saying once, not once per step.
+
+        ``newline=""``, because what lands here is later addressed by byte:
+        the two header rows `_patch_case` writes over, the summary row
+        `_live_summary_row` cuts. Both offsets count one byte per line end.
+        A text file on Windows writes two (CR LF), which put every row a
+        few bytes from where it was counted — the patch never once matched
+        there, and every case end wrote its whole page again.
         """
         try:
             folder = self._results_dir()
             folder.mkdir(parents=True, exist_ok=True)
             reportlib.write_stylesheet(folder)
-            with (folder / name).open(mode, encoding="utf-8") as out:
+            with (folder / name).open(mode, encoding="utf-8", newline="") as out:
                 out.write(text)
         except OSError as exc:
             if not self._report_live_failed:
@@ -1847,15 +1854,18 @@ class Bench:
             reportlib.write_stylesheet(folder)
             # a page the run already closed off stays as it is — the run
             # wrote it once, at the end of that case, and writing every
-            # page again here would be a second full copy of a long run
+            # page again here would be a second full copy of a long run.
+            # newline="" like the live writes (_report_write): one file, one
+            # kind of line end, whichever of the two wrote it last
             for case in run.cases:
                 if case.file not in self._finalised:
                     (folder / self._case_file(case)).write_text(
-                        reportlib.case_html(case), encoding="utf-8")
+                        reportlib.case_html(case), encoding="utf-8", newline="")
             summary = f"{stamp}__summary.html"
-            (folder / summary).write_text(reportlib.summary_html(run), encoding="utf-8")
+            (folder / summary).write_text(reportlib.summary_html(run),
+                                          encoding="utf-8", newline="")
             (folder / f"{stamp}__summary.json").write_text(
-                reportlib.summary_json(run), encoding="utf-8")
+                reportlib.summary_json(run), encoding="utf-8", newline="")
         except OSError as exc:
             # never let a full disk or a bad path swallow the run itself —
             # the verdicts are already in the log and on screen
@@ -6302,7 +6312,11 @@ class Bench:
         while path.exists():  # same second twice (off and on again) — don't append to the old one
             n += 1
             path = self.trace_dir / f"{stem}_{n}.jsonl"
-        self._autosave_fh = path.open("w", encoding="utf-8")
+        # newline="": `_autosave_bytes` counts what is written, and it is
+        # what rolls the segment and what the chip shows. On Windows a text
+        # file adds a CR to every row, and the count fell a byte per frame
+        # behind the file it describes
+        self._autosave_fh = path.open("w", encoding="utf-8", newline="")
         self._autosave_name = path.name
         # a header line, so a reader can tell what it has before parsing
         # rows; the loader skips any line that is not a frame
