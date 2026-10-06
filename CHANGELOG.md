@@ -75,6 +75,9 @@ development; the version counts from here.
   frame's payload into a register as the number it carries (low byte
   first, over every byte of the frame), so a case can compute with a
   PDO's value instead of only matching it
+- `wait` can take its length from a register: `{ms: Rn}` waits as many
+  milliseconds as the register holds when the step runs, so a case can
+  sit out a delay it read from the device. A stop now ends a running wait
 - Tests page: the Result filter's `not run · 30 d` lists the cases the
   results folder has no run of in that window — the ones that are due —
   so `all` and Start run exactly those; a SKIP does not count as a run
