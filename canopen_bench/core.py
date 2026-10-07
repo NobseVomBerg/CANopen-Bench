@@ -3902,12 +3902,21 @@ class Bench:
         happened to catch — the display a plugin had just read was gone.
         A device that answers no serial number is remembered for the
         session only; every such device would otherwise share one set.
+
+        It also retires whatever the bus buffer still holds for the same
+        object. That buffer is flushed with the moment of the flush, not of
+        the frame, and this read's own answer reaches it only when the next
+        tick drains the interface — so until then it holds the value from
+        *before* the read. Flushed in that window, on a device switch or at
+        shutdown, it put the device back one read: every session opened on
+        the display as it was before the last refresh.
         """
         self.obj_vals[key] = value
         self.obj_vals_at[key] = time.monotonic()
         sel = self.sel_devices
         if sel and sel[0]["sn"] != NO_SERIAL:
             self.db.remember_value(sel[0]["sn"], key, value, _stamp())
+            self._seen_dirty.discard((self._identity(sel[0]["node"]), key))
 
     def _identity(self, node: int) -> str:
         """What a value seen at a node belongs to: the device's serial
