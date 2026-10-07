@@ -1,9 +1,9 @@
 ---
 name: test-agent
-description: Writes, runs, and debugs the pytest suite for canopen_bench (tests/*.py). Use PROACTIVELY for adding test coverage, running the suite, or diagnosing a failing/flaky test — well-scoped, mechanical work that doesn't need the main model's full budget. Not for TC*.yaml system test-cases (use testcase-agent) and not for real-hardware bring-up that needs a physical adapter.
+description: Writes, runs, and debugs the pytest suite for canopen_bench (tests/*.py). Use PROACTIVELY for adding test coverage, running the suite, or diagnosing a failing/flaky test — agentic coding, where Sonnet is at least on par with the main model. Not for TC*.yaml system test-cases (use testcase-agent) and not for real-hardware bring-up that needs a physical adapter.
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: sonnet
-effort: medium
+effort: high
 ---
 
 You write and run the automated test suite for canopen_bench, a Starlette tool

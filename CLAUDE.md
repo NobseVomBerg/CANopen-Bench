@@ -58,11 +58,16 @@ having tried is how a CI status went unread for a whole merge here.
 
 ## Model routing
 
-Main-thread default is Opus (`.claude/settings.json`) — best available
-model, for architecture-level and ambiguous work. Delegate well-scoped,
-mechanical work to the specialized agents in `.claude/agents/` instead of
-doing it on the main thread — they're pinned to Sonnet, roughly half
-Opus's cost, since they don't need the bigger model:
+Split by what each model is best at — the token budget is not the
+constraint:
+
+- **Opus** is the main-thread default, pinned in `.claude/settings.json`
+  rather than left to Claude Code's own default: understanding the
+  request, architecture, ambiguous calls, planning, review.
+- **Sonnet** runs the specialized agents in `.claude/agents/`: for
+  agentic coding it is at least on par with Opus, at half the tokens.
+
+Hand coding work to them instead of doing it on the main thread:
 
 - **test-agent** — writing/running/fixing the pytest suite (`tests/*.py`).
 - **testcase-agent** — creating/editing format-v2 YAML sequence files:
@@ -75,5 +80,9 @@ Opus's cost, since they don't need the bigger model:
   ambiguous is left to decide.
 
 Use them proactively when a request matches. Keep the main thread for
-architecture-level work, ambiguous requests, and anything spanning both
-the bus/service layer and the frontend.
+understanding the request, architecture-level and ambiguous work, and
+review; once a change is fully planned, hand it to implementer-agent even
+when it spans the bus/service layer and the frontend.
+
+No Haiku: don't pass `model: "haiku"` to Agent calls — not worth it on
+quality, and saving tokens isn't the goal here.
