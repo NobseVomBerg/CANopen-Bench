@@ -4772,6 +4772,51 @@ def test_the_bus_values_reach_the_database_every_few_seconds(connected_bench, mo
     assert bench.db.last_values(sn)["0x2040:01"] == "0x0032"
 
 
+def test_a_read_is_not_undone_by_an_older_bus_value_on_reselect(connected_bench):
+    """Selecting a device flushes the bus buffer before it reads the
+    database back, and the buffer used to write whatever it held, stamped
+    with the moment of the flush. A read's own answer sits in the
+    interface queue until the next tick drains it, so the buffer still had
+    the value from before the read — and switching away and back put the
+    device back where it had been a read earlier."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench._bus_sample(1, 0x2040, 0x01, 0x0011, 2)    # carried past, not flushed yet
+    bench.remember("0x2040:01", "0x00C8")             # then read: newer
+
+    bench.dispatch("dev_toggle", {"node": 1})         # away: the flush
+    bench.dispatch("dev_toggle", {"node": 1})         # back: the restore
+
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
+    assert bench.obj_vals["0x2040:01"] == "0x00C8"
+
+
+def test_shutdown_does_not_put_back_what_a_later_read_replaced(connected_bench):
+    """The form of it that survives a restart: the last read before the
+    bench was closed lost to a bus value from seconds earlier, so every
+    session opened on the state one read behind the last one."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench._bus_sample(1, 0x2040, 0x01, 0x0011, 2)
+    bench.remember("0x2040:01", "0x00C8")
+    bench.shutdown()
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
+
+
+def test_a_bus_value_after_a_read_still_wins(connected_bench):
+    """Only what the read made obsolete is dropped. What the bus carries
+    afterwards is newer than the read, and is what gets written down."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    sn = bench.sel_devices[0]["sn"]
+    bench.remember("0x2040:01", "0x00C8")
+    bench._bus_sample(1, 0x2040, 0x01, 0x0033, 2)    # later on the bus
+    bench._flush_seen()
+    assert bench.db.last_values(sn)["0x2040:01"] == "0x0033"
+
+
 def test_shutdown_writes_the_last_seconds_of_the_bus(connected_bench):
     bench = connected_bench
     sn = bench.devices[0]["sn"]
