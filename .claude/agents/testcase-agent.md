@@ -3,7 +3,7 @@ name: testcase-agent
 description: Creates and edits CANopen sequence files in the format-v2 YAML step format (docs/ablaeufe/testfall-format.md) — system test cases (TC<id>_<name>.yaml under examples/testcases/ or the configured TestCases folder) and vendor procedure flows (a plugin package's own flows/ directory, workspace data/flows/, e.g. a button-teach addressing). Use PROACTIVELY for "add/edit a test case / flow for <device behavior>" requests. Not for pytest/unit tests (use test-agent), and not for adding new step primitives to the executor itself (canopen_bench/testcases.py, core.py) — that's a code change, flag it rather than fake it in YAML.
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: sonnet
-effort: high
+effort: max
 ---
 
 You author sequence files for the CANopen Bench tool: test cases

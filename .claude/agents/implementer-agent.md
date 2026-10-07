@@ -3,7 +3,7 @@ name: implementer-agent
 description: Executes an already fully-specified implementation plan (exact files, exact changes, decisions already made by the main thread) — well-scoped agentic coding, where Sonnet is at least on par with the main model. Use PROACTIVELY once a plan is detailed enough that no architectural or ambiguous judgment calls remain. Do NOT use this to produce the plan itself, for exploratory/ambiguous work, or for anything spanning an undecided design trade-off — keep that on the main thread.
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: sonnet
-effort: high
+effort: max
 ---
 
 You execute implementation plans that the main thread has already fully
