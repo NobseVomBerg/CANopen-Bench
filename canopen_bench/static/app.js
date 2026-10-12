@@ -1965,13 +1965,14 @@ function SwdlPage({ s }) {
     : w.done ? `finished with errors — ${counts}`
     : w.run || failed ? counts
     : `${selDevs.length} target(s) · v${selLabel}`;
-  // One row as tall as the page, and the library card no taller than that
-  // row, so a long folder scrolls inside its own list. Grown to its content
-  // instead, the row carried the page down with it, and the Download box
-  // beside it — targets, Start, progress — scrolled out of view while a
-  // file was being picked from the bottom of the list. The Download box
-  // keeps its own height; the page still scrolls as a whole if a window is
-  // too short for even that.
+  // One row as tall as the page, and neither card taller than that row, so
+  // each long list scrolls inside itself. Grown to its content instead, the
+  // row carried the page down with it: a long firmware folder took Start
+  // and the progress out of view while a file was picked from the bottom of
+  // it, and enough targets did the same to the mode switch and Start below
+  // them. Everything else in a card keeps its size — only the two lists
+  // give way. The page still scrolls as a whole if a window is too short
+  // for even that.
   return html`
   <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1.2fr;grid-template-rows:minmax(0,1fr);gap:14px;align-items:start;min-height:0">
     <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;max-height:100%;min-height:0;box-sizing:border-box">
@@ -2032,11 +2033,15 @@ function SwdlPage({ s }) {
       </div>
     </div>
 
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;max-height:100%;min-height:0;box-sizing:border-box">
       <div style="font-weight:600;font-size:13px">Download</div>
       <div style="font-size:11px;color:var(--dim);font-weight:600">TARGETS <span style="font-weight:400;color:var(--faint)">· selection from Devices box</span></div>
       ${!selDevs.length && html`<div style="border:1px solid var(--bd2);border-radius:7px;padding:14px;color:var(--faint);font-size:12px">No devices selected — tick target devices in the Devices box on the left.</div>`}
-      <div style="display:flex;flex-direction:column;gap:8px">
+      ${''/* the targets give way, and nothing else here: the mode switch,
+            Start and the line counting done and failed stay in view —
+            that line is the whole run at a glance while the list
+            scrolls */}
+      <div style="display:flex;flex-direction:column;gap:8px;min-height:0;overflow-x:hidden;overflow-y:auto">
         ${selDevs.map((d) => {
           const p = Math.round(w.prog[String(d.node)] || 0);
           const err = errs[String(d.node)];
