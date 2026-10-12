@@ -1965,9 +1965,16 @@ function SwdlPage({ s }) {
     : w.done ? `finished with errors — ${counts}`
     : w.run || failed ? counts
     : `${selDevs.length} target(s) · v${selLabel}`;
+  // One row as tall as the page, and the library card no taller than that
+  // row, so a long folder scrolls inside its own list. Grown to its content
+  // instead, the row carried the page down with it, and the Download box
+  // beside it — targets, Start, progress — scrolled out of view while a
+  // file was being picked from the bottom of the list. The Download box
+  // keeps its own height; the page still scrolls as a whole if a window is
+  // too short for even that.
   return html`
-  <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-content:start;min-height:0">
-    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+  <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1.2fr;grid-template-rows:minmax(0,1fr);gap:14px;align-items:start;min-height:0">
+    <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;max-height:100%;min-height:0;box-sizing:border-box">
       <div style="font-weight:600;font-size:13px">Firmware library</div>
       <!-- the input stays beside the zone, not inside it: a click on the
            input bubbles back to whatever contains it, and a drop zone that
@@ -1980,7 +1987,10 @@ function SwdlPage({ s }) {
         style="border:1.5px dashed var(--inp);border-radius:8px;padding:18px;text-align:center;color:var(--faint);font-size:12px;cursor:pointer">
         Drop a firmware file here, or click to choose — it is copied into the folder below
       </div>
-      <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
+      ${''/* the one child allowed below its content height: the title,
+            drop zone and folder line keep theirs, and only the list gives
+            way and scrolls */}
+      <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow-x:hidden;overflow-y:auto;min-height:0">
         ${w.fw.map((f) => {
           const on = w.sel === f.file;
           // a file no installed extension recognises is listed, because a
