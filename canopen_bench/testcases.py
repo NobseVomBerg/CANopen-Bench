@@ -15,7 +15,9 @@ import yaml
 from .values import base_of
 
 MANUAL_TIMEOUT_S = 120.0  # default confirmation window for `manual` steps
-MAX_STEPS = 10_000        # executed steps per case — loop runaway guard (v2)
+#: loop runaway guard (v2): executed steps per case, its preconditions and
+#: steps counted together — a flow, which has no case around it, per run
+MAX_STEPS = 10_000
 
 #: the predefined variables (v2), in the order a dump lists them — the
 #: set is for membership tests and has no order to lend
