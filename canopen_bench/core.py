@@ -574,6 +574,25 @@ def _step_text(key: str, val) -> str:
     return str(val)
 
 
+class _StepBudget:
+    """The loop runaway guard's count (``tclib.MAX_STEPS``), shared by
+    everything one case runs: its preconditions and its steps together,
+    which is what the format promises ("je Fall"). Counting each part on
+    its own let a case with preconditions run up to twice the limit before
+    it was stopped. A flow, or any other caller that passes none to
+    ``Bench._run_program``, gets one of its own per run."""
+
+    __slots__ = ("used",)
+
+    def __init__(self) -> None:
+        self.used = 0
+
+    def take(self) -> bool:
+        """Count one executed step; False once the limit is passed."""
+        self.used += 1
+        return self.used <= tclib.MAX_STEPS
+
+
 def _resolve(value, regs: dict, builtins: dict) -> int:
     """Format-v2 value: int literal, hex string, register, or builtin."""
     if isinstance(value, int) and not isinstance(value, bool):
@@ -5277,9 +5296,13 @@ class Bench:
             self._live_case_end(rec)
             return verdict, why
 
+        # one count for the whole case: the loop guard's limit is per case,
+        # preconditions and steps together (tclib.MAX_STEPS)
+        budget = _StepBudget()
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
                                               builtins, 0, on_step, stop, rec.steps,
-                                              lines=tc.precondition_lines)
+                                              lines=tc.precondition_lines,
+                                              budget=budget)
         if status in ("fail", "skip"):
             return done("SKIP", f"precondition: {why}")
         if status == "error":
@@ -5289,7 +5312,7 @@ class Bench:
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
                                               len(tc.preconditions), on_step, stop,
                                               rec.steps, allow_continue=True,
-                                              lines=tc.step_lines)
+                                              lines=tc.step_lines, budget=budget)
         if status == "ok":
             return done("PASS")
         if status == "skip":
@@ -5300,7 +5323,8 @@ class Bench:
                            regs: dict, builtins: dict, base: int,
                            on_step, should_stop, record: list | None = None,
                            allow_continue: bool = False,
-                           lines: list[int] | None = None) -> tuple[str, str]:
+                           lines: list[int] | None = None,
+                           budget: _StepBudget | None = None) -> tuple[str, str]:
         """Program-counter loop over one step list (format v2: labels, jumps,
         registers). Returns ("ok" | "fail" | "error", reason).
 
@@ -5309,7 +5333,10 @@ class Bench:
         reader looks up in the editor. A caller with no file behind it
         (a built-in case, a test) passes none and gets the count. The same
         number is ``$line`` while the step runs, so a step that puts a
-        marker on the bus carries what the report will print."""
+        marker on the bus carries what the report will print.
+        ``budget`` is the count the loop guard checks against
+        ``tclib.MAX_STEPS``: a case hands one budget to its preconditions
+        and its steps alike, every other caller gets a fresh one per call."""
         labels = {step["label"]: i for i, step in enumerate(steps)
                   if len(step) == 1 and "label" in step}
         # Where each `loop` finds its `loop_end`. Loops are flat (checked at
@@ -5330,10 +5357,10 @@ class Bench:
         loop_at: int | None = None   # the running loop's `loop` step
         loop_left = 0                # turns after the one running now
         pc = 0
-        executed = 0
+        if budget is None:
+            budget = _StepBudget()
         while pc < len(steps):
-            executed += 1
-            if executed > tclib.MAX_STEPS:
+            if not budget.take():
                 return "error", "step limit exceeded"
             if not self.connected:
                 return "error", "connection lost"

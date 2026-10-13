@@ -95,6 +95,10 @@ development; the version counts from here.
   or creating a workspace, saving a suite — instead of the browser's
   confirm and prompt boxes, which a browser lets the operator silence
   for good, after which every one of those actions did nothing
+- The 10 000-step loop guard counts a case's preconditions and steps
+  together, as the test-case format says — each part had a count of its
+  own, so a case with preconditions ran up to twice as long before it
+  was stopped. A flow keeps its limit per run
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;
