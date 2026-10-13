@@ -64,10 +64,13 @@ constraint:
 - **Opus** is the main-thread default, pinned in `.claude/settings.json`
   rather than left to Claude Code's own default: understanding the
   request, architecture, ambiguous calls, planning, review.
-- **Sonnet** runs the specialized agents in `.claude/agents/`: for
-  agentic coding it is at least on par with Opus, at half the tokens.
+- **Sonnet** runs the coding agents in `.claude/agents/`: for agentic
+  coding it is at least on par with Opus, at half the tokens.
+- **Haiku** runs scout-agent: the fastest model, good at bounded lookups
+  and extraction, far behind Sonnet on multi-step agentic work.
 
-Hand coding work to them instead of doing it on the main thread:
+Hand coding work to the Sonnet agents instead of doing it on the main
+thread:
 
 - **test-agent** — writing/running/fixing the pytest suite (`tests/*.py`).
 - **testcase-agent** — creating/editing format-v2 YAML sequence files:
@@ -79,10 +82,15 @@ Hand coding work to them instead of doing it on the main thread:
   specified (files, changes, decisions all made). Only once nothing
   ambiguous is left to decide.
 
+Send lookups to **scout-agent** instead of the built-in Explore (which
+inherits Opus): where something is defined or used, what a spec or log
+says, what git history shows — and plain check runs (ruff, pytest, a
+branch's CI status) that report rather than fix.
+
 Use them proactively when a request matches. Keep the main thread for
 understanding the request, architecture-level and ambiguous work, and
 review; once a change is fully planned, hand it to implementer-agent even
 when it spans the bus/service layer and the frontend.
 
-No Haiku: don't pass `model: "haiku"` to Agent calls — not worth it on
-quality, and saving tokens isn't the goal here.
+Haiku only through scout-agent: no `model: "haiku"` on other Agent
+calls, and nothing that writes code.
