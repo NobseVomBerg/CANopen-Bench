@@ -675,13 +675,21 @@ function SetupPage({ s }) {
         options=${s.workspaces.list.map((w) => [w, w])}
         style=${`border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 8px;font:12px ${MONO};outline:none;min-width:160px`}
         onPick=${(name, e) => {
-          if (name && name !== s.workspace && confirm(`Switch to workspace "${name}"? The bus will be disconnected.`)) send('workspace_switch', { name });
-          // put the box back by hand: the memo returns the identical vnode
-          // while `value` is unchanged, so a declined switch would leave the
-          // new name showing over the workspace that is still open
-          else e.target.value = s.workspace;
+          // put the box back by hand, and at once: it names the workspace
+          // that is open until the switch has happened, and the memo returns
+          // the identical vnode while `value` is unchanged — a declined
+          // switch would leave the new name showing over the old workspace
+          e.target.value = s.workspace;
+          if (!name || name === s.workspace) return;
+          ask({ title: 'Switch workspace', ok: 'Switch',
+                text: `Switch to workspace "${name}"? The bus will be disconnected.` })
+            .then((yes) => { if (yes) send('workspace_switch', { name }); });
         }} />
-      <span class="hv" onClick=${() => { const name = prompt('New workspace name:'); if (name) send('workspace_create', { name }); }}
+      <span class="hv" onClick=${() => ask({
+          title: 'New workspace', input: '', placeholder: 'name', ok: 'Create',
+          text: 'The bench switches to it at once — the bus will be disconnected.',
+          note: 'letters, digits, space and . _ - only',
+        }).then((name) => { if (name) send('workspace_create', { name }); })}
         style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">＋ New…</span>
       <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: data/${s.workspace}</span>
     </div>`}
@@ -1703,7 +1711,14 @@ function TestsPage({ s, ui, setUi }) {
       </div>
       <div style="flex:none;padding:8px 18px;border-top:1px solid var(--bd);background:var(--panel2);display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--dim)">
         <span><b style="color:var(--tx)">${shown.length}</b> shown</span><span><b style="color:var(--tx)">${selIds.length}</b> selected</span>
-        <span onClick=${() => { const name = prompt('Save suite as:', t.activeSuite || ''); if (name) send('suite_save', { name }); }}
+        <span onClick=${() => ask({
+            title: 'Save suite', input: t.activeSuite || '', placeholder: 'suite name', ok: 'Save',
+            // the whole selection is saved, filtered out or not — which the
+            // footer's "selected" count, being the shown ones, does not say
+            text: `The ${t.sel.length} selected test case(s)${t.sel.length > selIds.length
+              ? ` — ${t.sel.length - selIds.length} of them hidden by the filters —` : ''} and the run configuration, under one name.`,
+            note: 'a suite of the same name is replaced',
+          }).then((name) => { if (name) send('suite_save', { name }); })}
           style="margin-left:auto;color:var(--acc);font-weight:600;cursor:pointer">save suite</span>
         ${t.suites.map((name) => {
           const on = t.activeSuite === name;
@@ -2006,9 +2021,9 @@ function SwdlPage({ s }) {
           const canDelete = f.disk && !(w.run && on);
           const del = (ev) => {
             ev.stopPropagation();
-            if (confirm(`Delete "${f.file}" from the firmware folder?\n\n${w.folder}\n\nThe file is removed from the disk.`)) {
-              send('fw_delete', { file: f.file });
-            }
+            ask({ title: 'Delete firmware file', ok: 'Delete', danger: true, detail: w.folder,
+                  text: `Delete "${f.file}" from the firmware folder? The file is removed from the disk.` })
+              .then((yes) => { if (yes) send('fw_delete', { file: f.file }); });
           };
           return html`
           <div class=${unknown ? '' : 'hv'} onClick=${unknown ? null : () => send('swdl_fw', { file: f.file })}
@@ -2548,6 +2563,113 @@ function TracePage({ s }) {
   ${view === 'trace' && html`<${TraceTable} s=${s} cols=${cols} fmtTime=${fmtTime} />`}`;
 }
 
+// The tool's own confirm and prompt boxes. The browser's cannot be used:
+// from the second one on, Chrome and Edge offer to stop the page asking —
+// and once that is ticked, every later question is answered "no" without
+// being shown, until the site's permissions are reset. A ✕ that deletes
+// nothing, a workspace that will not switch, a suite that is not saved,
+// and nothing on screen to say why. So the page asks with a box of its
+// own, drawn like the folder picker below, and the answer is a promise:
+//
+//   ask({ title, text, detail?, ok?, danger? })              -> true | false
+//   ask({ title, text?, input: '', placeholder?, note?, ok? }) -> text | null
+//
+// Client state, unlike the folder picker's: it is the operator who clicked
+// who is asked, not every browser open on the bench. One question at a
+// time — a second one answers the first with "no".
+const dialogs = { open: null, seq: 0, listeners: new Set() };
+
+function ask(opts) {
+  return new Promise((resolve) => {
+    if (dialogs.open) dialogs.open.answer(false);
+    const prompting = typeof opts.input === 'string';
+    const d = {
+      ...opts,
+      prompting,
+      id: ++dialogs.seq,
+      answer: (yes, value) => {
+        if (dialogs.open !== d) return;   // answered already
+        dialogs.open = null;
+        dialogs.listeners.forEach((fn) => fn());
+        resolve(prompting ? (yes ? value : null) : !!yes);
+      },
+    };
+    dialogs.open = d;
+    dialogs.listeners.forEach((fn) => fn());
+  });
+}
+
+function AskDialog() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const fn = () => bump((n) => n + 1);
+    dialogs.listeners.add(fn);
+    return () => { dialogs.listeners.delete(fn); };
+  }, []);
+  const d = dialogs.open;
+  // keyed, so every question starts from its own text and focus
+  return d ? html`<${AskBox} key=${d.id} d=${d} />` : null;
+}
+
+function AskBox({ d }) {
+  const [val, setVal] = useState(d.prompting ? d.input : '');
+  const current = useRef(val);
+  current.current = val;
+  const field = useRef(null);
+  const down = useRef(false);
+  const ok = () => {
+    const text = current.current.trim();
+    if (d.prompting && !text) return;   // an empty name is no answer
+    d.answer(true, text);
+  };
+  useEffect(() => {
+    // the field has the keyboard at once, its text selected, as the
+    // browser's own box had it
+    if (field.current) {
+      field.current.focus();
+      field.current.select();
+    }
+    // Enter answers yes, Escape no — caught before anything else on the
+    // page sees the key, so a page's own shortcuts stay out of it
+    const onKey = (e) => {
+      if (e.key === 'Escape') d.answer(false);
+      else if (e.key === 'Enter') ok();
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+  const empty = d.prompting && !val.trim();
+  // A click beside the box is "no", like the folder picker's — but only one
+  // that started there: selecting text in the field and letting go outside
+  // it is a click on the backdrop too, and must not throw the name away.
+  return html`
+  <div onMouseDown=${(e) => { down.current = e.target === e.currentTarget; }}
+    onClick=${(e) => { if (down.current && e.target === e.currentTarget) d.answer(false); }}
+    style="position:fixed;inset:0;background:rgba(10,14,20,.4);z-index:90;display:grid;place-items:center">
+    <div role="dialog" aria-modal="true" aria-label=${d.title}
+      style="width:440px;max-width:calc(100vw - 32px);background:var(--panel);border:1px solid var(--bd);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+      <div style="padding:11px 14px;border-bottom:1px solid var(--bd);font-weight:600;font-size:12.5px;color:var(--tx)">${d.title}</div>
+      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:9px">
+        ${d.text && html`<div style="font-size:12px;color:var(--tx);line-height:1.5;overflow-wrap:anywhere">${d.text}</div>`}
+        ${d.detail && html`<div style="font:11px ${MONO};color:var(--mid);overflow-wrap:anywhere">${d.detail}</div>`}
+        ${d.prompting && html`
+          <input ref=${field} value=${val} placeholder=${d.placeholder || ''}
+            onInput=${(e) => setVal(e.target.value)}
+            style="border:1px solid var(--inp);background:var(--bg);color:var(--tx);border-radius:6px;padding:6px 9px;font:12px ${MONO};outline:none" />`}
+        ${d.note && html`<div style="font-size:10.5px;color:var(--faint)">${d.note}</div>`}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--bd)">
+        <span class="hv" onClick=${() => d.answer(false)} style="${btn.ghost}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">Cancel</span>
+        <span class=${empty ? '' : 'hv-b'} onClick=${ok}
+          style="background:${d.danger ? 'var(--red)' : 'var(--acc)'};color:#fff;font-weight:600;font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:${empty ? 'default' : 'pointer'};opacity:${empty ? '.45' : '1'}">${d.ok || 'OK'}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 // server-side directory picker behind the Browse… buttons: the browser can't
 // open a native dialog for paths on the server, so the tool renders its own
 function BrowseDialog({ b }) {
@@ -2636,6 +2758,7 @@ function App() {
       ${ui.page === 'trace' && html`<${TracePage} s=${s} />`}
       ${ui.page === 'about' && html`<${AboutPage} />`}
       ${s.browse && html`<${BrowseDialog} b=${s.browse} />`}
+      <${AskDialog} />
 
       <${ActionRefused} />
       <div style="flex:none;border-top:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column">
