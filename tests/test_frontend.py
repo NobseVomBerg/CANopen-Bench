@@ -14,7 +14,9 @@ the one place it matters is not a guard.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -481,4 +483,87 @@ def test_a_firmware_file_has_a_delete_that_asks_first():
         "no ✕ on an entry without a file, nor on the one being downloaded"
     delete = swdl.split("const del = ")[1].split("};")[0]
     assert "ev.stopPropagation()" in delete, "a click on ✕ must not select the row"
-    assert "confirm(" in delete and "${w.folder}" in delete
+    assert "ask({" in delete and "detail: w.folder" in delete
+    assert "danger: true" in delete, "a delete off the disk says so in red"
+    assert "if (yes) send('fw_delete'" in delete
+
+
+# -- the page asks with its own dialog, never with the browser's ---------------
+
+def test_the_page_never_asks_with_the_browsers_own_boxes():
+    """From the second one on, Chrome and Edge offer to stop a page asking,
+    and once that is ticked every later confirm is a silent "no" and every
+    prompt a silent nothing — until the site's permissions are reset. A
+    delete that deletes nothing and a workspace that will not switch, with
+    nothing on screen to say why. Every question goes through ``ask``."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert re.findall(r"\b(?:confirm|prompt|alert)\(", app) == []
+    for call in ("send('workspace_switch'", "send('workspace_create'",
+                 "send('suite_save'", "send('fw_delete'"):
+        before = app.split(call)[0]
+        assert "ask({" in before[-900:], f"{call} is not behind ask()"
+    # mounted once, beside the folder picker it is drawn like
+    assert app.count("<${AskDialog} />") == 1
+    assert "<${BrowseDialog} b=${s.browse} />`}\n      <${AskDialog} />" in app
+
+
+def test_the_dialog_answers_from_the_keyboard_and_not_from_a_stray_release():
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    box = app.split("function AskBox(")[1].split("\nfunction ")[0]
+    # Enter is yes and Escape is no, caught before the page's own handlers
+    assert "if (e.key === 'Escape') d.answer(false);" in box
+    assert "else if (e.key === 'Enter') ok();" in box
+    assert "window.addEventListener('keydown', onKey, true)" in box
+    assert "window.removeEventListener('keydown', onKey, true)" in box
+    # a click beside the box is no, but only one that also started there —
+    # selecting the name and letting go outside the field is not a cancel
+    assert "down.current = e.target === e.currentTarget" in box
+    assert "if (down.current && e.target === e.currentTarget) d.answer(false)" in box
+    # an empty name is no answer, and the field has the keyboard at once
+    assert "if (d.prompting && !text) return;" in box
+    assert "field.current.focus();" in box and "field.current.select();" in box
+
+
+def test_ask_answers_once_and_a_second_question_answers_the_first(tmp_path):
+    """Run the store itself, not a reading of it: a confirm resolves to a
+    boolean, a prompt to its text or null, an answer counts once, and a
+    question asked while another is open answers that one with no."""
+    node = _node()
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node is missing in CI — the dialog store would go untested")
+        pytest.skip("node not installed")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    store = "const dialogs = " + app.split("const dialogs = ")[1].split("\nfunction AskDialog")[0]
+    script = tmp_path / "ask.mjs"
+    script.write_text(store + """
+const seen = [];
+dialogs.listeners.add(() => seen.push(dialogs.open ? dialogs.open.id : null));
+const out = {};
+const yes = ask({ title: 'a', text: 'x' });
+dialogs.open.answer(true);
+dialogs.open && dialogs.open.answer(false);
+out.yes = await yes;
+const name = ask({ title: 'b', input: 'old' });
+dialogs.open.answer(true, 'new');
+out.name = await name;
+const first = ask({ title: 'c', input: '' });
+const second = ask({ title: 'd', text: 'y' });
+out.first = await first;
+out.openAfterSecond = dialogs.open && dialogs.open.title;
+dialogs.open.answer(false);
+out.second = await second;
+const late = dialogs.open;
+out.closed = late === null;
+out.seen = seen;
+console.log(JSON.stringify(out));
+""", encoding="utf-8")
+    done = subprocess.run([node, str(script)], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    out = json.loads(done.stdout)
+    assert out["yes"] is True, "a confirm answers a boolean"
+    assert out["name"] == "new", "a prompt answers its text"
+    assert out["first"] is None, "a question asked over another answers that one with no"
+    assert out["openAfterSecond"] == "d"
+    assert out["second"] is False and out["closed"] is True
+    assert out["seen"] == [1, None, 2, None, 3, None, 4, None]

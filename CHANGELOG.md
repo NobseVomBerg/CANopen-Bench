@@ -91,6 +91,10 @@ development; the version counts from here.
   What a PDO firmware download sends its blocks with. Every other frame
   the bench sends waits out a full transmit queue the same way, so the
   SDO request that follows a burst is not taken for a lost adapter
+- The page asks with its own dialog — deleting a firmware file, switching
+  or creating a workspace, saving a suite — instead of the browser's
+  confirm and prompt boxes, which a browser lets the operator silence
+  for good, after which every one of those actions did nothing
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;
