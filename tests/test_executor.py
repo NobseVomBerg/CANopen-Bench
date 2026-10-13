@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
-from canopen_bench import data
+import canopen_bench.testcases as tclib
+from canopen_bench import core, data
 from canopen_bench import report as reportlib
 from canopen_bench.core import Bench, _step_text
 from canopen_bench.db import Db
@@ -262,6 +263,83 @@ def test_endless_loop_hits_step_limit_guard(tc_bench):
     run_selected(tc_bench, {"0010"})  # all-local steps (label/jump) — 10000 iterations, still fast
     assert tc_bench.results == {"0010": "ERROR"}
     assert any("step limit exceeded" in ln["msg"] for ln in tc_bench.logs)
+
+
+# -- the step limit is per case: preconditions and steps share one count ----
+
+#: 2500 turns of a three-step loop: 7501 executed steps in each part, so
+#: either part alone stays under MAX_STEPS and the two together do not.
+#: (Even if a label were not counted, 5001 + 5001 still passes the limit.)
+PRE_AND_BODY_TC = """\
+id: "0056"
+name: "preconditions and steps share the step limit"
+preconditions:
+  - mov: {to: R1, value: 0}
+  - label: pre
+  - add: {to: R1, value: 1}
+  - jump_lt: {a: R1, b: 2500, to: pre}
+steps:
+  - mov: {to: R2, value: 0}
+  - label: body
+  - add: {to: R2, value: 1}
+  - jump_lt: {a: R2, b: 2500, to: body}
+"""
+
+PRE_ALONE_TC = """\
+id: "0057"
+name: "a long precondition alone stays under the step limit"
+preconditions:
+  - mov: {to: R1, value: 0}
+  - label: pre
+  - add: {to: R1, value: 1}
+  - jump_lt: {a: R1, b: 2500, to: pre}
+steps:
+  - log: "body ran"
+"""
+
+
+def test_preconditions_and_steps_share_one_step_limit(tc_bench):
+    """The format promises 10 000 executed steps per case. Each part used
+    to count from zero, so a case with preconditions could run twice as
+    long before the guard stopped it."""
+    _add_tc(tc_bench, "TC0056_shared_limit.yaml", PRE_AND_BODY_TC)
+    run_selected(tc_bench, {"0056"})
+    assert tc_bench.results == {"0056": "ERROR"}
+    assert any("step limit exceeded" in ln["msg"] for ln in tc_bench.logs)
+
+
+def test_a_part_alone_under_the_limit_is_no_error(tc_bench):
+    _add_tc(tc_bench, "TC0057_pre_alone.yaml", PRE_ALONE_TC)
+    run_selected(tc_bench, {"0057"})
+    assert tc_bench.results == {"0057": "PASS"}
+
+
+LOOP_STEPS = [{"mov": {"to": "R1", "value": 0}}, {"label": "spin"},
+              {"add": {"to": "R1", "value": 1}},
+              {"jump_lt": {"a": "R1", "b": 2500, "to": "spin"}}]
+
+
+def test_a_run_without_a_budget_gets_its_own_and_a_shared_one_adds_up(tmp_path):
+    """A flow has no case around it: each run is held to the limit on its
+    own. A budget handed in is what makes two parts one case."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[])
+    bench.connected = True
+    tc = tclib.TestCase(id="1", name="step budget", steps=LOOP_STEPS)
+
+    def run(budget=None):
+        regs = {name: 0 for name in tclib.REGISTERS}
+        builtins = {"node": 1, "expected": 0, "session": None}
+        return asyncio.run(bench._run_program(
+            tc, LOOP_STEPS, 1, regs, builtins, 0, lambda step, text: None,
+            lambda: False, budget=budget))
+
+    # 7501 executed steps per run: one fits under the limit, two do not
+    assert run() == ("ok", "")
+    assert run() == ("ok", "")
+
+    shared = core._StepBudget()
+    assert run(budget=shared) == ("ok", "")
+    assert run(budget=shared) == ("error", "step limit exceeded")
 
 
 ON_TIMEOUT_TC = """\

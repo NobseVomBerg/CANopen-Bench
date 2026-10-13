@@ -347,7 +347,8 @@ und `steps` sind getrennte Programme) und werden beim Parsen geprüft.
   erscheint rot im Katalog und ist nicht ausführbar.
 - Testfälle: `id` muss zum Dateinamen-Präfix `TC<id>_` passen
   (Ablauf-Dateien sind davon ausgenommen).
-- **Schleifen-Schutz:** maximal 10 000 Schrittausführungen je Fall;
+- **Schleifen-Schutz:** maximal 10 000 Schrittausführungen je Fall,
+  Vorbedingungen und Schritte zusammengezählt (ein Ablauf: je Lauf);
   Überschreitung → ERROR („step limit exceeded").
 
 ## Plugin-Schritte
