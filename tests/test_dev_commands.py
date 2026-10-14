@@ -115,3 +115,118 @@ def test_dev_cmd_write_abort_keeps_state_and_logs_emcy(tmp_path):
     abort_log = next(log for log in reversed(bench.logs) if "abort" in log["msg"])
     assert abort_log["type"] == "emcy0"
     assert "W node 01" in abort_log["msg"]
+
+
+def test_a_boot_up_switches_off_what_the_device_had_on(tmp_path):
+    """What a command switched on lives in the device's RAM, and a restart
+    ends it — whatever made the restart, the device says so with a boot-up.
+    A badge still saying "on" for a device that forgot is how a write gets
+    refused for no visible reason. Only the device that booted is cleared."""
+    bench = _bench(tmp_path)
+    connect_and_scan(bench)
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.dispatch("dev_cmd", {"key": "su", "node": 1})
+    bench.dispatch("dev_cmd", {"key": "su", "node": 2})
+
+    bench.bus.queue_raw(0x701, b"\x00")  # node 1 has just started
+    bench._drain_frames()
+
+    node1 = next(d for d in bench.devices if d["node"] == 1)
+    node2 = next(d for d in bench.devices if d["node"] == 2)
+    assert node1["cmds"]["su"] is False
+    assert node2["cmds"]["su"] is True
+    assert bench.logs[-1]["msg"] == "CMD  SuperUser off → node 01 (the device restarted)"
+
+
+def test_a_heartbeat_is_not_a_restart(tmp_path):
+    """The heartbeat has the boot-up's COB-ID; only the single 00 byte says
+    "I just started". Reading every heartbeat as a boot-up would switch a
+    command off the moment after it was switched on."""
+    bench = _bench(tmp_path)
+    connect_and_scan(bench)
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.dispatch("dev_cmd", {"key": "su", "node": 1})
+
+    bench.bus.queue_raw(0x701, b"\x05")  # operational
+    bench._drain_frames()
+
+    node1 = next(d for d in bench.devices if d["node"] == 1)
+    assert node1["cmds"]["su"] is True
+    assert not [log for log in bench.logs if "CMD " in log["msg"] and " off " in log["msg"]]
+
+
+def test_a_reset_from_the_bench_switches_off_at_once(tmp_path):
+    """The demo bus does not answer a reset with a boot-up, and a real
+    device sends it only a moment later — a badge that waited for it would
+    show "on" for a device the operator has just reset. The reset the bench
+    sends itself clears the state right away, with nothing received yet."""
+    bench = _bench(tmp_path)
+    connect_and_scan(bench)
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("dev_cmd", {"key": "su"})
+    node1 = next(d for d in bench.devices if d["node"] == 1)
+    assert node1["cmds"]["su"] is True
+
+    bench.dispatch("nmt", {"cmd": "reset"})  # no boot-up queued, nothing drained
+
+    assert node1["cmds"]["su"] is False
+    # cause before effect: the reset is logged, then what it switched off
+    assert bench.logs[-2]["msg"].startswith("NMT  reset node")
+    assert bench.logs[-1]["msg"] == "CMD  SuperUser off → node 01 (reset node)"
+
+
+def test_a_state_change_that_is_no_restart_leaves_the_commands_on(tmp_path):
+    """Start, pre-operational and stop change what a device does on the
+    bus, not what it remembers — a command switched on stays on through
+    them, from the Devices box and from the device's own menu alike."""
+    bench = _bench(tmp_path)
+    connect_and_scan(bench)
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.dispatch("dev_toggle", {"node": 1})
+    bench.dispatch("dev_cmd", {"key": "su"})
+    node1 = next(d for d in bench.devices if d["node"] == 1)
+
+    for cmd in ("start", "preop", "stop"):
+        bench.dispatch("nmt", {"cmd": cmd})
+    for what in ("op", "preop"):
+        bench.dispatch("dev_menu", {"node": 1, "what": what})
+
+    assert node1["cmds"]["su"] is True
+    assert not [log for log in bench.logs if "CMD " in log["msg"] and " off " in log["msg"]]
+
+
+def test_a_restart_from_the_device_menu_switches_off_too(tmp_path):
+    """The device's own menu sends resets as well, reset communication
+    among them, and a device that was reset from there has forgotten just
+    the same."""
+    bench = _bench(tmp_path)
+    connect_and_scan(bench)
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+    bench.dispatch("dev_cmd", {"key": "su", "node": 2})
+    node2 = next(d for d in bench.devices if d["node"] == 2)
+    assert node2["cmds"]["su"] is True
+
+    bench.dispatch("dev_menu", {"node": 2, "what": "resetcomm"})
+    assert node2["cmds"]["su"] is False
+    assert "(reset communication)" in bench.logs[-1]["msg"]
+
+    bench.dispatch("dev_cmd", {"key": "su", "node": 2})
+    assert node2["cmds"]["su"] is True
+    bench.dispatch("dev_menu", {"node": 2, "what": "restart"})
+    assert node2["cmds"]["su"] is False
+    assert "(reset node)" in bench.logs[-1]["msg"]
+
+
+def test_a_boot_up_says_nothing_when_nothing_was_on(tmp_path):
+    """Every device boots now and then, and most of the time no command is
+    on: the log line is for the restart that changed what the screen shows,
+    not for each one."""
+    bench = _bench(tmp_path)
+    connect_and_scan(bench)
+    bench.db.eds_set_commands("dut_alpha_v2.eds", [{"key": "su", "label": "SuperUser", "badge": "SU"}])
+
+    bench.bus.queue_raw(0x701, b"\x00")
+    bench._drain_frames()
+
+    assert not [log for log in bench.logs if "CMD " in log["msg"]]

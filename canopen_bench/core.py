@@ -1581,6 +1581,10 @@ class Bench:
             self._observe_stats(row)
             if row["cls"] == "HB" and row["node"] is not None:
                 self._hb_seen[row["node"]] = time.monotonic()
+                # a boot-up: the heartbeat's COB-ID, one byte 00 — the device
+                # has just started, whatever made it
+                if row["dir"] == "RX" and row["data"].replace(" ", "") == "00":
+                    self._forget_dev_cmds(row["node"], "the device restarted")
             key = (row["cls"], row["node"])
             self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
         self.trace += rows
@@ -2698,11 +2702,17 @@ class Bench:
         if not self.sel_devices or not self.connected:
             return
         state = NMT_STATE[cmd]
+        reset = []
         for d in self.devices:
             if d["sel"]:
                 d["nmt"] = state
                 self.bus.nmt(cmd, d["node"])
+                if cmd == "reset":
+                    reset.append(d["node"])
         self.log(f"NMT  {NMT_LABEL[cmd]} → {self._sel_names()}", "nmt")
+        # after the NMT line, so the log reads cause before effect
+        for node in reset:
+            self._forget_dev_cmds(node, "reset node")
 
     def _device_commands(self, eds_file: str) -> list[dict]:
         """Device commands declared by the EDS registry entry this device is
@@ -2727,6 +2737,30 @@ class Bench:
                 return None
         dev["cmds"][cmd["key"]] = on
         return on
+
+    def _forget_dev_cmds(self, node: int, why: str) -> None:
+        """A device that restarted has forgotten what its device commands
+        switched on — that lives in its RAM, and a reset, a power cycle or
+        a watchdog ends it. The state the bench shows goes with it: a badge
+        still saying "on" for a device that has forgotten is how a write
+        gets refused for no visible reason.
+
+        Both ways the bench learns of a restart come here: the boot-up a
+        device sends whenever it starts, and a reset the bench sends itself
+        (which the demo bus answers without a boot-up). Says which commands
+        it switched off, and nothing when none was on.
+        """
+        dev = next((d for d in self.devices if d["node"] == node), None)
+        if dev is None:
+            return
+        on = [key for key, state in dev["cmds"].items() if state]
+        if not on:
+            return
+        labels = {c["key"]: c["label"] for c in self._device_commands(dev["eds"])}
+        for key in on:
+            dev["cmds"][key] = False
+        self.log(f"CMD  {', '.join(labels.get(k, k) for k in on)} off → node {node:02d} ({why})")
+        self._changed()
 
     def act_dev_cmd(self, p: dict) -> None:
         """Toggle a per-EDS device command ({key}), on one device ({node})
@@ -2770,6 +2804,8 @@ class Bench:
             if state:
                 dev["nmt"] = state
             self.log(f"NMT  {NMT_LABEL.get(cmd, 'reset comm')} → node {node:02d}", "nmt")
+            if what in ("restart", "resetcomm"):
+                self._forget_dev_cmds(node, "reset node" if what == "restart" else "reset communication")
         elif what == "eds_set":
             # The file the operator picked from the menu's list. This used to
             # be "the next enabled file", one click each in alphabetical
