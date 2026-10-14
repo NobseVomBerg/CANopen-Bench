@@ -2770,15 +2770,20 @@ class Bench:
             if state:
                 dev["nmt"] = state
             self.log(f"NMT  {NMT_LABEL.get(cmd, 'reset comm')} → node {node:02d}", "nmt")
-        elif what == "eds_next":
-            enabled = sorted(self.eds_enabled)
-            if enabled:
-                try:
-                    nxt = enabled[(enabled.index(dev["eds"]) + 1) % len(enabled)]
-                except ValueError:
-                    nxt = enabled[0]
-                dev["eds"] = nxt
-                self.log(f"EDS  node {node} manually assigned → {nxt}")
+        elif what == "eds_set":
+            # The file the operator picked from the menu's list. This used to
+            # be "the next enabled file", one click each in alphabetical
+            # order — clicked twice to get past a wrong one, a device landed
+            # on whatever came after, and took that file's display and
+            # device commands with it. Enabled files only: a disabled one is
+            # out of the way on purpose, and a name the registry does not
+            # have would assign something no scan could ever match.
+            file = str(p.get("file", ""))
+            if file not in self.eds_enabled:
+                self.log(f'EDS  node {node} — "{file}" is not an enabled EDS file', "emcy0")
+                return
+            dev["eds"] = file
+            self.log(f"EDS  node {node} manually assigned → {file}")
 
     def act_mirror_refresh(self, p: dict) -> None:
         sel = self.sel_devices
@@ -3376,6 +3381,21 @@ class Bench:
         family's pre-configuration, so dropping the file into the folder
         brings it back with its identity, code and variant already set."""
         return [e for e in self.db.eds_list() if (self.db.eds_dir / e["file"]).is_file()]
+
+    def _eds_matches(self) -> dict[str, str]:
+        """By node: the enabled EDS file the device's identity names, for
+        the device menu to mark in its list. The same lookup a scan assigns
+        with, so the mark and the scan cannot disagree — and not a compare
+        in the browser, where the device's raw identity and the registry's
+        normalized one are two spellings of one number."""
+        by_identity = self._eds_by_identity()
+        out: dict[str, str] = {}
+        for d in self.devices:
+            if d.get("ident"):
+                entry = by_identity.get(normalize_identity(d["ident"]))
+                if entry:
+                    out[str(d["node"])] = entry["file"]
+        return out
 
     def _eds_by_identity(self) -> dict[str, dict]:
         """Enabled EDS entries keyed by normalized identity. When several
@@ -7333,7 +7353,7 @@ class Bench:
             "devices": self.devices,
             "logs": self.logs[-30:],
             "emcyNew": self.emcy_new,
-            "eds": {"files": eds_files},
+            "eds": {"files": eds_files, "match": self._eds_matches()},
             "mc": self.mc | {"ref": self.mc_ref, "hbLost": sorted(self._hb_lost),
                              "teach": self.teach, "flows": self._addressing_flows(),
                              "procedures": self._flow_buttons()},
