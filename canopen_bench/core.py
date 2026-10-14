@@ -7013,9 +7013,20 @@ class Bench:
             self._catalog_cache[file] = (mtime, err)
             return err
 
+        # The object dictionary's areas (CiA 301), and only those this EDS has
+        # objects in: an empty one listed beside the rest reads as a part of
+        # the device that is there and holds nothing. The manufacturer area
+        # comes in its 0x1000 blocks — vendors lay their objects out by
+        # block, and one list from 0x2000 to 0x5FFF ran to hundreds of rows
+        # on a device using three of them, with no way to go to one. The
+        # areas above 0x9FFF were dropped without a word before; a device
+        # that has objects there now shows them.
         group_defs = [("comm", "Communication", 0x1000, 0x1FFF),
-                      ("manu", "Manufacturer", 0x2000, 0x5FFF),
-                      ("profile", "Device profile", 0x6000, 0x9FFF)]
+                      *[(f"manu-{block:04X}", "Manufacturer", block, block + 0xFFF)
+                        for block in (0x2000, 0x3000, 0x4000, 0x5000)],
+                      ("profile", "Device profile", 0x6000, 0x9FFF),
+                      ("netvar", "Network variables", 0xA000, 0xAFFF),
+                      ("sysvar", "System variables", 0xB000, 0xBFFF)]
         catalog: dict[str, list] = {k: [] for k, _, _, _ in group_defs}
 
         def add_row(var: ODVariable) -> None:
@@ -7049,7 +7060,8 @@ class Bench:
                         add_row(member)
 
         groups = [{"key": k, "label": lbl, "range": f"0x{lo:04X}–0x{hi:04X}",
-                   "count": len(catalog[k])} for k, lbl, lo, hi in group_defs]
+                   "count": len(catalog[k])} for k, lbl, lo, hi in group_defs if catalog[k]]
+        catalog = {k: rows for k, rows in catalog.items() if rows}
         self._catalog_cache[file] = (mtime, (catalog, groups))
         return catalog, groups
 
