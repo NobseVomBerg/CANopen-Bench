@@ -95,6 +95,56 @@ def test_plugin_seeds_eds_once(tmp_path):
     assert [e["file"] for e in again.db.eds_list()].count("CiA301Base.eds") == 1
 
 
+def test_a_plugin_installed_into_an_existing_workspace_brings_its_rows(tmp_path):
+    """The rows went into an empty registry only, while the files came on
+    every start — so a plugin installed into a workspace that already
+    listed a device put its EDS files in the folder and nothing in the
+    list. Found with a device family's wheel installed into a workspace
+    months older than the plugin."""
+    db = Db(tmp_path / "x.db")
+    db.eds_add("other.eds", "OTHER_DEV", "0x9·0x9", "", True)   # already listing a device
+    bench = Bench(db, plugins=[FakePlugin()])                    # then the plugin arrives
+
+    files = {e["file"] for e in bench.db.eds_list(devices_only=True)}
+    assert files == {"other.eds", "fake_dev.eds"}
+    assert any("fake_dev.eds" in row["msg"] for row in bench.logs), "and says so"
+
+
+def test_a_plugin_row_the_operator_disabled_stays_disabled(tmp_path):
+    """Added when no row names the file — the rule the base EDS follows —
+    so a later start neither duplicates the row nor switches it back on."""
+    db = Db(tmp_path / "x.db")
+    db.eds_add("other.eds", "OTHER_DEV", "0x9·0x9", "", True)
+    Bench(db, plugins=[FakePlugin()])
+    db.eds_set_enabled("fake_dev.eds", False)
+
+    again = Bench(db, plugins=[FakePlugin()])
+
+    rows = [e for e in again.db.eds_list() if e["file"] == "fake_dev.eds"]
+    assert len(rows) == 1
+    assert not rows[0]["enabled"]
+
+
+class _BrokenSeedPlugin(BenchPlugin):
+    name = "broken"
+
+    def seed_eds(self) -> list[dict]:
+        raise RuntimeError("no rows today")
+
+
+@pytest.mark.parametrize("existing", [True, False], ids=["existing workspace", "fresh workspace"])
+def test_a_plugin_whose_rows_cannot_be_read_does_not_stop_the_bench(tmp_path, existing):
+    """Asked on every start now, not only into an empty registry — so a
+    plugin failing there would otherwise fail every start, where it used
+    to fail the first one only. And a fresh workspace goes the same way."""
+    db = Db(tmp_path / "x.db")
+    if existing:
+        db.eds_add("other.eds", "OTHER_DEV", "0x9·0x9", "", True)
+    bench = Bench(db, plugins=[_BrokenSeedPlugin(), FakePlugin()])
+    assert "fake_dev.eds" in {e["file"] for e in bench.db.eds_list()}, "the others still come"
+    assert any("broken" in row["msg"] and "no rows today" in row["msg"] for row in bench.logs)
+
+
 # -- seeded variant detection (Bench.__init__ seed_eds loop, "variant" key) -
 
 class _VariantSeedPlugin(BenchPlugin):
