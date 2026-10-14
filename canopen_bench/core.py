@@ -1323,19 +1323,12 @@ class Bench:
         # not in the folder matches no identity and reads as a broken install
         self._seed_plugin_eds()
         if not db.eds_count(devices_only=True):
-            seed_eds = list(data.SEED_EDS_FILES) + [e for p in self.plugins
-                                                    for e in p.seed_eds()]
-            for e in seed_eds:
-                db.eds_add(e["file"], e["dev"], e["ident"], e["code"], e["enabled"])
-                if e.get("commands"):
-                    db.eds_set_commands(e["file"], e["commands"])
-                if variant := e.get("variant"):
-                    # where this device family keeps its variant number. The
-                    # panel lets an operator configure it per row; a family
-                    # whose plugin already knows should not make them.
-                    db.eds_set_variant(e["file"], variant.get("index", ""),
-                                       variant.get("sub", ""),
-                                       variant.get("map") or {})
+            for e in data.SEED_EDS_FILES:
+                self._register_seed(e)
+        # every start, not only into an empty registry: a plugin that arrived
+        # after the registry was first filled gets its rows too — its files
+        # came above
+        self._seed_plugin_rows()
         # after the seeding above, which only runs on an empty registry: this
         # row would otherwise make the registry non-empty and swallow it
         self._seed_base_eds()
@@ -3211,6 +3204,51 @@ class Bench:
                     dst.write_bytes(src.read_bytes())
                 except OSError as exc:
                     self.log(f"EDS  {src.name} could not be installed — {exc}", "emcy0")
+
+    def _register_seed(self, e: dict) -> None:
+        """One seed row into the registry, with what it carries beyond the
+        row itself."""
+        self.db.eds_add(e["file"], e["dev"], e["ident"], e["code"], e["enabled"])
+        if e.get("commands"):
+            self.db.eds_set_commands(e["file"], e["commands"])
+        if variant := e.get("variant"):
+            # where this device family keeps its variant number. The panel
+            # lets an operator configure it per row; a family whose plugin
+            # already knows should not make them.
+            self.db.eds_set_variant(e["file"], variant.get("index", ""),
+                                    variant.get("sub", ""), variant.get("map") or {})
+
+    def _seed_plugin_rows(self) -> None:
+        """The rows a plugin's ``seed_eds()`` names, in a workspace whose
+        registry already had rows when the plugin arrived.
+
+        The seeding in ``__init__`` fills an empty registry only, while the
+        files a plugin ships come on every start (_seed_plugin_eds). So a
+        plugin installed into an existing workspace put its EDS files into
+        the folder and nothing into the list — a device family that the
+        bench then matched to nothing, with the files for it right there.
+
+        The base EDS rule, for the same reason: a row is added when none
+        names that file, so one the operator disabled stays disabled and one
+        they edited keeps the edit. Removed, it comes back on the next
+        start; disabling is how to put it away for good. Asked of each
+        plugin on its own and every start now, so one that fails here is
+        logged and skipped instead of failing every start after it.
+        """
+        have = {e["file"] for e in self.db.eds_list()}
+        for p in self.plugins:
+            try:
+                rows = list(p.seed_eds())
+            except Exception as exc:  # a plugin's fault must not stop the bench
+                self.log(f'EDS  plugin "{getattr(p, "name", type(p).__name__)}" '
+                         f"named no rows — {exc}", "emcy0")
+                continue
+            for e in rows:
+                if e["file"] in have:
+                    continue
+                self._register_seed(e)
+                have.add(e["file"])
+                self.log(f"EDS  {e['file']} added to the list — shipped by an installed plugin")
 
     def _seed_base_eds(self) -> None:
         """Install the generic CiA 301 EDS and register it with no identity.
