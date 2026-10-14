@@ -3240,8 +3240,16 @@ class Bench:
         start; disabling is how to put it away for good. Asked of each
         plugin on its own and every start now, so one that fails here is
         logged and skipped instead of failing every start after it.
+
+        A row that is already there gets one thing from the plugin: its
+        device commands, when they differ. Those are the plugin's to say —
+        the EDS list shows them and offers no way to edit them — and seeded
+        once only, a command the plugin later taught to write stayed the
+        badge-only one the workspace was made with: a button that lit up
+        and sent nothing. Enabled, code and variant are the operator's,
+        since the list edits them, and are left as they are.
         """
-        have = {e["file"] for e in self.db.eds_list()}
+        have = {e["file"]: e["device_commands"] for e in self.db.eds_list()}
         for p in self.plugins:
             try:
                 rows = list(p.seed_eds())
@@ -3250,11 +3258,15 @@ class Bench:
                          f"named no rows — {exc}", "emcy0")
                 continue
             for e in rows:
-                if e["file"] in have:
-                    continue
-                self._register_seed(e)
-                have.add(e["file"])
-                self.log(f"EDS  {e['file']} added to the list — shipped by an installed plugin")
+                wanted = list(e.get("commands") or [])
+                if e["file"] not in have:
+                    self._register_seed(e)
+                    have[e["file"]] = wanted
+                    self.log(f"EDS  {e['file']} added to the list — shipped by an installed plugin")
+                elif have[e["file"]] != wanted:
+                    self.db.eds_set_commands(e["file"], wanted)
+                    have[e["file"]] = wanted
+                    self.log(f"EDS  {e['file']} device commands updated from the installed plugin")
 
     def _seed_base_eds(self) -> None:
         """Install the generic CiA 301 EDS and register it with no identity.
