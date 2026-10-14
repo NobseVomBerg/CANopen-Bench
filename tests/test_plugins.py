@@ -145,6 +145,65 @@ def test_a_plugin_whose_rows_cannot_be_read_does_not_stop_the_bench(tmp_path, ex
     assert any("broken" in row["msg"] and "no rows today" in row["msg"] for row in bench.logs)
 
 
+# -- a row's device commands are the plugin's --------------------------------
+
+_BADGE_ONLY = [{"key": "lamp", "label": "Lamp", "badge": "L"}]
+_WRITING = [{"key": "lamp", "label": "Lamp", "badge": "L",
+             "write": {"index": "0x2000", "sub": "00", "on": "0x00000001", "off": "0x00000000"}}]
+
+
+class _CommandsPlugin(BenchPlugin):
+    """One row, with whatever commands this version of the plugin carries."""
+    name = "lamps"
+
+    def __init__(self, commands: list[dict]):
+        self._commands = commands
+
+    def seed_eds(self) -> list[dict]:
+        return [{"file": "fake_dev.eds", "dev": "FAKE_DEV", "ident": "0x1·0x2",
+                 "code": "FAK", "enabled": True, "commands": self._commands}]
+
+
+def test_an_existing_rows_commands_follow_the_plugin(tmp_path):
+    """The commands are the plugin's to say — the EDS list shows them and
+    cannot edit them. Seeded once and never again, a command the plugin
+    later taught to write stayed the badge-only one the workspace was made
+    with: a button that lit up and sent nothing to the device."""
+    db = Db(tmp_path / "x.db")
+    Bench(db, plugins=[_CommandsPlugin(_BADGE_ONLY)])        # the workspace, an older plugin
+
+    bench = Bench(db, plugins=[_CommandsPlugin(_WRITING)])   # the plugin, updated
+
+    row = next(e for e in bench.db.eds_list() if e["file"] == "fake_dev.eds")
+    assert row["device_commands"] == _WRITING
+    assert any("fake_dev.eds" in r["msg"] and "command" in r["msg"] for r in bench.logs)
+
+
+def test_commands_that_already_match_are_neither_written_nor_logged(tmp_path):
+    db = Db(tmp_path / "x.db")
+    Bench(db, plugins=[_CommandsPlugin(_WRITING)])
+    again = Bench(db, plugins=[_CommandsPlugin(_WRITING)])
+    assert not [r for r in again.logs if "fake_dev.eds" in r["msg"]]
+
+
+def test_what_the_operator_set_on_a_row_survives_a_commands_update(tmp_path):
+    """Enabled, code and variant can be changed in the EDS list, so they
+    are the operator's and stay; only the commands follow the plugin."""
+    db = Db(tmp_path / "x.db")
+    Bench(db, plugins=[_CommandsPlugin(_BADGE_ONLY)])
+    db.eds_set_enabled("fake_dev.eds", False)
+    db.eds_set_code("fake_dev.eds", "MINE")
+    db.eds_set_variant("fake_dev.eds", "0x2100", "0x01", {})
+
+    bench = Bench(db, plugins=[_CommandsPlugin(_WRITING)])
+
+    row = next(e for e in bench.db.eds_list() if e["file"] == "fake_dev.eds")
+    assert row["device_commands"] == _WRITING
+    assert not row["enabled"]
+    assert row["code"] == "MINE"
+    assert (row["variant_index"], row["variant_sub"]) == ("0x2100", "0x01")
+
+
 # -- seeded variant detection (Bench.__init__ seed_eds loop, "variant" key) -
 
 class _VariantSeedPlugin(BenchPlugin):
