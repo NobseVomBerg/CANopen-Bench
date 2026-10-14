@@ -104,7 +104,11 @@ EDS `—`, Log `… — no active EDS match`.
 ### Phase 5 — Ergebnis [Ist]
 
 Geräteliste wird ersetzt; Auswahl-/SuperUser-Status bereits bekannter
-Nodes bleibt erhalten (`prev`, `core.py`). Abschluss-Log
+Nodes bleibt erhalten (`prev`, `core.py`). Der Zustand der
+Gerätebefehle endet dagegen mit einem Neustart des Geräts: Ein Boot-up
+(0x700+Node, `00`) oder ein Reset, den die Bench selbst schickt,
+schaltet ihn in der Anzeige aus — was solch ein Befehl einschaltet,
+liegt im RAM des Geräts. Abschluss-Log
 `SCAN done — N devices found, EDS auto-assigned`, Snapshot-Push.
 
 ## Timing und Timeouts

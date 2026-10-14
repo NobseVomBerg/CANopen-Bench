@@ -205,8 +205,11 @@ assignment, multi-select, NMT quick commands, per-device ⋮ menu with
 restart/NMT/EDS assignment, and per-EDS **device commands** — special
 functions like a vendor's SuperUser mode are registry data
 (`db.eds_set_commands`), rendered generically as chips/badges/menu
-entries; the demo device ships a neutral "Service mode" example), display
-mirror, and the dockable state log with EMCY badge.
+entries; the demo device ships a neutral "Service mode" example; a
+device that restarts — its boot-up, or a reset the bench sends — has
+their states switched off again, since what they switch on lives in the
+device's RAM), display mirror, and the dockable state log with EMCY
+badge.
 
 ## Architecture
 
