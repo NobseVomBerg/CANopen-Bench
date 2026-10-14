@@ -441,6 +441,24 @@ function panelBox(p) {
 }
 
 // ---------------------------------------------------------------- sidebar --
+// The tooltip of a device row in the sidebar: everything the row has no
+// room for. The variant is a bare number to anyone who did not configure
+// it, so the tooltip says what it is and where it was read — and gives a
+// hex value in decimal as well, the way a variant is usually named.
+function deviceTip(d, row) {
+  const lines = [d.name];
+  if (d.variant) {
+    const hex = /^0x[0-9a-f]+$/i.test(d.variant);
+    const value = hex ? `${d.variant} (= ${parseInt(d.variant, 16)})` : d.variant;
+    const where = row && row.variant_index
+      ? ` from object ${row.variant_index}:${row.variant_sub || '00'}` : '';
+    lines.push(`Variant ${value}, read on scan${where} as set on the EDS entry`);
+  }
+  if (d.eds) lines.push(`EDS: ${d.eds}`);
+  if (d.sn && d.sn !== '?') lines.push(`SN ${d.sn}`);
+  return lines.join('\n');
+}
+
 function Sidebar({ s, ui, setUi }) {
   const selDevs = s.devices.filter((d) => d.sel);
   const adapterInfo = s.adapters.find((a) => a.key === s.adapter);
@@ -451,6 +469,7 @@ function Sidebar({ s, ui, setUi }) {
   // device commands are per-EDS data (special functions like a vendor's
   // SuperUser) — chips, badges and menu entries render from the registry
   const edsCmds = (file) => (s.eds.files.find((e) => e.file === file) || {}).device_commands || [];
+  const edsRow = (file) => s.eds.files.find((e) => e.file === file);
   const devCmds = Object.values(Object.fromEntries(
     s.devices.flatMap((d) => edsCmds(d.eds)).map((c) => [c.key, c])));
   const menuActions = mDev ? [
@@ -512,18 +531,20 @@ function Sidebar({ s, ui, setUi }) {
       </div>
       <div style="display:flex;flex-direction:column;min-height:34px">
         ${!s.connected && html`<div style="padding:10px;color:var(--faint);font-size:11.5px">Connect the interface, then scan.</div>`}
-        ${s.connected && s.devices.map((d) => html`
+        ${s.connected && s.devices.map((d) => {
+          const tip = deviceTip(d, edsRow(d.eds));
+          return html`
           <div class="hv-dk" style="display:flex;align-items:center;gap:8px;padding:6px 8px 6px 10px;background:${d.sel ? 'var(--sb-sel)' : 'transparent'};cursor:pointer">
             <span onClick=${() => send('dev_toggle', { node: d.node })}
               style="width:12px;height:12px;border-radius:3px;border:1.5px solid ${d.sel ? 'var(--acc)' : 'var(--inp)'};background:${d.sel ? 'var(--acc)' : 'transparent'};flex:none;display:grid;place-items:center;color:#fff;font-size:9px">${d.sel ? '✓' : ''}</span>
-            <span onClick=${() => send('dev_toggle', { node: d.node })} style="font:11px ${MONO};color:var(--acc);width:20px">${String(d.node).padStart(2, '0')}</span>
-            <span onClick=${() => send('dev_toggle', { node: d.node })} style="color:${d.sel ? 'var(--tx)' : 'var(--mid)'};flex:1;font-weight:${d.sel ? 600 : 400}">${d.name}</span>
-            ${d.variant && html`<span title="Variant (auto-detected on scan)" style="font:600 8.5px ${MONO};background:var(--chip);color:var(--faint);padding:1px 4px;border-radius:3px">${d.variant}</span>`}
-            ${edsCmds(d.eds).filter((c) => (d.cmds || {})[c.key]).map((c) => html`<span title=${c.label} style="font:600 8.5px ${MONO};background:var(--su-soft);color:var(--su);padding:1px 4px;border-radius:3px">${c.badge || c.key.toUpperCase()}</span>`)}
+            <span onClick=${() => send('dev_toggle', { node: d.node })} style="font:11px ${MONO};color:var(--acc);width:3ch;flex:none">${String(d.node).padStart(2, '0')}</span>
+            <span onClick=${() => send('dev_toggle', { node: d.node })} title=${tip} style="color:${d.sel ? 'var(--tx)' : 'var(--mid)'};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:${d.sel ? 600 : 400}">${d.name}</span>
+            ${edsCmds(d.eds).filter((c) => (d.cmds || {})[c.key]).map((c) => html`<span title=${c.label} style="flex:none;font:600 8.5px ${MONO};background:var(--su-soft);color:var(--su);padding:1px 4px;border-radius:3px">${c.badge || c.key.toUpperCase()}</span>`)}
             <span title=${d.nmt} style="width:7px;height:7px;border-radius:50%;background:${ledFor(d.nmt)};flex:none;animation:${d.nmt === 'Emergency' ? 'coPulse 1s infinite' : 'none'}"></span>
             <span class="hv-white" onClick=${() => setUi({ ...ui, menuNode: ui.menuNode === d.node ? null : d.node, menuEds: false })}
-              style="color:var(--faint);padding:0 3px;cursor:pointer;font-weight:700">⋮</span>
-          </div>`)}
+              style="flex:none;color:var(--faint);padding:0 3px;cursor:pointer;font-weight:700">⋮</span>
+          </div>`;
+        })}
       </div>
       <div style="padding:8px 10px;border-top:1px solid var(--sb-bd);display:flex;flex-wrap:wrap;gap:5px">
         ${nmtChip('Op', 'start')}${nmtChip('Pre-Op', 'preop')}${nmtChip('Stop', 'stop')}${nmtChip('Reset', 'reset')}${devCmds.map(cmdChip)}
