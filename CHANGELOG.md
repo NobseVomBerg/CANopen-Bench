@@ -109,6 +109,11 @@ development; the version counts from here.
   about 1 MB however long the case runs. Every step of every run goes to
   `testSteps.log` in the results folder, one line each, one file appended
   across runs; past 100 MB its oldest 10 MB are dropped
+- A device that restarts has its device commands switched off in the
+  bench too: its boot-up, or a reset the bench sends from the Devices box
+  or a device's menu, clears what the commands had on — that lives in the
+  device's RAM, and a badge still saying "on" made a refused write look
+  like a mystery
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;
