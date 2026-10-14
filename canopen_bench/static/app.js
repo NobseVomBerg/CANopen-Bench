@@ -446,7 +446,7 @@ function Sidebar({ s, ui, setUi }) {
   const adapterInfo = s.adapters.find((a) => a.key === s.adapter);
   const ifaceFoot = s.connected ? `${adapterInfo.foot} · ${s.bitrate} kbit/s` : 'interface offline';
   const mDev = s.connected ? s.devices.find((d) => d.node === ui.menuNode) : null;
-  const closeMenu = () => setUi({ ...ui, menuNode: null });
+  const closeMenu = () => setUi({ ...ui, menuNode: null, menuEds: false });
   const menuAct = (what) => () => { send('dev_menu', { node: mDev.node, what }); closeMenu(); };
   // device commands are per-EDS data (special functions like a vendor's
   // SuperUser) — chips, badges and menu entries render from the registry
@@ -464,8 +464,17 @@ function Sidebar({ s, ui, setUi }) {
       fg: 'var(--su)',
       go: () => { send('dev_cmd', { node: mDev.node, key: c.key }); closeMenu(); },
     })),
-    { code: 'EDS', label: `EDS: ${mDev.eds} · change…`, fg: 'var(--acc)', go: menuAct('eds_next') },
+    { code: 'EDS', label: `EDS: ${mDev.eds} · change…`, fg: 'var(--acc)', go: () => setUi({ ...ui, menuEds: true }) },
   ] : [];
+
+  // what "change…" offers: every enabled EDS, the one this device's identity
+  // names on top and marked, the one it has now ticked. Picked by name — it
+  // used to step to the next file per click, and a second click to get past
+  // a wrong one landed on whatever came after it
+  const edsMatch = mDev ? (s.eds.match || {})[String(mDev.node)] : null;
+  const edsChoices = mDev ? s.eds.files.filter((e) => e.enabled)
+    .sort((a, b) => (b.file === edsMatch) - (a.file === edsMatch) || a.file.localeCompare(b.file)) : [];
+  const pickEds = (file) => () => { send('dev_menu', { node: mDev.node, what: 'eds_set', file }); closeMenu(); };
 
   const nmtChip = (label, cmd, extra = '') => html`
     <span class='hv-chip'
@@ -512,7 +521,7 @@ function Sidebar({ s, ui, setUi }) {
             ${d.variant && html`<span title="Variant (auto-detected on scan)" style="font:600 8.5px ${MONO};background:var(--chip);color:var(--faint);padding:1px 4px;border-radius:3px">${d.variant}</span>`}
             ${edsCmds(d.eds).filter((c) => (d.cmds || {})[c.key]).map((c) => html`<span title=${c.label} style="font:600 8.5px ${MONO};background:var(--su-soft);color:var(--su);padding:1px 4px;border-radius:3px">${c.badge || c.key.toUpperCase()}</span>`)}
             <span title=${d.nmt} style="width:7px;height:7px;border-radius:50%;background:${ledFor(d.nmt)};flex:none;animation:${d.nmt === 'Emergency' ? 'coPulse 1s infinite' : 'none'}"></span>
-            <span class="hv-white" onClick=${() => setUi({ ...ui, menuNode: ui.menuNode === d.node ? null : d.node })}
+            <span class="hv-white" onClick=${() => setUi({ ...ui, menuNode: ui.menuNode === d.node ? null : d.node, menuEds: false })}
               style="color:var(--faint);padding:0 3px;cursor:pointer;font-weight:700">⋮</span>
           </div>`)}
       </div>
@@ -525,7 +534,24 @@ function Sidebar({ s, ui, setUi }) {
             Node ${String(mDev.node).padStart(2, '0')} · ${mDev.name} · SN ${mDev.sn}
             <span class="hv-white" onClick=${closeMenu} style="cursor:pointer;color:var(--faint);padding:0 2px">✕</span>
           </div>
-          ${menuActions.map((a) => html`
+          ${ui.menuEds ? html`
+            <div class="hv-mrow" onClick=${() => setUi({ ...ui, menuEds: false })}
+              style="padding:6px 12px;cursor:pointer;color:var(--faint);font-size:11px">‹ back</div>
+            <div style="max-height:50vh;overflow:auto">
+              ${edsChoices.map((e) => html`
+              <div class="hv-mrow" onClick=${pickEds(e.file)}
+                title=${e.file === edsMatch ? 'the EDS file this device\'s identity names' : ''}
+                style="padding:6px 12px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:center;color:var(--tx)">
+                <span style="width:12px;flex:none;color:var(--acc)">${e.file === mDev.eds ? '✓' : ''}</span>
+                <span style="flex:1;min-width:0">
+                  <div style="font:11.5px ${MONO};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.file}</div>
+                  <div style="font-size:10.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.dev}${e.ident ? ' · ' + e.ident : ''}</div>
+                </span>
+                ${e.file === edsMatch && html`<span style="font:600 9.5px ${MONO};color:var(--grn);background:var(--grn-soft);padding:1px 6px;border-radius:4px;flex:none">identity</span>`}
+              </div>`)}
+              ${!edsChoices.length && html`<div style="padding:8px 12px;color:var(--faint);font-size:11.5px">No enabled EDS files — enable one in Setup.</div>`}
+            </div>`
+          : menuActions.map((a) => html`
             <div class="hv-mrow" onClick=${a.go} style="padding:7px 12px;cursor:pointer;color:${a.fg};font-size:12px;display:flex;gap:8px;align-items:center">
               <span style="font:600 9px ${MONO};color:var(--faint);width:30px">${a.code}</span>${a.label}
             </div>`)}
@@ -2706,6 +2732,7 @@ function App() {
     page: 'setup',
     theme: localStorage.getItem('cb-theme') || 'light',
     menuNode: null,
+    menuEds: false,
     logOpen: true,
     objGroup: 'manu',
     testFilter: '',
