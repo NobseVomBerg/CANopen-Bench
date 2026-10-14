@@ -99,6 +99,16 @@ development; the version counts from here.
   together, as the test-case format says — each part had a count of its
   own, so a case with preconditions ran up to twice as long before it
   was stopped. A flow keeps its limit per run
+- The loop guard applies to automated cases and cases without a grade;
+  semi-automated, manual and production cases run without one — they are
+  run one at a time with somebody at the bench, and an endurance run ends
+  with Stop, not at a step count
+- A long case's page lists its first 2 000 steps, then only steps that
+  did not pass, log steps and operator steps (at most 1 000, with a row
+  saying how many were left out wherever some were), and its last 500 —
+  about 1 MB however long the case runs. Every step of every run goes to
+  `testSteps.log` in the results folder, one line each, one file appended
+  across runs; past 100 MB its oldest 10 MB are dropped
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;

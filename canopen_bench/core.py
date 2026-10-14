@@ -580,17 +580,21 @@ class _StepBudget:
     which is what the format promises ("je Fall"). Counting each part on
     its own let a case with preconditions run up to twice the limit before
     it was stopped. A flow, or any other caller that passes none to
-    ``Bench._run_program``, gets one of its own per run."""
+    ``Bench._run_program``, gets one of its own per run. A case of an
+    unguarded grade (tclib.UNGUARDED_GRADES) runs on a budget without a
+    limit."""
 
-    __slots__ = ("used",)
+    __slots__ = ("used", "limit")
 
-    def __init__(self) -> None:
+    def __init__(self, limit: int | None = tclib.MAX_STEPS) -> None:
         self.used = 0
+        #: None: nothing stops this case by count
+        self.limit = limit
 
     def take(self) -> bool:
         """Count one executed step; False once the limit is passed."""
         self.used += 1
-        return self.used <= tclib.MAX_STEPS
+        return self.limit is None or self.used <= self.limit
 
 
 def _resolve(value, regs: dict, builtins: dict) -> int:
@@ -1109,6 +1113,8 @@ class Bench:
         # write last happened (see _live_case_begin)
         self._run_cases: list[reportlib.CaseRecord] = []
         self._run_record: reportlib.CaseRecord | None = None
+        #: the step log of the run in progress (report.StepLog), None between runs
+        self._step_log: reportlib.StepLog | None = None
         self._run_started = ""
         self._run_stamp = ""
         self._run_nth: Counter[str] = Counter()
@@ -5092,6 +5098,11 @@ class Bench:
         self._report_live_failed = False
         self._report_write(f"{self._report_stamp()}__summary.html",
                            reportlib.summary_head(self._live_run()))
+        self._step_log = reportlib.StepLog(
+            self._results_dir() / reportlib.STEP_LOG,
+            on_error=lambda why: self.log(f"RUN  step log: {why}", "emcy0"))
+        self._step_log.run_start(self._report_stamp(), len(self.run_order),
+                                 f"canopen-bench {__version__}", self.workspace_name)
         try:
             for i, tid in enumerate(self.run_order):
                 self.run_idx = i
@@ -5125,6 +5136,10 @@ class Bench:
             self.log("RUN  finished — report created")
             self._push_report(self.run_order)
         finally:
+            if self._step_log is not None:
+                self._step_log.run_end(self._report_stamp())
+                self._step_log.close()
+                self._step_log = None
             self.running = False
             self.run_prog = None
             self.manual_prompt = None
@@ -5276,6 +5291,14 @@ class Bench:
                     "failed": ""}   # set by a failure the case chose to survive
         total = len(tc.preconditions) + len(tc.steps)
         self._live_case_begin(rec)             # the page exists before step 1
+        # what the page lists of this case — every step goes to the step log,
+        # a long case's page only its start, what stood out and its end
+        window = reportlib.StepWindow(rec, log=self._step_log,
+                                      head=reportlib.PAGE_HEAD_STEPS,
+                                      notable=reportlib.PAGE_NOTABLE_STEPS,
+                                      tail=reportlib.PAGE_TAIL_STEPS)
+        if self._step_log is not None:
+            self._step_log.case_start(rec)
 
         def on_step(idx: int, text: str) -> None:
             self.run_prog = {"tid": tc.id, "step": idx, "of": total, "text": text}
@@ -5290,17 +5313,21 @@ class Bench:
         def done(verdict: str, why: str = "") -> tuple[str, str]:
             rec.verdict, rec.reason = verdict, why
             rec.seconds = time.time() - started
+            window.finish()    # the last gap and the held-back end go on the page
+            if self._step_log is not None:
+                self._step_log.case_end(rec)
             # the last write of this case: from here its page carries the
             # result and the duration, which is what the header was
             # missing all the way through
             self._live_case_end(rec)
             return verdict, why
 
-        # one count for the whole case: the loop guard's limit is per case,
-        # preconditions and steps together (tclib.MAX_STEPS)
-        budget = _StepBudget()
+        # one count for the whole case, preconditions and steps together —
+        # and none at all for a case somebody runs by hand
+        # (tclib.UNGUARDED_GRADES): an endurance run ends with Stop
+        budget = _StepBudget(None if tc.grade in tclib.UNGUARDED_GRADES else tclib.MAX_STEPS)
         status, why = await self._run_program(tc, tc.preconditions, node, regs,
-                                              builtins, 0, on_step, stop, rec.steps,
+                                              builtins, 0, on_step, stop, window,
                                               lines=tc.precondition_lines,
                                               budget=budget)
         if status in ("fail", "skip"):
@@ -5311,7 +5338,7 @@ class Bench:
         # fails means the case does not apply, and there is nothing to undo
         status, why = await self._run_program(tc, tc.steps, node, regs, builtins,
                                               len(tc.preconditions), on_step, stop,
-                                              rec.steps, allow_continue=True,
+                                              window, allow_continue=True,
                                               lines=tc.step_lines, budget=budget)
         if status == "ok":
             return done("PASS")
@@ -5321,7 +5348,8 @@ class Bench:
 
     async def _run_program(self, tc: tclib.TestCase, steps: list, node: int,
                            regs: dict, builtins: dict, base: int,
-                           on_step, should_stop, record: list | None = None,
+                           on_step, should_stop,
+                           record: list | reportlib.StepWindow | None = None,
                            allow_continue: bool = False,
                            lines: list[int] | None = None,
                            budget: _StepBudget | None = None) -> tuple[str, str]:
@@ -5403,7 +5431,7 @@ class Bench:
                     note=val.get("note", "") if isinstance(val, dict) else "",
                     # on the passing path this is what came back, not a
                     # reason — both belong in the file for the same reason
-                    detail=info, ts=started_at))
+                    detail=info, ts=started_at, key=key))
             if key == "loop":
                 count = val.get("n") if isinstance(val, dict) else val
                 # resolved once, here: from now on the frame holds the

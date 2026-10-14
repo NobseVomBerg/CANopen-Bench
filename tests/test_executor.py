@@ -342,6 +342,44 @@ def test_a_run_without_a_budget_gets_its_own_and_a_shared_one_adds_up(tmp_path):
     assert run(budget=shared) == ("error", "step limit exceeded")
 
 
+#: 4000 turns of a three-step loop: 12 001 executed steps, past MAX_STEPS.
+#: The grade is all that tells these two cases apart.
+PRODUCTION_SPIN_TC = """\
+id: "0058"
+name: "a production case may run past the step limit"
+grade: production
+steps:
+  - mov: {to: R1, value: 0}
+  - label: spin
+  - add: {to: R1, value: 1}
+  - jump_lt: {a: R1, b: 4000, to: spin}
+"""
+
+AUTOMATED_SPIN_TC = """\
+id: "0059"
+name: "an automated case stops at the step limit"
+grade: automated
+steps:
+  - mov: {to: R1, value: 0}
+  - label: spin
+  - add: {to: R1, value: 1}
+  - jump_lt: {a: R1, b: 4000, to: spin}
+"""
+
+
+def test_a_production_case_has_no_step_limit_but_an_automated_one_does(tc_bench):
+    """The limit is there to stop a loop nobody meant. A case an operator
+    runs by hand, standing beside the bench, is one somebody meant to let
+    run as long as it takes — an endurance run ends with Stop, not at a
+    step count — so the 12 001 steps that are an error in an automated
+    case are none here."""
+    _add_tc(tc_bench, "TC0058_production_spin.yaml", PRODUCTION_SPIN_TC)
+    _add_tc(tc_bench, "TC0059_automated_spin.yaml", AUTOMATED_SPIN_TC)
+    run_selected(tc_bench, {"0058", "0059"}, timeout=60)
+    assert tc_bench.results == {"0058": "PASS", "0059": "ERROR"}
+    assert any("step limit exceeded" in ln["msg"] for ln in tc_bench.logs)
+
+
 ON_TIMEOUT_TC = """\
 id: "0011"
 name: "wait_for on_timeout jumps over a fail step"
@@ -2367,6 +2405,73 @@ def test_the_live_files_are_the_files_the_run_leaves_behind(tc_bench):
     after = {p.name for p in _report_files(bench)}
     assert during and during[-1] <= after, "the live files are not the final ones"
     assert len(after) == 2, after          # one case page, one summary
+
+
+# -- a long case: a page that stays small, a log with every step ------------
+
+SEMI_SPIN_TC = """\
+id: "0060"
+name: "a long case keeps its page small"
+grade: semi
+steps:
+  - mov: {to: R1, value: 0}
+  - label: spin
+  - add: {to: R1, value: 1}
+  - jump_lt: {a: R1, b: 1000, to: spin}
+"""
+
+
+def test_a_long_cases_page_is_bounded_and_the_step_log_has_every_step(tc_bench, monkeypatch):
+    """An endurance run goes on all night, and a page with a row per step
+    would be millions of them — more than any browser opens. The page keeps
+    the start, the end and one row that counts what lies between; the step
+    log keeps all of it, and that row says where.
+
+    The window is sized down to 50 + 5 + 20 so that 3 001 steps stand for
+    the night. Every one of them is the case's own bookkeeping, so none
+    stands out: 50 and 20 are listed and 2 931 are between."""
+    monkeypatch.setattr(reportlib, "PAGE_HEAD_STEPS", 50)
+    monkeypatch.setattr(reportlib, "PAGE_NOTABLE_STEPS", 5)
+    monkeypatch.setattr(reportlib, "PAGE_TAIL_STEPS", 20)
+    _add_tc(tc_bench, "TC0060_semi_spin.yaml", SEMI_SPIN_TC)
+    run_selected(tc_bench, {"0060"}, timeout=60)
+    assert tc_bench.results == {"0060": "PASS"}
+
+    rec = tc_bench._run_cases[0]
+    assert len(rec.steps) == 50 + 1 + 20
+    assert rec.steps[50].line == 0
+    assert rec.steps[50].text.startswith("… 2931 steps not listed")
+    folder = Path(tc_bench.paths["res"])
+    page = (folder / rec.file).read_text(encoding="utf-8")
+    assert "2931 steps not listed" in page
+    assert "every step is in testSteps.log" in page
+
+    lines = (folder / "testSteps.log").read_text(encoding="utf-8").splitlines()
+    ours = [ln for ln in lines if "  0060  " in ln]
+    assert len([ln for ln in ours if "-----" not in ln]) == 3001
+    assert sum("----- start:" in ln for ln in ours) == 1
+    assert sum("----- PASS after" in ln for ln in ours) == 1
+    # the run's own two lines: that it began and that it is over. The second
+    # is a "===== run" line too, which is why the first is told apart by
+    # not ending that way
+    assert sum("===== run " in ln and not ln.endswith(" over") for ln in lines) == 1
+    assert sum(ln.endswith(" over") for ln in lines) == 1
+
+
+def test_the_step_log_is_one_file_across_runs(tc_bench):
+    """Appended to a file of a fixed name, not started anew: a week of runs
+    is one file to search, and the run before is still above the one that
+    follows it."""
+    run_selected(tc_bench, {"0001"})
+    run_selected(tc_bench, {"0001"})
+
+    lines = (Path(tc_bench.paths["res"]) / "testSteps.log").read_text(encoding="utf-8").splitlines()
+    began = [i for i, ln in enumerate(lines) if "===== run " in ln and not ln.endswith(" over")]
+    started = [i for i, ln in enumerate(lines) if "  0001  ----- start:" in ln]
+    over = [i for i, ln in enumerate(lines) if ln.endswith(" over")]
+    assert len(began) == len(started) == len(over) == 2
+    # the first run's lines all come before the second's
+    assert began[0] < started[0] < over[0] < began[1] < started[1] < over[1]
 
 
 # -- which cases a bench without the supply offers ---------------------------

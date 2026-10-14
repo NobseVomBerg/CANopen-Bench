@@ -26,6 +26,7 @@ id: "4602"                  # Pflicht; Katalog-ID, eindeutig im Ordner (s.u.)
 name: "Aux power off handling, under-voltage"   # Pflicht; Anzeige
 desc: "Prüft, dass ..."     # optional; ein Satz für den Report-Kopf
 grade: automated            # optional; automated | semi | manual | production
+                            #   steuert auch den Schleifen-Schutz (s.u.)
 tools: [PSU]                # optional; benötigte Zusatzgeräte, [] = keine
 est: "8.4 s"                # optional; erwartete Dauer, nur Anzeige
 dut: selected               # optional; Zielgerät der Bus-Schritte:
@@ -349,7 +350,12 @@ und `steps` sind getrennte Programme) und werden beim Parsen geprüft.
   (Ablauf-Dateien sind davon ausgenommen).
 - **Schleifen-Schutz:** maximal 10 000 Schrittausführungen je Fall,
   Vorbedingungen und Schritte zusammengezählt (ein Ablauf: je Lauf);
-  Überschreitung → ERROR („step limit exceeded").
+  Überschreitung → ERROR („step limit exceeded"). Gilt für
+  `grade: automated` und für Fälle ohne `grade`. `semi`, `manual` und
+  `production` laufen ohne Grenze: Sie laufen einzeln, mit jemandem am
+  Prüfstand, und ein Dauerlauf soll nicht an einer Schrittzahl enden —
+  beendet wird er mit Stop. Wie lange so ein Fall auch läuft, sein
+  Report bleibt begrenzt (A-04, „Lange Fälle").
 
 ## Plugin-Schritte
 

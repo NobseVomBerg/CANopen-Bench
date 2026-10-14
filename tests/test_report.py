@@ -27,7 +27,9 @@ from canopen_bench.report import (
     SUMMARY_GLOB,
     CaseRecord,
     RunRecord,
+    StepLog,
     StepRecord,
+    StepWindow,
     case_html,
     collect_overview,
     default_css,
@@ -35,6 +37,7 @@ from canopen_bench.report import (
     last_verdicts,
     load_runs,
     overview_html,
+    stands_out,
     summary_html,
     summary_json,
     write_stylesheet,
@@ -455,6 +458,9 @@ def test_an_unwritable_results_folder_does_not_lose_the_run(tmp_path):
     _run_all(bench)
     assert bench.results.get("0101") == "PASS"
     assert any("report not written" in row["msg"] for row in bench.logs)
+    # the step log lives in the same folder and says so the same way: once
+    said = [row["msg"] for row in bench.logs if "step log:" in row["msg"]]
+    assert len(said) == 1 and "testSteps.log not written" in said[0]
 
 
 # -- the overview across runs ------------------------------------------------
@@ -785,3 +791,162 @@ def test_a_page_still_being_written_has_no_closing_tags():
     case = CaseRecord(id="0001", name="in progress")
     assert "</html>" not in report.case_head(case)
     assert report.page_tail().rstrip().endswith("</html>")
+
+
+# -- a long case: what its page lists, what the step log keeps ---------------
+
+def _step(i: int, state: str = "ok") -> StepRecord:
+    """Step i of a case, stamped t01, t02, … so that a gap row can name its ends."""
+    return StepRecord(line=i, text=f"s{i}", state=state, ts=f"t{i:02d}")
+
+
+def _numbered(i: int) -> str:
+    """A log line of a fixed width, numbered, so that a cut can be read back."""
+    return f"line {i:04d} " + "x" * 10
+
+
+def test_a_long_case_lists_its_start_what_stood_out_and_its_end():
+    """A case that runs all night still needs a page a browser opens, and
+    the page has to say what it left out: the first rows in full, after
+    them only steps that did not simply pass — while their budget lasts —
+    the last rows in full, and a row wherever steps are missing that
+    counts them.
+
+    Twenty steps through a window of 3 + 2 + 2 pin every rule at once. A
+    note closes the gap in front of it; the failure at 9 spends the last of
+    the budget, so the failure at 12 falls into the final gap and is
+    counted there; and the end is held back until it is known to be the end.
+    """
+    case = CaseRecord(id="7")
+    window = StepWindow(case, head=3, notable=2, tail=2)
+    for i in range(1, 21):
+        window.append(_step(i, "note" if i in (6, 15) else "fail" if i in (9, 12) else "ok"))
+    window.finish()
+
+    assert [s.line for s in case.steps] == [1, 2, 3, 0, 6, 0, 9, 0, 19, 20]
+    first, second, third = (s for s in case.steps if s.line == 0)
+    assert first.text.startswith("… 2 steps not listed")
+    assert "t04 … t05" in first.text            # which stretch of the run it stands for
+    assert second.text.startswith("… 2 steps not listed")
+    assert third.text.startswith("… 9 steps not listed")
+    assert "1 of them did not pass" in third.text
+    assert "did not pass" not in first.text
+    assert "did not pass" not in second.text
+    assert {first.state, second.state, third.state} == {"note"}
+    assert (window.omitted, window.seen) == (13, 20)
+
+
+def test_a_short_case_loses_nothing():
+    """Up to head + tail steps there is nothing to leave out, and a case of
+    ordinary length must read exactly as it did before there was a window."""
+    case = CaseRecord(id="7")
+    window = StepWindow(case, head=3, notable=2, tail=2)
+    steps = [_step(i) for i in range(1, 6)]
+    for step in steps:
+        window.append(step)
+    window.finish()
+
+    assert case.steps == steps          # all five, in order, and no gap row among them
+    assert window.omitted == 0
+
+
+def test_an_operator_step_stands_out_even_when_it_passed():
+    """A step that waited for somebody is the one a reader of a night's page
+    looks for, and it passed — which is why its state alone cannot decide.
+    The case's own bookkeeping and traffic that passed stand out for nothing."""
+    assert stands_out(StepRecord(state="ok", key="manual"))
+    assert not stands_out(StepRecord(state="flow", key="add"))
+    assert not stands_out(StepRecord(state="ok", key="sdo_read"))
+
+
+def test_every_step_reaches_the_log_whether_the_page_lists_it_or_not(tmp_path):
+    """The page can leave steps out because the log has them. A step in
+    neither would be gone, so each one is handed to the log as it comes,
+    before anything is decided about the page."""
+    path = tmp_path / "s.log"
+    log = StepLog(path)
+    case = CaseRecord(id="7")
+    window = StepWindow(case, log=log, head=1, notable=0, tail=1)
+    for i in range(1, 6):
+        window.append(_step(i))
+    window.finish()
+    log.close()
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 5
+    assert all("  7  " in ln for ln in lines)                  # whose steps they are
+    assert [ln.split()[-1] for ln in lines] == ["s1", "s2", "s3", "s4", "s5"]
+    assert [s.line for s in case.steps] == [1, 0, 5]           # step 1, a row for 2–4, step 5
+    assert "3 steps not listed" in case.steps[1].text
+
+
+def test_the_step_log_is_one_file_across_runs(tmp_path):
+    """A run opens the log and finds the one before it still there. The
+    name is fixed and the lines are appended: a run that started the file
+    over would lose the night before the morning somebody reads it."""
+    path = tmp_path / "s.log"
+    for text in ("first run", "second run"):
+        log = StepLog(path)
+        log.line(text)
+        log.close()
+
+    assert path.read_text(encoding="utf-8").splitlines() == ["first run", "second run"]
+
+
+def test_the_oldest_lines_go_past_the_limit_at_a_line_end(tmp_path):
+    """A log that grows for months fills the disk it is on, so past the
+    limit its oldest part goes — and goes whole lines at a time, with a line
+    at the top that says so, or the first line left would be half of one
+    and the reader could not tell what was cut."""
+    path = tmp_path / "s.log"
+    log = StepLog(path, max_bytes=1000, drop_bytes=300)
+    for i in range(200):
+        log.line(_numbered(i))
+    log.close()
+
+    assert path.stat().st_size <= 1000 + len(_numbered(0)) + 1
+    first, *rest = path.read_text(encoding="utf-8").splitlines()
+    assert "older lines dropped here" in first
+    assert rest and all(re.fullmatch(r"line \d{4} x{10}", ln) for ln in rest)
+    numbers = [int(ln.split()[1]) for ln in rest]
+    assert numbers == list(range(numbers[0], 200))      # consecutive, and the newest are kept
+
+
+def test_a_cut_that_fails_does_not_stop_the_log_and_is_not_retried_on_every_line(tmp_path, monkeypatch):
+    """The rename that puts the shortened file in place can be refused —
+    something else holds the log open. The log has to go on taking lines
+    (dropping them would lose steps), has to say so once, and must not
+    try the cut again on every line past the limit: each try copies the
+    file, which at a hundred megabytes is a hundred megabytes per step."""
+    replaced: list[tuple] = []
+
+    def busy(src, dst):
+        replaced.append((src, dst))
+        raise OSError("busy")
+
+    monkeypatch.setattr(report.os, "replace", busy)
+    errors: list[str] = []
+    path = tmp_path / "s.log"
+    log = StepLog(path, on_error=errors.append, max_bytes=1000, drop_bytes=300)
+    for i in range(200):
+        log.line(_numbered(i))
+    log.close()
+
+    assert path.read_text(encoding="utf-8").splitlines() == [_numbered(i) for i in range(200)]
+    assert len(errors) == 1 and "busy" in errors[0]
+    assert len(replaced) < 20
+    assert [p.name for p in tmp_path.iterdir()] == ["s.log"]    # no half-written copy left behind
+
+
+def test_a_log_that_cannot_be_written_says_so_once(tmp_path):
+    """A full disk, or a folder that is a file, must not end a run whose
+    reports are still being written — and must not pass unnoticed either.
+    One line in the bench's own log says it; one per step would bury it."""
+    (tmp_path / "blocker").write_text("a file where the folder should be")
+    errors: list[str] = []
+    log = StepLog(tmp_path / "blocker" / "s.log", on_error=errors.append)
+    log.line("a")
+    log.line("b")
+    log.close()
+
+    assert len(errors) == 1
