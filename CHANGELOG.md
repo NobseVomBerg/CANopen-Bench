@@ -114,6 +114,11 @@ development; the version counts from here.
   or a device's menu, clears what the commands had on — that lives in the
   device's RAM, and a badge still saying "on" made a refused write look
   like a mystery
+- Devices box: a row keeps its columns — the node in a fixed width, the
+  name cut short with … when it does not fit, badges and state on the
+  right. The variant left the row for its tooltip, which also gives the
+  full name, the variant in decimal and the object it was read from, the
+  EDS file and the serial number
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;

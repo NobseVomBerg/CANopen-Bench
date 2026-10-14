@@ -567,3 +567,69 @@ console.log(JSON.stringify(out));
     assert out["openAfterSecond"] == "d"
     assert out["second"] is False and out["closed"] is True
     assert out["seen"] == [1, None, 2, None, 3, None, 4, None]
+
+
+# -- a device row in the sidebar -----------------------------------------------
+
+def test_a_device_row_keeps_its_columns():
+    """A row whose columns move with what it shows reads as uneven: the list
+    of devices is read down a column, and the eye lands on the names. A
+    three-digit node, a long name and a badge must not shift the rest.
+
+    So the node has a width of its own (three characters, not twenty pixels
+    that node 127 overflows), the name is cut short with an ellipsis instead
+    of pushing the right side along, and what the row has no room for is the
+    name's tooltip rather than a chip that only some rows have.
+    """
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    side = app.split("function Sidebar(")[1].split("\nfunction ")[0]
+    assert "Variant (auto-detected on scan)" not in side, "the variant chip is back"
+    node = next((ln for ln in side.splitlines()
+                 if "${String(d.node).padStart(2, '0')}</span>" in ln), "")
+    assert "width:3ch;flex:none" in node, "the node column is not three characters wide"
+    name = next((ln for ln in side.splitlines() if "${d.name}</span>" in ln), "")
+    assert "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" in name, \
+        "a long name is not cut short, it pushes the right side"
+    assert "title=${tip}" in name, "what the row leaves out is not on the name"
+    assert "const tip = deviceTip(d, edsRow(d.eds))" in side
+
+
+def test_the_device_tooltip_says_what_the_variant_is(tmp_path):
+    """The variant left the row for the tooltip. A bare 0x0334 means nothing
+    to anyone who did not configure it, so the tooltip says it is the
+    variant, which object it was read from and — for a hex value — what that
+    is in decimal, the way a variant is usually named. Run the function
+    itself, not a reading of it."""
+    node = _node()
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node is missing in CI — the device tooltip would go untested")
+        pytest.skip("node not installed")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # up to and including the first line that is exactly `}` — its own end
+    tip = "function deviceTip(" + app.split("function deviceTip(")[1].split("\n}\n")[0] + "\n}\n"
+    script = tmp_path / "tip.mjs"
+    script.write_text(tip + """
+console.log(JSON.stringify([
+  deviceTip({ name: 'A very long device name', variant: '0x0334', eds: 'x.eds', sn: '123' },
+            { variant_index: '0x4000', variant_sub: '0x01' }),
+  deviceTip({ name: 'B', variant: 'V2', eds: 'y.eds', sn: '?' },
+            { variant_index: '', variant_sub: '' }),
+  deviceTip({ name: 'C', variant: '', eds: '', sn: '' }, undefined),
+]));
+""", encoding="utf-8")
+    done = subprocess.run([node, str(script)], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    hexed, label, bare = json.loads(done.stdout)
+    assert hexed.split("\n") == [
+        "A very long device name",
+        "Variant 0x0334 (= 820), read on scan from object 0x4000:0x01 as set on the EDS entry",
+        "EDS: x.eds",
+        "SN 123",
+    ], "a hex variant is given in decimal as well, with the object it was read from"
+    assert label.split("\n") == [
+        "B",
+        "Variant V2, read on scan as set on the EDS entry",
+        "EDS: y.eds",
+    ], "a label has no decimal, an unconfigured row no object, and '?' is no serial number"
+    assert bare == "C", "a device with nothing more to say gets its name and nothing else"
