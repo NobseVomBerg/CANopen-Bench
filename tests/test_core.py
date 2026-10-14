@@ -4412,13 +4412,59 @@ def test_base_eds_can_be_assigned_by_hand(connected_bench):
     """Unassignable automatically, but reachable through the device's ⋮ menu
     — which is the only way it is meant to arrive anywhere."""
     bench = connected_bench
-    assert "CiA301Base.eds" in bench.eds_enabled       # the ⋮ cycle reads this
+    assert "CiA301Base.eds" in bench.eds_enabled       # the ⋮ list offers these
     node = bench.devices[0]["node"]
-    for _ in range(len(bench.eds_enabled)):
-        bench.dispatch("dev_menu", {"node": node, "what": "eds_next"})
-        if bench.devices[0]["eds"] == "CiA301Base.eds":
-            break
+    bench.dispatch("dev_menu", {"node": node, "what": "eds_set", "file": "CiA301Base.eds"})
     assert bench.devices[0]["eds"] == "CiA301Base.eds"
+
+
+def test_an_eds_is_picked_by_name_not_cycled_to(connected_bench):
+    """"change…" stepped to the next enabled file in alphabetical order, one
+    click each. Clicked twice to get past a wrong one, a device landed on
+    whatever came next — a gateway on a demo device's EDS, showing its
+    display and its Service mode, or on another family's. The file is named now."""
+    bench = connected_bench
+    node = bench.devices[0]["node"]
+    target = sorted(bench.eds_enabled)[-1]
+    bench.dispatch("dev_menu", {"node": node, "what": "eds_set", "file": target})
+    assert bench.devices[0]["eds"] == target
+    assert f"manually assigned → {target}" in bench.logs[-1]["msg"]
+
+
+@pytest.mark.parametrize("file", ["no-such-file.eds", "DISABLED"])
+def test_a_file_that_is_not_an_enabled_eds_is_not_assigned(connected_bench, file):
+    """A disabled file is out of the way on purpose, and a name the
+    registry does not have would assign nothing a scan could ever match."""
+    bench = connected_bench
+    if file == "DISABLED":
+        file = next(iter(bench.eds_enabled - {"CiA301Base.eds"}))
+        bench.db.eds_set_enabled(file, False)
+    node = bench.devices[0]["node"]
+    before = bench.devices[0]["eds"]
+    bench.dispatch("dev_menu", {"node": node, "what": "eds_set", "file": file})
+    assert bench.devices[0]["eds"] == before
+    assert bench.logs[-1]["type"] == "emcy0" and file in bench.logs[-1]["msg"]
+
+
+def test_the_cycle_is_gone(connected_bench):
+    bench = connected_bench
+    before = bench.devices[0]["eds"]
+    bench.dispatch("dev_menu", {"node": bench.devices[0]["node"], "what": "eds_next"})
+    assert bench.devices[0]["eds"] == before
+
+
+def test_the_snapshot_names_the_eds_each_identity_matches(connected_bench):
+    """The menu marks it, so the file that fits the device is the one to
+    pick rather than the one to look for — by the same lookup a scan uses,
+    not by comparing two spellings of one identity in the browser."""
+    bench = connected_bench
+    snap = bench.snapshot()
+    for d in bench.devices:
+        assert snap["eds"]["match"][str(d["node"])] == d["eds"]   # what the scan assigned
+    bench.dispatch("dev_menu", {"node": bench.devices[0]["node"], "what": "eds_set",
+                                "file": "CiA301Base.eds"})
+    # still the file the identity names, whatever was picked by hand
+    assert bench.snapshot()["eds"]["match"][str(bench.devices[0]["node"])] != "CiA301Base.eds"
 
 
 def test_base_eds_browses_the_objects_a_foreign_device_can_be_asked_for(connected_bench):
