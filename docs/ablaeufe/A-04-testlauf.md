@@ -155,10 +155,11 @@ Ein Lauf schreibt in den Results-Ordner (`paths["res"]`, sonst
 
 | Datei | Inhalt |
 |---|---|
-| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt). Buchhaltung des Falls (Label, Sprung, Registerrechnung) ist hellbraun abgesetzt, damit eine Schleife als Schleife lesbar bleibt. Spalte **Line** ist die Zeilennummer in der Testdatei (1-basiert), nicht die Nummer des ausgeführten Schritts — ein Schritt im Report und ein Schritt im Editor sind damit dasselbe zum Nachschlagen |
+| `<stamp>__<tid>__<name>.html` | ein Testfall: Kopfdaten, dann je Schritt bis zu drei Zeilen — was lief (mit EDS-Objektnamen), die `note` des Autors, und was zurückkam (auch im Gutfall, mit Enum-Bedeutung wo bekannt). Buchhaltung des Falls (Label, Sprung, Registerrechnung) ist hellbraun abgesetzt, damit eine Schleife als Schleife lesbar bleibt. Spalte **Line** ist die Zeilennummer in der Testdatei (1-basiert), nicht die Nummer des ausgeführten Schritts — ein Schritt im Report und ein Schritt im Editor sind damit dasselbe zum Nachschlagen — bei langen Fällen nicht jeder Schritt, siehe „Lange Fälle" unten |
 | `<stamp>__summary.html` | der Lauf: eine Zeile je Testfall, verlinkt auf dessen Datei |
 | `<stamp>__summary.json` | derselbe Lauf als Daten — Grundlage der Übersicht unten |
 | `testReportStyle.css` | einmal geschrieben, von allen Reports verlinkt, **nie überschrieben** |
+| `testSteps.log` | jeder Schritt jedes Laufs, eine Zeile je Schritt: Zeitstempel, Testfall, Zeile, Zustand, Schritt, `note`, Antwort — dazu je eine Zeile für Beginn und Ende von Lauf und Testfall. **Fester Name**, über alle Läufe angehängt; über 100 MB fallen die ältesten ~10 MB weg, an einer Zeilengrenze und mit einer Zeile, die es sagt |
 
 ### Geschrieben *während* der Lauf läuft **[Ist]**
 
@@ -228,6 +229,30 @@ Schlägt das Schreiben fehl (volle Platte, ungültiger Pfad), ist das eine
 Logzeile `RUN  report not written — …` (einmal je Lauf, nicht je Schritt)
 und **kein** fehlgeschlagener Lauf: die Verdikte stehen bereits im Log
 und auf dem Schirm.
+
+### Lange Fälle **[Ist]**
+
+Ein Dauerlauf kann Millionen Schritte ausführen, und eine Seite mit
+Millionen Zeilen öffnet kein Browser. Die Seite eines Falls listet
+deshalb:
+
+| Teil | Was |
+|---|---|
+| Anfang | die ersten 2 000 Schritte vollständig |
+| Mitte | nur Schritte, die auffallen: nicht bestanden, `log`-Schritte, Bediener-Schritte (`manual`, `ask`, `adjust`) — höchstens 1 000; wo dazwischen Schritte ausgelassen sind, sagt eine Zeile, wie viele, über welche Zeit und wie viele davon nicht bestanden |
+| Ende | die letzten 500 Schritte vollständig |
+
+Eine Seite hat damit höchstens rund 4 500 Zeilen, gut 1 MB, egal wie
+lange der Fall läuft, und der Speicher des Prüfstands wächst ebenso
+wenig mit. Ein Fall bis 2 500 Schritte verliert nichts.
+
+Was nach den ersten 2 000 Schritten auffällt, erscheint auf der Seite
+erst 500 Schritte später: So lange könnte es noch zum Ende gehören, und
+die Seite wird nur angehängt, nie umgeschrieben. Jeden Schritt sofort
+hat `testSteps.log`, auch die, die eine Seite auslässt.
+
+Die Grenzen sind `PAGE_HEAD_STEPS`, `PAGE_NOTABLE_STEPS` und
+`PAGE_TAIL_STEPS` in `canopen_bench/report.py`.
 
 ### Übersicht nach HW-Varianten **[Ist]**
 

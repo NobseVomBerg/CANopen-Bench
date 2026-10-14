@@ -36,10 +36,15 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
+import shutil
+from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from importlib import resources
+from pathlib import Path
 
 #: Verdicts, in the vocabulary the runner produces.
 PASS, FAIL, ERROR, SKIP = "PASS", "FAIL", "ERROR", "SKIP"
@@ -95,6 +100,7 @@ class StepRecord:
     note: str = ""           # the case author's own words for this step
     detail: str = ""         # what came back, or why it failed
     ts: str = ""             # "20260729_091330.922", like the bench's own log
+    key: str = ""            # the step's primitive ("sdo_read", "log", …) — what decides whether it stands out
 
 
 @dataclass
@@ -317,7 +323,7 @@ def step_row(step: StepRecord) -> str:
     if step.detail:
         text += f"<br /><i>{_rich(step.detail)}</i>"
     return (f"<tr class='{cls}'><td>{_e(step.ts)}</td>"
-            f"<td>{step.line}</td><td>{text}</td></tr>\n")
+            f"<td>{step.line or ''}</td><td>{text}</td></tr>\n")
 
 
 def page_tail() -> str:
@@ -332,6 +338,222 @@ def case_html(case: CaseRecord) -> str:
     """One test case: the header block, then every step that ran."""
     return (case_head(case) + "".join(step_row(s) for s in case.steps)
             + page_tail())
+
+
+#: What a case page lists of a long case: its first PAGE_HEAD_STEPS steps
+#: in full; after them only steps that stand out (see stands_out), at
+#: most PAGE_NOTABLE_STEPS of them, with a row saying how many were left
+#: out wherever some were; and its last PAGE_TAIL_STEPS in full. An
+#: endurance run that goes on all night would otherwise be a page of
+#: millions of rows, which no browser opens — every step is in the step
+#: log (STEP_LOG) instead. A case of up to head + tail steps loses nothing.
+PAGE_HEAD_STEPS = 2000
+PAGE_NOTABLE_STEPS = 1000
+PAGE_TAIL_STEPS = 500
+
+#: steps that wait for somebody — always worth a row, whatever came back
+OPERATOR_KEYS = frozenset({"manual", "ask", "adjust"})
+
+#: every step of every run, one line each, in one file of a fixed name in
+#: the results folder, appended across runs
+STEP_LOG = "testSteps.log"
+#: past this size the oldest STEP_LOG_DROP_BYTES go, cut at a line end
+STEP_LOG_MAX_BYTES = 100 * 1024 * 1024
+STEP_LOG_DROP_BYTES = 10 * 1024 * 1024
+
+
+def _stamp_now() -> str:
+    """Now, the way step rows and the bench's own log write a time."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]
+
+
+def stands_out(step: StepRecord) -> bool:
+    """Whether a step past a page's first rows still gets one of its own:
+    it did not simply pass, it is the case author's own sentence (a
+    `log` step), or it waited for somebody."""
+    return step.state in ("fail", "error", "skip", "note") or step.key in OPERATOR_KEYS
+
+
+def gap_row(count: int, failed: int, first: str, last: str, log_name: str = "") -> StepRecord:
+    """The row that stands where steps were left off a page."""
+    text = f"… {count} step{'' if count == 1 else 's'} not listed, {first} … {last}"
+    if failed:
+        text += f" — {failed} of them did not pass"
+    note = f"every step is in {log_name}" if log_name else ""
+    return StepRecord(line=0, text=text, state="note", note=note, ts=first)
+
+
+class StepWindow:
+    """Decides which of a case's steps its page lists, as they come.
+
+    Stands where the case's step list stood: the executor appends every
+    step, and what is to be listed lands in ``case.steps`` in the order
+    the steps ran — which is what the live report writes out, unchanged.
+    Steps past the first ``head`` are held back ``tail`` steps long,
+    because until then nobody knows whether they belong to the end. A
+    held step that drops out of that window is listed if it stands out
+    and the ``notable`` budget allows; otherwise it is counted into the
+    gap that the next listed row closes with a ``gap_row``. ``finish``
+    closes the last gap and lists what is still held.
+
+    Every step goes to ``log`` the moment it is appended, listed or not.
+    """
+
+    def __init__(self, case: CaseRecord, log: StepLog | None = None, *,
+                 head: int = PAGE_HEAD_STEPS, notable: int = PAGE_NOTABLE_STEPS,
+                 tail: int = PAGE_TAIL_STEPS) -> None:
+        self.case, self.log = case, log
+        self.head, self.notable, self.tail = head, notable, tail
+        self.seen = 0              # steps appended
+        self.listed_notable = 0    # standing-out steps listed after the head
+        self.omitted = 0           # steps left off the page, all gaps together
+        self.held: deque[StepRecord] = deque()
+        self._gap = 0
+        self._gap_failed = 0
+        self._gap_first = ""
+        self._gap_last = ""
+
+    def append(self, step: StepRecord) -> None:
+        if self.log is not None:
+            self.log.step(self.case.id, step)
+        self.seen += 1
+        if self.seen <= self.head:
+            self.case.steps.append(step)
+            return
+        self.held.append(step)
+        if len(self.held) > self.tail:
+            self._let_go(self.held.popleft())
+
+    def finish(self) -> None:
+        self._close_gap()
+        self.case.steps.extend(self.held)
+        self.held.clear()
+
+    def _let_go(self, step: StepRecord) -> None:
+        if stands_out(step) and self.listed_notable < self.notable:
+            self._close_gap()
+            self.case.steps.append(step)
+            self.listed_notable += 1
+            return
+        if not self._gap:
+            self._gap_first = step.ts
+        self._gap += 1
+        self._gap_last = step.ts
+        if step.state in ("fail", "error"):
+            self._gap_failed += 1
+
+    def _close_gap(self) -> None:
+        if not self._gap:
+            return
+        name = self.log.path.name if self.log is not None else ""
+        self.case.steps.append(gap_row(self._gap, self._gap_failed,
+                                       self._gap_first, self._gap_last, name))
+        self.omitted += self._gap
+        self._gap = self._gap_failed = 0
+
+
+class StepLog:
+    """The step log: one line per executed step, appended to one file.
+
+    Opened on the first line and kept open until ``close``; each line is
+    flushed as it is written, so what a crash leaves behind ends at the
+    last step that ran. Past ``max_bytes`` the oldest ``drop_bytes`` are
+    cut away at a line end, and a line at the top says so.
+
+    Never raises. A log that cannot be written says so once through
+    ``on_error`` and stays quiet after that — a full disk must not end a
+    run whose reports are still being written. A cut that fails (the file
+    held open by another program, say) is said once too, and tried again
+    only after another ``drop_bytes`` were written, not on every line.
+    """
+
+    def __init__(self, path, on_error: Callable[[str], None] | None = None, *,
+                 max_bytes: int = STEP_LOG_MAX_BYTES,
+                 drop_bytes: int = STEP_LOG_DROP_BYTES) -> None:
+        self.path = Path(path)
+        self.on_error = on_error
+        self.max_bytes, self.drop_bytes = max_bytes, drop_bytes
+        self._fh = None
+        self._size = 0
+        self._next_cut = max_bytes
+        self._broken = False
+        self._cut_said = False
+
+    # -- what goes in ---------------------------------------------------------
+    def step(self, case_id: str, step: StepRecord) -> None:
+        parts = [f"{step.ts}  {case_id}  {step.line or '':>5}  {step.state or '-':<5}  {step.text}"]
+        parts += [p for p in (step.note, step.detail) if p]
+        self.line("  | ".join(parts))
+
+    def case_start(self, case: CaseRecord) -> None:
+        where = " · ".join(p for p in (f"node {case.node}" if case.node else "",
+                                       case.device, case.variant) if p)
+        self.line(f"{_stamp_now()}  {case.id}  ----- start: {case.name}"
+                  + (f" · {where}" if where else "") + (f" → {case.file}" if case.file else ""))
+
+    def case_end(self, case: CaseRecord) -> None:
+        self.line(f"{_stamp_now()}  {case.id}  ----- {case.verdict} after {case.seconds:.1f} s"
+                  + (f": {case.reason}" if case.reason else ""))
+
+    def run_start(self, stamp: str, cases: int, tool: str, workspace: str) -> None:
+        self.line(f"{_stamp_now()}  ===== run {stamp} · {cases} case(s) · {tool} · workspace {workspace}")
+
+    def run_end(self, stamp: str) -> None:
+        self.line(f"{_stamp_now()}  ===== run {stamp} over")
+
+    def line(self, text: str) -> None:
+        if self._broken:
+            return
+        data = (text.replace("\r", "").replace("\n", " ↵ ") + "\n").encode("utf-8")
+        try:
+            if self._fh is None:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._fh = self.path.open("ab")
+                self._size = os.fstat(self._fh.fileno()).st_size
+            self._fh.write(data)
+            self._fh.flush()
+        except OSError as exc:
+            self._broken = True
+            self.close()
+            if self.on_error is not None:
+                self.on_error(f"{self.path.name} not written — {exc}")
+            return
+        self._size += len(data)
+        if self._size > self._next_cut:
+            self._cut_oldest()
+
+    def close(self) -> None:
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+
+    # -- keeping it under max_bytes -------------------------------------------
+    def _cut_oldest(self) -> None:
+        self.close()
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            with self.path.open("rb") as src, tmp.open("wb") as dst:
+                src.seek(self.drop_bytes)
+                src.readline()             # the rest of the line the cut fell into
+                dst.write((f"{_stamp_now()}  ===== older lines dropped here — this file is kept "
+                           f"under {self.max_bytes // (1024 * 1024)} MB\n").encode())
+                shutil.copyfileobj(src, dst, 1024 * 1024)
+            os.replace(tmp, self.path)
+            self._size = self.path.stat().st_size
+            self._next_cut = self.max_bytes
+        except OSError as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self._next_cut = self._size + self.drop_bytes
+            if not self._cut_said and self.on_error is not None:
+                self._cut_said = True
+                self.on_error(f"{self.path.name} keeps growing past "
+                              f"{self.max_bytes // (1024 * 1024)} MB — {exc}")
 
 
 def _device_text(case: CaseRecord) -> str:
