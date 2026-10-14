@@ -16,8 +16,15 @@ from .values import base_of
 
 MANUAL_TIMEOUT_S = 120.0  # default confirmation window for `manual` steps
 #: loop runaway guard (v2): executed steps per case, its preconditions and
-#: steps counted together — a flow, which has no case around it, per run
+#: steps counted together — a flow, which has no case around it, per run.
+#: Not for UNGUARDED_GRADES.
 MAX_STEPS = 10_000
+
+#: grades an operator runs one case at a time, standing beside the bench:
+#: no loop guard for these — an endurance run must not stop at a step
+#: count, and Stop ends one that has to. Every other case, one without a
+#: grade included, is held to MAX_STEPS.
+UNGUARDED_GRADES = frozenset({"semi", "manual", "production"})
 
 #: the predefined variables (v2), in the order a dump lists them — the
 #: set is for membership tests and has no order to lend
