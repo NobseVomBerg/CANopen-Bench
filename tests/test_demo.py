@@ -298,7 +298,7 @@ def test_demo_objects_catalog_is_built_from_the_eds(demo_bench):
     demo_bench.dispatch("dev_toggle", {"node": 1})
     snap = demo_bench.snapshot()
     catalog = snap["objects"]["catalog"]
-    manu_rows = {(r[0], r[1]): r for r in catalog["manu"]}
+    manu_rows = {(r[0], r[1]): r for r in catalog["manu-2000"]}
     row = manu_rows[("0x2000", "00")]
     assert row[2] == "Demo counter"
     assert row[3] == "U32"
@@ -308,7 +308,7 @@ def test_demo_objects_catalog_is_built_from_the_eds(demo_bench):
     assert ("0x1000", "00") in comm_rows
     assert ("0x1018", "01") in comm_rows  # record member
     groups = {g["key"]: g for g in snap["objects"]["groups"]}
-    assert groups["manu"]["count"] == len(catalog["manu"])
+    assert groups["manu-2000"]["count"] == len(catalog["manu-2000"])
 
 
 def test_demo_catalog_is_empty_without_selection(demo_bench):
@@ -474,7 +474,7 @@ def test_demo_catalog_rows_carry_eds_min_max(demo_bench):
     demo_bench.dispatch("dev_toggle", {"node": 1})
     snap = demo_bench.snapshot()
     catalog = snap["objects"]["catalog"]
-    manu_rows = {(r[0], r[1]): r for r in catalog["manu"]}
+    manu_rows = {(r[0], r[1]): r for r in catalog["manu-2000"]}
 
     ranged_row = manu_rows[("0x2010", "00")]
     assert len(ranged_row) == 8

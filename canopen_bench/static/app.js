@@ -1229,6 +1229,13 @@ function ObjectsPage({ s, ui, setUi }) {
   const targetNode = selDevs[0] ? selDevs[0].node : 1;
   const mirrorNode = selDevs[0] ? String(selDevs[0].node).padStart(2, '0') : '—';
   const vals = s.objects.vals;
+  // the area to show: the one picked, while this EDS has it; otherwise the
+  // first manufacturer block, which is what the page has always opened on,
+  // else the first area there is. Areas are only those the EDS has objects
+  // in, so a key picked on another device can name nothing here.
+  const groups = s.objects.groups;
+  const groupKey = (groups.find((g) => g.key === ui.objGroup)
+    || groups.find((g) => g.key.startsWith('manu')) || groups[0] || {}).key;
   const raw = s.raw;
   // fixed columns must leave room for star+Read+Write (last col); NAME is
   // the only flexible one and may wrap long identifiers inside its cell
@@ -1383,7 +1390,7 @@ function ObjectsPage({ s, ui, setUi }) {
       ${view !== 'panel' && !s.objects.groups.length && html`
         <div style="font-size:11px;color:var(--faint);line-height:1.5;padding:4px">${s.objects.hint}</div>`}
       ${view !== 'panel' && s.objects.groups.map((g) => {
-        const on = ui.objGroup === g.key;
+        const on = groupKey === g.key;
         return html`
         <div class=${on ? '' : 'hv'} onClick=${() => setUi({ ...ui, objGroup: g.key })}
           style="padding:8px 10px;border-radius:6px;cursor:pointer;background:${on ? 'var(--acc-soft)' : 'transparent'}">
@@ -1404,7 +1411,7 @@ function ObjectsPage({ s, ui, setUi }) {
       <div style="flex:1;min-height:0;overflow:auto">
         ${!s.objects.groups.length && html`
           <div style="padding:26px 18px;text-align:center;font-size:12px;color:var(--faint)">${s.objects.hint}</div>`}
-        ${(s.objects.catalog[ui.objGroup] || []).map(([idx, sub, name, type, acc, val, min, max]) => {
+        ${(s.objects.catalog[groupKey] || []).map(([idx, sub, name, type, acc, val, min, max]) => {
           const key = idx + ':' + sub;
           const cur = vals[key];
           const shown = shownValue(key, cur ?? val);

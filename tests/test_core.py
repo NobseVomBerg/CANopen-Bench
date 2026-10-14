@@ -4433,8 +4433,43 @@ def test_base_eds_browses_the_objects_a_foreign_device_can_be_asked_for(connecte
                 "0x1009", "0x100A", "0x1017", "0x1018"):
         assert idx in indices, f"{idx} missing from the base catalog"
     # all of it is communication-profile: nothing manufacturer-specific can
-    # be claimed about a device this file has never met
-    assert not objects["manu"] and not objects["profile"]
+    # be claimed about a device this file has never met — and an area the
+    # file has nothing in is not listed as if it were there and empty
+    assert set(objects) == {"comm"}
+    assert [g["key"] for g in catalog[1]] == ["comm"]
+
+
+_SPREAD_EDS = "\n".join(
+    ["[FileInfo]", "FileName=spread.eds", "EDSVersion=4.0", "",
+     "[DeviceInfo]", "VendorNumber=0x1", "ProductNumber=0x2", ""]
+    + [line for idx, name in (("1000", "Device type"), ("2001", "First vendor block"),
+                              ("3005", "Second vendor block"), ("3006", "Second, again"),
+                              ("4010", "Third vendor block"), ("A000", "A network variable"))
+       for line in (f"[{idx}]", f"ParameterName={name}", "ObjectType=0x7",
+                    "DataType=0x0007", "AccessType=rw", "DefaultValue=0", "")])
+
+
+def test_the_object_areas_are_the_ones_the_eds_has(connected_bench):
+    """A fixed list of three showed areas a file had nothing in and hid the
+    rest: everything from 0x2000 to 0x5FFF in one list however many blocks
+    a vendor used, and anything above 0x9FFF dropped without a word. The
+    areas are now the file's own — each manufacturer block on its own."""
+    bench = connected_bench
+    bench.db.eds_write_file("spread.eds", _SPREAD_EDS)
+
+    built = bench._catalog_from_eds("spread.eds")
+    assert not isinstance(built, str), built
+    objects, groups = built
+
+    assert [(g["key"], g["label"], g["range"], g["count"]) for g in groups] == [
+        ("comm", "Communication", "0x1000–0x1FFF", 1),
+        ("manu-2000", "Manufacturer", "0x2000–0x2FFF", 1),
+        ("manu-3000", "Manufacturer", "0x3000–0x3FFF", 2),
+        ("manu-4000", "Manufacturer", "0x4000–0x4FFF", 1),
+        ("netvar", "Network variables", "0xA000–0xAFFF", 1),
+    ]
+    assert [row[0] for row in objects["manu-3000"]] == ["0x3005", "0x3006"]
+    assert set(objects) == {g["key"] for g in groups}, "no empty lists beside them"
 
 
 def test_a_disabled_base_eds_stays_disabled(tmp_path):
