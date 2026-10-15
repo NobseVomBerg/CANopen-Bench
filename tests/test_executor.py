@@ -2543,3 +2543,65 @@ steps:
     run_selected(bench, {"0034"}, during=_once(queue_only))
     assert bench.results == {"0034": "PASS"}
     assert any(e.code == 0x3000 for e in bench.emcy_seen), "never made it into the record"
+
+
+# -- the variant a run checks against is read when the run starts ------------
+
+VARIANT_TC = """\
+id: "0201"
+name: "for variant 0 only"
+variants: [0]
+steps:
+  - log: "ran"
+"""
+
+
+@pytest.fixture()
+def stale_variant_bench(tmp_path):
+    """A device whose EDS names a variant object — the seed EDS's own
+    read-only 0x2050 — and a case written for variant 0, which is what the
+    demo device answers there. No plugins: what runs is the core alone."""
+    bench = Bench(Db(tmp_path / "v.db"), plugins=[])
+    write_seed_eds_files(bench)
+    for e in bench.db.eds_list(devices_only=True):
+        bench.db.eds_set_variant(e["file"], "0x2050", "00", {})
+    tc_dir = tmp_path / "tcs"
+    tc_dir.mkdir()
+    (tc_dir / "TC0201_for_variant_0.yaml").write_text(VARIANT_TC)
+    bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
+    connect_and_scan(bench)
+    bench.dispatch("dev_toggle", {"node": 1})
+    return bench
+
+
+def test_a_run_checks_the_variant_the_device_answers_when_it_starts(stale_variant_bench):
+    """The variant was read at the scan and nowhere else. Two units scanned
+    while their bootloader was running answered 0 at the variant object;
+    an hour later, back in their application and answering their real
+    variant to every case that asked, a run skipped every case written for
+    a variant — on the number from the scan. The run reads it again."""
+    bench = stale_variant_bench
+    dev = next(d for d in bench.devices if d["node"] == 1)
+    dev["variant"] = "0x05"                   # what a scan in another state found
+    run_selected(bench, {"0201"})
+    assert bench.results["0201"] == "PASS"
+    assert dev["variant"] == "0x00"
+    assert any("node 01" in r["msg"] and "0x05 → 0x00" in r["msg"] for r in bench.logs)
+
+
+def test_a_variant_that_cannot_be_read_now_keeps_the_scanned_one(stale_variant_bench):
+    """A read that fails says nothing about the device's variant — and a
+    device that does not answer now fails its cases on that, not on this."""
+    bench = stale_variant_bench
+    dev = next(d for d in bench.devices if d["node"] == 1)
+    bench.db.eds_set_variant(dev["eds"], "0x2FFF", "00", {})   # an object the device does not have
+    run_selected(bench, {"0201"})
+    assert dev["variant"] == "0x00"
+    assert not any("read again" in r["msg"] for r in bench.logs)
+
+
+def test_an_unchanged_variant_is_not_logged_at_every_run(stale_variant_bench):
+    bench = stale_variant_bench
+    run_selected(bench, {"0201"})
+    assert bench.results["0201"] == "PASS"
+    assert not any("read again" in r["msg"] for r in bench.logs)
