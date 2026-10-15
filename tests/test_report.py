@@ -74,9 +74,17 @@ def test_the_header_says_what_ran_against_what():
     doc = case_html(_case(desc="checks under-voltage", grade="automated",
                           tools=["PSU"], user="bench"))
     for text in ("Power off handling", "checks under-voltage", "automated",
-                 "PSU", "DUT_ALPHA", "variant V2", "SN 0026", "node 01",
+                 "PSU", "DUT_ALPHA", "SN 0026", "node 01",
                  "2026-07-29T09:13:30", "8.4 s"):
         assert text in doc, text
+
+
+def test_the_device_line_does_not_repeat_the_variant():
+    """Next to the device's name the variant was mostly a repeat. A SKIP
+    still names it, as the reason for the skip."""
+    assert "V2" not in case_html(_case())
+    skipped = case_html(_case(verdict="SKIP", reason="for variant V1, this is V2"))
+    assert "this is V2" in skipped
 
 
 def test_a_failed_step_carries_its_reason_into_the_file():
