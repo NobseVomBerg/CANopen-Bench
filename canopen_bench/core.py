@@ -5194,7 +5194,37 @@ class Bench:
             self._manual_event.set()
 
     # -- step executor (real test-case files, see docs/ablaeufe/A-04) --------
+    async def _read_variants_now(self) -> None:
+        """Each device's variant, read again before a run decides on it.
+
+        The scan reads it once and the device list keeps it, and a device
+        answers for the state it is in at that moment. Two units scanned
+        while their bootloader was running answered 0 at the variant object;
+        an hour later, back in their application and answering their real
+        variant to every case that asked, a run skipped every case written
+        for a variant — on the number from the scan.
+
+        The reads go off the event loop, as the scan's do; what changed is
+        applied and said here. A read that fails keeps what the scan found:
+        it says nothing about the variant, and a device that does not answer
+        now fails its cases on that, not on this.
+        """
+        by_file = {e["file"]: e for e in self.db.eds_list()}
+        wanted = [(d["node"], by_file[d["eds"]]) for d in self.devices
+                  if d.get("eds") in by_file and by_file[d["eds"]]["variant_index"]]
+        if not wanted:
+            return
+        fresh = await asyncio.to_thread(
+            lambda: {node: self._read_variant(node, entry) for node, entry in wanted})
+        for dev in self.devices:
+            now = fresh.get(dev["node"], "")
+            if now and now != dev.get("variant", ""):
+                self.log(f"RUN  node {dev['node']:02d} variant {dev.get('variant') or '—'} → {now} "
+                         f"(read again at the start of the run)")
+                dev["variant"] = now
+
     async def _run_task(self) -> None:
+        await self._read_variants_now()
         self._run_cases = []
         self._run_started = datetime.now().isoformat(timespec="seconds")
         # one stamp for every file this run writes, live ones included
