@@ -557,9 +557,10 @@ class StepLog:
 
 
 def _device_text(case: CaseRecord) -> str:
+    # no variant here: next to the device's name it was mostly a repeat. Where it
+    # decides something (a SKIP) the reason names it, and the summary JSON keeps it
+    # for the overview
     bits = [case.device or "—"]
-    if case.variant:
-        bits.append(f"variant {case.variant}")
     if case.sn:
         bits.append(f"SN {case.sn}")
     if case.node:
