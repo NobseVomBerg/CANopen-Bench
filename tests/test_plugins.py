@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import importlib.metadata
 import io
 import sys
 import uuid
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
 
+import canopen_bench.plugin as plugin_mod
 import canopen_bench.testcases as tclib
 from canopen_bench.bus.interface import SdoResult
 from canopen_bench.core import Bench, _resolve
@@ -30,6 +32,8 @@ from canopen_bench.plugin import (
     SwdlStrategy,
     TraceDecoder,
     load_plugins,
+    pip_command,
+    unmet_requirements,
 )
 from canopen_bench.testcases import parse_testcase
 
@@ -1158,13 +1162,15 @@ def _write_zip(files: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
-def _hand_wheel_bytes(dist_name: str, version: str) -> bytes:
+def _hand_wheel_bytes(dist_name: str, version: str, requires: list[str] | None = None) -> bytes:
     """A minimal, non-importable wheel archive — enough for
-    _install_plugin_wheel/manifest/zip-slip tests, not for a real load."""
+    _install_plugin_wheel/manifest/zip-slip tests, not for a real load.
+    ``requires`` become the METADATA's Requires-Dist lines."""
+    needs = "".join(f"Requires-Dist: {line}\n" for line in requires or ())
     return _write_zip({
         f"{dist_name}/__init__.py": "",
         f"{dist_name}-{version}.dist-info/METADATA":
-            f"Metadata-Version: 2.1\nName: {dist_name}\nVersion: {version}\n",
+            f"Metadata-Version: 2.1\nName: {dist_name}\nVersion: {version}\n{needs}",
         f"{dist_name}-{version}.dist-info/entry_points.txt":
             f"[canopen_bench.plugins]\n{dist_name} = {dist_name}.plugin:NotReal\n",
     })
@@ -1557,10 +1563,12 @@ def test_a_plugin_that_raises_while_naming_does_not_stop_the_run(tmp_path):
 # -- the same package installed twice ---------------------------------------
 
 class _FakeDist:
-    """Just enough of importlib.metadata.Distribution for _installed_at()."""
+    """Just enough of importlib.metadata.Distribution for _installed_at()
+    and unmet_requirements()."""
 
-    def __init__(self, name: str, version: str, path: str):
+    def __init__(self, name: str, version: str, path: str, requires: list[str] | None = None):
         self.name, self.version, self._path = name, version, path
+        self.requires = requires or []
 
     def locate_file(self, _):
         return self._path
@@ -1668,6 +1676,188 @@ def test_the_bench_says_it_in_the_state_log(monkeypatch, tmp_path):
     assert [p.name for p in bench.plugins] == ["twice"]
     assert any("installed twice" in entry["msg"] and entry["type"] == "emcy0"
                for entry in bench.logs)
+
+
+# -- a plugin that lacks what it needs --------------------------------------
+
+def _failing_to_load(name: str, error: Exception, dist) -> _FakeEP:
+    """An entry point whose import raises — where a plugin module importing
+    a package this Python does not have fails."""
+    ep = _FakeEP(name, _Twice, dist)
+
+    def load():
+        raise error
+
+    ep.load = load
+    return ep
+
+
+def test_unmet_requirements_are_the_missing_and_the_too_old():
+    """The upload unpacks and installs nothing, so what a wheel needs is
+    either here already or it is not, and only the bench can say which.
+    Extras, packages for another platform and lines nobody can parse are
+    not its business: a wrong complaint is worse than none."""
+    unmet = unmet_requirements([
+        "surely-not-installed-xyz>=1.0",
+        "pyyaml>=1",
+        "pyyaml>=999",
+        "only-for-dev-xyz; extra == 'dev'",
+        "other-platform-xyz; sys_platform == 'no-such-platform'",
+        "!! not a requirement",
+    ])
+
+    assert unmet == [("surely-not-installed-xyz>=1.0", None),
+                     ("pyyaml>=999", importlib.metadata.version("pyyaml"))]
+
+
+def test_the_pip_command_names_the_python_running_the_bench(monkeypatch):
+    """The ``python`` a console finds first need not be the one running the
+    bench: on a machine with two, the package would land next to the wrong
+    one and the plugin would go on failing with the command just followed."""
+    monkeypatch.setattr(sys, "executable", r"C:\ee\python\python.exe")
+    assert pip_command(["surely-not-installed-xyz>=1.2"]) == \
+        r'C:\ee\python\python.exe -m pip install "surely-not-installed-xyz>=1.2"'
+
+    monkeypatch.setattr(sys, "executable", r"C:\Program Files\Py\python.exe")
+    assert pip_command(["surely-not-installed-xyz>=1.2"]).startswith(
+        r'"C:\Program Files\Py\python.exe" -m pip install')
+
+
+def test_a_plugin_that_lacks_a_dependency_says_which_and_how_to_get_it(monkeypatch):
+    """A wheel uploaded under Setup > Extensions brings none of its
+    dependencies, so the plugin fails on its first import. The traceback
+    for that goes to a console nobody watches; what is missing, and the
+    command that adds it, is the whole message."""
+    _entry_points(monkeypatch, [
+        _failing_to_load("acme", ModuleNotFoundError("No module named 'xyzusb'"),
+                         _FakeDist("cob-acme", "1.0", "/data/plugins",
+                                   requires=["surely-not-installed-xyz>=1.2", "pyyaml>=1"])),
+    ])
+    notes: list[str] = []
+
+    assert load_plugins(note=notes.append) == []
+
+    assert len(notes) == 1
+    assert "cannot load" in notes[0]
+    assert "surely-not-installed-xyz>=1.2 (not installed)" in notes[0]
+    assert '-m pip install "surely-not-installed-xyz>=1.2"' in notes[0]
+    assert "restart" in notes[0]
+    assert "pyyaml" not in notes[0], "what is installed is not asked for"
+
+
+def test_any_other_load_failure_reaches_the_state_log_too(monkeypatch):
+    """A plugin failing for any other reason used to be a traceback on the
+    console and an entry missing from the screen, with nothing in the
+    bench to say why."""
+    _entry_points(monkeypatch, [
+        _failing_to_load("acme", RuntimeError("boom"),
+                         _FakeDist("cob-acme", "1.0", "/data/plugins", requires=["pyyaml>=1"])),
+    ])
+    notes: list[str] = []
+
+    assert load_plugins(note=notes.append) == []
+
+    assert len(notes) == 1
+    assert "failed to load" in notes[0] and "RuntimeError: boom" in notes[0]
+
+
+def _versions(monkeypatch, known: dict[str, str | None]):
+    """``metadata.version`` as the plugin module sees it, with ``known``
+    answered from the dict (None: not installed) and the rest as installed."""
+    real = plugin_mod.metadata.version
+
+    def version(name):
+        if name in known:
+            if known[name] is None:
+                raise plugin_mod.metadata.PackageNotFoundError(name)
+            return known[name]
+        return real(name)
+
+    monkeypatch.setattr(plugin_mod.metadata, "version", version)
+
+
+def test_a_version_packaging_cannot_read_is_skipped_not_raised(monkeypatch):
+    """An installed package may carry a version that is no PEP 440 version
+    at all. Comparing against it raises — and on the upload path that came
+    after the files were unpacked and before the reload that activates them,
+    leaving an install half done. Nothing said beats a guess."""
+    _versions(monkeypatch, {"weird-xyz": "0.1-dev-r123"})
+    assert unmet_requirements(["weird-xyz>=1"]) == []
+    assert unmet_requirements(["weird-xyz"]) == [], "present is present"
+
+
+def test_an_extra_stays_in_the_pip_command(monkeypatch):
+    """What an extra pulls in is installed only when the extra is named, so a
+    command without it installs less than the plugin asked for."""
+    assert unmet_requirements(["surely-not-installed-xyz[fast]>=1.2"]) == [
+        ("surely-not-installed-xyz[fast]>=1.2", None)]
+
+
+def test_the_bench_counts_itself_as_installed_even_from_a_checkout(monkeypatch):
+    """Started from a checkout without being installed, the bench has no
+    metadata — and a plugin requiring it would be told it is missing by the
+    very program telling it. Its own version answers instead."""
+    from canopen_bench import __version__
+    _versions(monkeypatch, {"canopen-bench": None, "canopen_bench": None})
+    assert unmet_requirements(["canopen-bench>=1,<2"]) == []
+    assert unmet_requirements(["canopen-bench>=999"]) == [("canopen-bench>=999", __version__)]
+
+
+def test_a_distribution_that_cannot_say_what_it_needs_still_reports_the_failure(monkeypatch):
+    """The dependency check is a diagnostic on top of the failure; metadata
+    that cannot be asked costs that diagnostic, not the report."""
+    class _Mute(_FakeDist):
+        @property
+        def requires(self):
+            raise RuntimeError("no metadata")
+
+        @requires.setter
+        def requires(self, _):
+            pass
+
+    _entry_points(monkeypatch, [
+        _failing_to_load("acme", RuntimeError("boom"), _Mute("cob-acme", "1.0", "/data/plugins"))])
+    notes: list[str] = []
+
+    assert load_plugins(note=notes.append) == []
+    assert len(notes) == 1 and "failed to load" in notes[0] and "boom" in notes[0]
+
+
+def test_an_uploaded_wheel_says_what_this_python_lacks(tmp_path):
+    """The upload unpacks the wheel and installs nothing it depends on.
+    Without a word here the first sign is a plugin that does not show up,
+    and the reason sits on a console nobody watches."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[], workspaces_root=tmp_path)
+    reloads = []
+    bench.on_plugin_reload = lambda: reloads.append(True)
+    content = _hand_wheel_bytes("cob_xyz", "1.0.0",
+                                requires=["surely-not-installed-xyz>=1.2", "pyyaml>=1"])
+
+    bench.dispatch("plugin_install", {"filename": "cob_xyz-1.0.0-py3-none-any.whl",
+                                      "content": base64.b64encode(content).decode("ascii")})
+
+    assert any("surely-not-installed-xyz>=1.2" in entry["msg"]
+               and "-m pip install" in entry["msg"] and entry["type"] == "emcy0"
+               for entry in bench.logs)
+    assert not any("pyyaml" in entry["msg"] for entry in bench.logs)
+    assert reloads == [True], "the files are in place, so the install went through"
+
+
+def test_an_uploaded_wheel_with_everything_it_needs_says_nothing_more(tmp_path):
+    """The line is for a wheel that cannot work here. One whose
+    requirements are all met gets none, or the state log cries wolf and
+    the next one that matters is read as the last one was."""
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[], workspaces_root=tmp_path)
+    reloads = []
+    bench.on_plugin_reload = lambda: reloads.append(True)
+    content = _hand_wheel_bytes("cob_xyz", "1.0.0", requires=["pyyaml>=1"])
+
+    bench.dispatch("plugin_install", {"filename": "cob_xyz-1.0.0-py3-none-any.whl",
+                                      "content": base64.b64encode(content).decode("ascii")})
+
+    assert not any("pip install" in entry["msg"] for entry in bench.logs)
+    assert any('"cob_xyz-1.0.0" installed' in entry["msg"] for entry in bench.logs)
+    assert reloads == [True]
 
 
 # -- the EDS files a plugin ships -------------------------------------------

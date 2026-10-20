@@ -79,6 +79,7 @@ repository contains them, and distributing that image distributes them:
 | [Uvicorn](https://github.com/encode/uvicorn) | BSD-3-Clause |
 | [websockets](https://github.com/python-websockets/websockets) | BSD-3-Clause |
 | [PyYAML](https://github.com/yaml/pyyaml) | MIT |
+| [packaging](https://github.com/pypa/packaging) | Apache-2.0 OR BSD-2-Clause |
 
 **python-can is LGPL-3.0.** CANopen Bench imports it as an unmodified
 library and neither copies nor modifies its source, so the LGPL's

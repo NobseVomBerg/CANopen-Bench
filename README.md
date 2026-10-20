@@ -133,7 +133,9 @@ registered under the
 `canopen_bench.plugins` entry-point group — installing one activates it.
 In multi-workspace mode this needs no shell at all: Setup > Extensions
 installs a plugin package (`.whl`) straight from the browser, active
-immediately. Guide with hook table and a minimal example:
+immediately — its own dependencies are not installed with it, and the
+state log names any this Python lacks, with the pip command that adds
+them. Guide with hook table and a minimal example:
 `docs/extending.md`; API: `canopen_bench/plugin.py`. A complete worked
 example ships in this repo under
 [`plugins/cob-cpcusb/`](plugins/cob-cpcusb/) — python-can driver plus
