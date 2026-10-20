@@ -2,6 +2,8 @@
 demo bus's LSS slaves, the `lss_fastscan` step, and how the trace reads it."""
 from __future__ import annotations
 
+import threading
+
 import can
 import pytest
 from conftest import connect_and_scan, write_seed_eds_files
@@ -32,6 +34,10 @@ def bus(bench):
     return bus
 
 
+#: the demo answers at once, so a question needs no 10 ms window here
+FAST = 0.002
+
+
 def _sent(bus, cs: int) -> list[bytes]:
     return [bytes.fromhex(f.data) for f in bus._sdo_frames
             if f.direction == "TX" and f.cob_id == "0x7E5" and f.data.startswith(f"{cs:02X}")]
@@ -39,7 +45,7 @@ def _sent(bus, cs: int) -> list[bytes]:
 
 def test_the_lowest_lss_address_gets_the_first_node_id(bus):
     addresses = sorted(slave["address"] for slave in bus._lss)
-    found = lsslib.assign(bus, 5, 20, {})
+    found = lsslib.assign(bus, 5, 20, {}, FAST)
     assert [(dev.node, dev.address) for dev in found] == list(zip((5, 6, 7), addresses))
     assert bus.device_nodes() == [5, 6, 7] and bus.unconfigured() == 0
     bootups = [f.cob_id for f in bus._sdo_frames if f.direction == "RX" and f.data == "00"]
@@ -48,7 +54,7 @@ def test_the_lowest_lss_address_gets_the_first_node_id(bus):
 
 def test_every_device_goes_back_to_waiting_before_the_next_is_scanned(bus):
     """A device left in configuration would take the next node-ID as well."""
-    lsslib.assign(bus, 1, 20, {})
+    lsslib.assign(bus, 1, 20, {}, FAST)
     order = [bytes.fromhex(f.data)[0] for f in bus._sdo_frames
              if f.direction == "TX" and f.cob_id == "0x7E5" and not f.data.startswith("51")]
     assert order == [0x04] + [0x11, 0x17, 0x04] * 3
@@ -56,7 +62,7 @@ def test_every_device_goes_back_to_waiting_before_the_next_is_scanned(bus):
 
 def test_a_known_part_is_confirmed_with_one_question(bus):
     vendor = bus._lss[0]["address"][0]
-    lsslib.assign(bus, 1, 20, {0: vendor})
+    lsslib.assign(bus, 1, 20, {0: vendor}, FAST)
     scans = _sent(bus, lsslib.FASTSCAN)
     assert scans[1] == lsslib.frame(0x51, *vendor.to_bytes(4, "little"), 0, 0, 1)
     # three devices, 3 x 33 questions saved, and the final start nobody answers
@@ -67,37 +73,64 @@ def test_a_device_with_another_product_stops_the_scan(bus):
     products = sorted({slave["address"][1] for slave in bus._lss})
     assert len(products) == 2, "the seeded registry has two device types"
     with pytest.raises(lsslib.LssError, match="none with product") as err:
-        lsslib.assign(bus, 1, 20, {1: products[0]})
+        lsslib.assign(bus, 1, 20, {1: products[0]}, FAST)
     assert [dev.node for dev in err.value.assigned] == [1, 2]
     assert bus.unconfigured() == 1 and not bus._lss[0]["config"]
 
 
 def test_more_devices_than_node_ids_fail_and_leave_the_rest_waiting(bus):
     with pytest.raises(lsslib.LssError, match=r"more unconfigured devices than node-IDs 1\.\.2"):
-        lsslib.assign(bus, 1, 2, {})
+        lsslib.assign(bus, 1, 2, {}, FAST)
     assert bus.device_nodes() == [1, 2] and bus.unconfigured() == 1
     assert not bus._lss[0]["config"], "the device found last is back in waiting"
 
 
 def test_a_refused_node_id_names_the_error(bus):
     with pytest.raises(lsslib.LssError, match=r"configure node-ID 200: refused, error 1 \(node-ID out of range\)"):
-        lsslib.assign(bus, 200, 210, {})
+        lsslib.assign(bus, 200, 210, {}, FAST)
 
 
 def test_a_device_without_boot_up_fails(bus, monkeypatch):
     monkeypatch.setattr(bus, "_activate", lambda slave, node: None)
     with pytest.raises(lsslib.LssError, match="node 1: no boot-up within 0.05 s"):
-        lsslib.assign(bus, 1, 20, {}, bootup=0.05)
+        lsslib.assign(bus, 1, 20, {}, FAST, bootup=0.05)
 
 
 def test_nobody_unconfigured_is_nothing_to_do(bench):
-    assert lsslib.assign(bench._demo_bus, 1, 20, {}) == []
+    assert lsslib.assign(bench._demo_bus, 1, 20, {}, FAST) == []
 
 
 def test_a_stop_ends_between_two_devices(bus):
     checks = iter([False, True])
-    found = lsslib.assign(bus, 1, 20, {}, stop=lambda: next(checks))
+    found = lsslib.assign(bus, 1, 20, {}, FAST, stop=lambda: next(checks))
     assert [dev.node for dev in found] == [1] and bus.unconfigured() == 2
+
+
+def test_a_late_answer_does_not_count_for_the_next_question(bench, monkeypatch):
+    """Every slave answers a fastscan question on its own, a millisecond or
+    so after the others. Seen live with three devices: the master asked on
+    after the first answer, and the late ones answered questions nobody had
+    a 0 for. The two of one product here answer 2 ms apart."""
+    bus = bench._demo_bus
+    for node in (1, 2):
+        bus.unconfigure(node)
+    vendor, product = bus._lss[0]["address"][:2]
+    expected = sorted(slave["address"] for slave in bus._lss)
+    original = bus._lss_request
+
+    def staggered(data):
+        answers = []
+        bus.queue_raw = lambda cob, payload: answers.append((cob, payload))
+        try:
+            original(data)
+        finally:
+            del bus.queue_raw
+        for i, answer in enumerate(answers):
+            threading.Timer(0.002 * i, bus.queue_raw, answer).start()
+
+    monkeypatch.setattr(bus, "_lss_request", staggered)
+    found = lsslib.assign(bus, 1, 20, {0: vendor, 1: product})
+    assert [dev.address for dev in found] == expected
 
 
 # -- the step ------------------------------------------------------------------
@@ -121,7 +154,7 @@ FASTSCAN_TC = """\
 id: "0301"
 name: "lss_fastscan hands out node-IDs"
 steps:
-  - lss_fastscan: {first: 4, last: 9, into: R1}
+  - lss_fastscan: {first: 4, last: 9, timeout: 0.002, into: R1}
   - jump_eq: {a: R1, b: 3, to: ok}
   - fail: "wrong count"
   - label: ok

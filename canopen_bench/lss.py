@@ -5,7 +5,10 @@ bytes with zeros after the payload. A fastscan finds the unconfigured slave
 (node-ID 0xFF) with the lowest LSS address (vendor, product, revision,
 serial, 32 bits each) by asking bit by bit whether anyone has a 0 there:
 silence means every slave still in the race has a 1. Several slaves answer
-one question with the same frame, and the bus carries that as one.
+one question, each on its own and a millisecond or so apart, so every
+question waits out its whole window. Asking on after the first answer, as
+this did at first, hands the late ones to the next question, which then
+reads as "someone has a 0 here" where nobody has.
 
 A part of the address the master already knows is confirmed with one
 question instead of 32. After the last part exactly one slave is in LSS
@@ -67,21 +70,25 @@ class LssMaster:
     def switch_global(self, mode: int) -> None:
         self.bus.send_raw(REQUEST, frame(SWITCH_GLOBAL, mode))
 
-    def _ask(self, request: bytes, answer: int, timeout: float) -> bytes | None:
-        """The first answer to ``request`` within ``timeout``. What was already
-        waiting answered an earlier question, so it goes first."""
+    def _ask(self, request: bytes, answer: int, timeout: float, whole: bool = False) -> bytes | None:
+        """The first answer to ``request`` within ``timeout``, and with
+        ``whole`` only once the window is over. What was already waiting
+        answered an earlier question, so it goes first."""
         self._answers.clear()
         self.bus.send_raw(REQUEST, request)
+        first = None
         deadline = time.perf_counter() + timeout
         while (left := deadline - time.perf_counter()) > 0:
             got = self._answers.get(left)
-            if got is not None and got[1][:1] == bytes([answer]):
-                return got[1]
-        return None
+            if got is not None and got[1][:1] == bytes([answer]) and first is None:
+                first = got[1]
+                if not whole:
+                    break
+        return first
 
     def _scan(self, id_number: int, bit: int, sub: int, nxt: int) -> bool:
         request = frame(FASTSCAN, *id_number.to_bytes(4, "little"), bit, sub, nxt)
-        return self._ask(request, IDENTIFIED, self.timeout) is not None
+        return self._ask(request, IDENTIFIED, self.timeout, whole=True) is not None
 
     def fastscan(self, known: dict[int, int]) -> tuple[int, ...] | None:
         """The unconfigured slave with the lowest LSS address, now in LSS
