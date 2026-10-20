@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from canopen.objectdictionary import ObjectDictionary, ODVariable
 
+from .. import lss as lsslib
 from ..db import Db
 from ..eds_od import RAW_TYPES, OdCache, find_var, pdo_mapping
 from .canopen_bus import _bytes_to_hex, _decode_cob
@@ -108,6 +109,8 @@ class EdsDemoBus(BusInterface):
         # behaviour, e.g. button-teach
         self._hooks: list = []
         self.session: bytes | None = None  # last stored session identity (set by hooks)
+        # devices without a node-ID, as LSS slaves: {dev, address, config, pos, pending}
+        self._lss: list[dict] = []
 
     def retarget_eds(self, eds_dir) -> None:
         """The workspace's EDS folder moved — reload ODs from the new place."""
@@ -124,6 +127,7 @@ class EdsDemoBus(BusInterface):
         self._devices = {}
         self._nmt = {}
         self._sdo_frames = []
+        self._lss = []
 
     # -- EDS object dictionaries ---------------------------------------------
     def _load_od(self, file: str) -> ObjectDictionary | None:
@@ -140,6 +144,7 @@ class EdsDemoBus(BusInterface):
                    if e["enabled"] and self._load_od(e["file"]) is not None]
 
         self._devices = {}
+        self._lss = []
         found: list[FoundDevice] = []
         node = 1
         for i, entry in enumerate(entries):
@@ -364,9 +369,82 @@ class EdsDemoBus(BusInterface):
         self._sdo_frames.append(Frame(
             direction="RX", cob_id=f"0x{cob:03X}", length=str(len(data)),
             data=" ".join(f"{b:02X}" for b in data), decoded=_decode_cob(cob)))
+        self._deliver(cob, data)
 
     def device_nodes(self) -> list[int]:
         return sorted(self._devices)
+
+    # -- LSS slaves (CiA 305) --------------------------------------------------
+    # A device that dropped its node-ID leaves the bus (no heartbeat, no SDO)
+    # and waits as an LSS slave: a fastscan finds it by its LSS address, it
+    # takes a node-ID and stores it, and the switch back to waiting makes the
+    # ID active, with a boot-up. What makes a device drop its ID is the
+    # vendor's business, a hook calls unconfigure; the rest is the standard's.
+    def unconfigure(self, node: int) -> None:
+        """The device on ``node`` drops its node-ID (0xFF) and falls silent."""
+        if node not in self._devices:
+            return
+        revision = self._read(node, "0x1018", "0x03")
+        dev = self._devices.pop(node)
+        self._nmt.pop(node, None)
+        vendor, _, product = dev["entry"]["ident"].partition("·")
+        address = tuple(_parse_int(text) or 0 for text in
+                        (vendor, product, revision.value if revision.ok else "", dev["sn"]))
+        self._lss.append({"dev": dev, "address": address, "config": False,
+                          "pos": None, "pending": None})
+
+    def unconfigured(self) -> int:
+        """How many devices are waiting for a node-ID."""
+        return len(self._lss)
+
+    def wake(self, node: int) -> bool:
+        """The first device without a node-ID takes ``node`` and boots, the
+        way a vendor hands one out without LSS (a button press, say)."""
+        if not self._lss:
+            return False
+        self._activate(self._lss.pop(0), node)
+        return True
+
+    def _activate(self, slave: dict, node: int) -> None:
+        self._devices[node] = slave["dev"]
+        self._nmt[node] = "Pre-Operational"
+        self.queue_raw(0x700 + node, b"\x00")
+
+    def _lss_request(self, data: bytes) -> None:
+        cs = data[0]
+        if cs == lsslib.SWITCH_GLOBAL:
+            for slave in list(self._lss):
+                slave["config"] = data[1] == lsslib.CONFIGURATION
+                if not slave["config"] and slave["pending"] not in (None, 0xFF):
+                    self._lss.remove(slave)  # waiting again: the stored node-ID is active
+                    self._activate(slave, slave["pending"])
+        elif cs == lsslib.FASTSCAN:
+            id_number, bit, sub, nxt = int.from_bytes(data[1:5], "little"), data[5], data[6], data[7]
+            answers = 0
+            for slave in self._lss:
+                if slave["config"] or slave["pending"] not in (None, 0xFF):
+                    continue  # only a slave waiting without a node-ID takes part
+                if bit == lsslib.RESET_SCAN:
+                    slave["pos"] = 0
+                    answers += 1
+                elif bit < 32 and slave["pos"] == sub and sub < 4 \
+                        and (slave["address"][sub] ^ id_number) >> bit == 0:
+                    answers += 1
+                    slave["pos"] = nxt
+                    slave["config"] = bit == 0 and nxt < sub  # the whole address matched
+            for _ in range(answers):  # each slave answers on its own, as on a real bus
+                self.queue_raw(lsslib.ANSWER, lsslib.frame(lsslib.IDENTIFIED))
+        elif cs in (lsslib.CONFIGURE_NODE_ID, lsslib.STORE):
+            chosen = [slave for slave in self._lss if slave["config"]]
+            error = 0
+            if cs == lsslib.CONFIGURE_NODE_ID:
+                if 1 <= data[1] <= 127 or data[1] == 0xFF:
+                    for slave in chosen:
+                        slave["pending"] = data[1]
+                else:
+                    error = 1  # node-ID out of range
+            if chosen:
+                self.queue_raw(lsslib.ANSWER, lsslib.frame(cs, error, 0))
 
     def renumber(self, old: int, new: int) -> None:
         """Move a demo device to a new node-ID (addressing simulation)."""
@@ -397,6 +475,9 @@ class EdsDemoBus(BusInterface):
         for hook in self._hooks:
             if hook.on_raw_frame(self, cob, data):
                 return
+        if cob == lsslib.REQUEST and len(data) == 8:
+            self._lss_request(data)
+            return
         self._apply_rpdo(cob, data)
 
     _RPDO_MAP_INDEX = {0x200: 0x1600, 0x300: 0x1601, 0x400: 0x1602, 0x500: 0x1603}

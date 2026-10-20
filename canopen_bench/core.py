@@ -27,6 +27,7 @@ from typing import Any, NamedTuple, TextIO
 from canopen.objectdictionary import ODVariable
 
 from . import __version__, data, instruments
+from . import lss as lsslib
 from . import report as reportlib
 from . import testcases as tclib
 from .bus.canopen_bus import CanopenBus, _decode_cob
@@ -207,6 +208,39 @@ def trace_node(cob: str) -> int | None:
                                           0x400, 0x480, 0x500, 0x580, 0x600, 0x700):
         return None
     return node
+
+
+def _annotate_lss(row: dict) -> None:
+    """LSS (CiA 305) for the trace: the service in `obj`, its argument or
+    the answer in `val`. The COB-IDs are fixed, 0x7E5 asks, 0x7E4 answers."""
+    try:
+        cob = int(row["cob"], 16)
+        data = bytes.fromhex(row["data"].replace(" ", ""))
+    except ValueError:
+        return
+    if cob not in (lsslib.REQUEST, lsslib.ANSWER) or not data:
+        return
+    data = data.ljust(8, b"\x00")
+    cs = data[0]
+    if cob == lsslib.ANSWER and cs in (lsslib.CONFIGURE_NODE_ID, lsslib.STORE):
+        row["val"] = "ok" if not data[1] else f"error 0x{data[1]:02X}" + (
+            f", device error 0x{data[2]:02X}" if data[1] == 0xFF else "")
+    elif cs == lsslib.SWITCH_GLOBAL:
+        row["val"] = "configuration" if data[1] else "waiting"
+    elif cs == lsslib.CONFIGURE_NODE_ID:
+        row["val"] = f"node-ID {data[1]}"
+    elif cs == lsslib.FASTSCAN:
+        value, bit, sub, nxt = int.from_bytes(data[1:5], "little"), data[5], data[6], data[7]
+        part = lsslib.PARTS[sub] if sub < 4 else f"sub {sub}"
+        if bit == lsslib.RESET_SCAN:
+            row["val"] = "start"
+        elif bit == 0 and nxt != sub:
+            row["val"] = f"{part} = 0x{value:08X}"
+        else:
+            row["val"] = f"{part} 0x{value:08X} from bit {bit}"
+    row["obj"] = {lsslib.SWITCH_GLOBAL: "switch state global", lsslib.CONFIGURE_NODE_ID: "configure node-ID",
+                  lsslib.STORE: "store configuration", lsslib.FASTSCAN: "fastscan",
+                  lsslib.IDENTIFIED: "fastscan answer"}.get(cs, f"command 0x{cs:02X}")
 
 
 def trace_class(dec: str) -> str:
@@ -536,6 +570,8 @@ def _step_text(key: str, val) -> str:
         return f"send frame {val['cob']}"
     if key == "lss_assign":
         return f"LSS assign 1..{val['count']}"
+    if key == "lss_fastscan":
+        return f"LSS fastscan, node-IDs {val.get('first', 1)}..{val.get('last', 127)}"
     if key in tclib._ARITH:
         return f"{key} {val['to']}, {val['value']}"
     if key == "loop":
@@ -1323,19 +1359,21 @@ class Bench:
         self.flows_dir = self.db.path.parent / "flows"
         #: file name -> ((mtime, size), button label), so the snapshot can
         #: ask what is on the buttons without re-reading the folder
-        self._flow_button_cache: dict[str, tuple[tuple[int, int], str]] = {}
+        self._flow_header_cache: dict[str, tuple[tuple[int, int], tuple[str, str]]] = {}
         #: which of them a plugin brought — see the normalization below
         self._plugin_flows: set[str] = set()
         self._seed_default_flows()
         # normalize the persisted procedure choice: heal names that no longer
         # exist (e.g. plugin uninstalled) and prefer a procedure a plugin
-        # brought over the standard-LSS flow this package ships. By where it
-        # came from, not by what it is called: how a device family is
-        # addressed is that family's business, and a core that knew the
-        # file name of one would be carrying a fact about it
+        # brought over the standard-LSS flow this package ships, the one its
+        # addressing provider names first. By where it came from, not by
+        # what it is called: how a device family is addressed is that
+        # family's business, and a core that knew the file name of one
+        # would be carrying a fact about it
         flow_files = self._addressing_flows()
         if dict(db.get("mc_opts", {})).get("teachFlow") not in flow_files:
-            vendor = sorted(self._plugin_flows & set(flow_files))
+            first = getattr(self.addressing, "flow", "")
+            vendor = sorted(self._plugin_flows & set(flow_files), key=lambda f: (f != first, f))
             self.mc["teachFlow"] = next(iter(vendor), "") \
                 or (DEFAULT_FLOW if DEFAULT_FLOW in flow_files
                     else (flow_files[0] if flow_files else ""))
@@ -1593,6 +1631,7 @@ class Bench:
             self._annotate_sdo(row)
             self._annotate_pdo(row)
             self._annotate_emcy(row)
+            _annotate_lss(row)
             # last: a matching vendor decoder overrides generic decode
             self._annotate_plugin(row)
             self._observe_stats(row)
@@ -3696,6 +3735,12 @@ class Bench:
         same reasons: a vendor ships it, and whoever owns the bench can
         edit it without touching the tool. What the tool cannot work out
         is what to call it, so the file says (``button:``).
+        """
+        return [{"file": name, "label": button}
+                for name, (_, button) in self._flow_headers().items() if button]
+
+    def _flow_headers(self) -> dict[str, tuple[str, str]]:
+        """``{file: (name, button)}`` of every flow in the folder.
 
         Read from the folder, so a file that appeared or lost its button
         is the truth about what can be pressed — but only re-read when it
@@ -3707,22 +3752,21 @@ class Bench:
         still has a name on its button, and pressing it is where that is
         said.
         """
-        out: list[dict] = []
+        out: dict[str, tuple[str, str]] = {}
         for name in self._flow_files():
             try:
                 info = (self.flows_dir / name).stat()
                 stamp = (info.st_mtime_ns, info.st_size)
             except OSError:
                 continue
-            known = self._flow_button_cache.get(name)
+            known = self._flow_header_cache.get(name)
             if known is None or known[0] != stamp:
                 try:
                     text = (self.flows_dir / name).read_text(encoding="utf-8")
                 except OSError:
                     continue
-                self._flow_button_cache[name] = known = (stamp, tclib.button_of(text))
-            if known[1]:
-                out.append({"file": name, "label": known[1]})
+                self._flow_header_cache[name] = known = (stamp, tclib.flow_header(text))
+            out[name] = known[1]
         return out
 
     def act_mc_flow(self, p: dict) -> None:
@@ -3734,10 +3778,17 @@ class Bench:
             self.log(f'MC   addressing procedure set to "{name}"')
 
     def act_mc_readdress(self, p: dict) -> None:
-        """Operator-requested re-addressing — runs the selected teach flow."""
-        self._start_teach()
+        """Operator-requested re-addressing — runs the selected procedure,
+        or the one in ``file`` without selecting it: which procedure machine
+        control falls back on is one choice, which one addresses the bus
+        right now is another."""
+        name = p.get("file") or ""
+        if name and name not in self._addressing_flows():
+            self.log(f'MC   "{name}" is not an addressing procedure', "emcy0")
+            return
+        self._start_teach(flow_file=name)
 
-    def _start_teach(self, auto: bool = False) -> None:
+    def _start_teach(self, auto: bool = False, flow_file: str = "") -> None:
         """Teach in two modes. Operator-initiated (auto=False): open-ended
         across the address range — the flow's device bound is the range's
         upper node-id, the procedure ends via Addr-End/assignment running
@@ -3762,11 +3813,11 @@ class Bench:
                 return
         else:
             expected = int(self.scan_range[1])
-        flow = self._load_flow(self.mc.get("teachFlow") or DEFAULT_FLOW)
+        flow = self._load_flow(flow_file or self.mc.get("teachFlow") or DEFAULT_FLOW)
         if flow is None:
             return
         self._teach_abort = False
-        self.teach = {"step": 0, "of": len(flow.steps), "text": "starting…"}
+        self.teach = {"step": 0, "of": len(flow.steps), "text": "starting…", "name": flow.name}
         self.spawn(self._teach_task(flow, expected, adopt_after=not auto))
 
     def act_mc_teach_abort(self, p: dict) -> None:
@@ -3854,7 +3905,7 @@ class Bench:
             builtins = {"node": 0, "expected": expected, "session": session}
 
             def on_step(idx: int, text: str) -> None:
-                self.teach = {"step": idx, "of": len(flow.steps), "text": text}
+                self.teach = {"step": idx, "of": len(flow.steps), "text": text, "name": flow.name}
                 self._changed()
 
             status, why = await self._run_program(
@@ -5766,6 +5817,32 @@ class Bench:
                 return "error", "connection lost"
             regs[val.get("into", "R0")] = assigned & 0xFFFFFFFF
             return "ok", ""
+        if key == "lss_fastscan":
+            known = {sub: _resolve(val[part], regs, builtins) & 0xFFFFFFFF
+                     for sub, part in enumerate(lsslib.PARTS) if part in val}
+            first = _resolve(val.get("first", 1), regs, builtins)
+            last = _resolve(val.get("last", 127), regs, builtins)
+            if not 1 <= first <= last <= 127:
+                return "fail", f"lss_fastscan: node-IDs {first}..{last} are not a range within 1..127"
+            failed = ""
+            try:
+                found = await asyncio.to_thread(
+                    lsslib.assign, bus, first, last, known, float(val.get("timeout", 0.01)),
+                    float(val.get("bootup", 0.5)), should_stop)
+            except lsslib.LssError as exc:
+                found, failed = exc.assigned, str(exc)
+            except ConnectionError:
+                return "error", "connection lost"
+            for dev in found:
+                self.log(f"LSS  {dev.text()}")
+            if "into" in val:
+                regs[val["into"]] = len(found)
+            if should_stop():
+                return "error", "aborted"
+            done = "; ".join(dev.text() for dev in found)
+            if failed:
+                return "fail", f"lss_fastscan: {failed}" + (f" — assigned before: {done}" if done else "")
+            return "ok", done or "no unconfigured device answered"
         if key in ("sdo_read", "sdo_write") and "node" in val:
             # a case may talk to more than the one device it is about — a
             # second feeder consuming yarn, a gateway. Default stays the
@@ -6737,6 +6814,7 @@ class Bench:
             self._annotate_sdo(row, live=False)
             self._annotate_pdo(row, live=False)
             self._annotate_emcy(row, live=False)
+            _annotate_lss(row)
             self._annotate_plugin(row)
             rows.append(row)
         name = datetime.now().strftime("import_%Y%m%d_%H%M%S") + f"_{len(rows)}f.json"
@@ -7448,6 +7526,7 @@ class Bench:
             "eds": {"files": eds_files, "match": self._eds_matches()},
             "mc": self.mc | {"ref": self.mc_ref, "hbLost": sorted(self._hb_lost),
                              "teach": self.teach, "flows": self._addressing_flows(),
+                             "flowNames": {f: name for f, (name, _) in self._flow_headers().items()},
                              "procedures": self._flow_buttons()},
             "paths": self.paths | {"eds": str(self.db.eds_dir)},
             "objects": {

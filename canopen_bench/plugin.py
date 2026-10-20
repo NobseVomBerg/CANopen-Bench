@@ -41,6 +41,10 @@ class AddressingProvider:
     message."""
 
     name = "unnamed"
+    #: the flow file, one of the plugin's ``flow_dirs()``, a workspace
+    #: addresses with until somebody picks another; "" leaves it to the
+    #: core, which takes the plugin's flows in the order of their names
+    flow = ""
 
     def new_session(self, db) -> bytes:
         """Return the session identity bytes for one addressing run.

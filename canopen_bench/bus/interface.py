@@ -7,6 +7,7 @@ never know the difference.
 """
 from __future__ import annotations
 
+import queue
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
@@ -44,6 +45,41 @@ class SdoResult:
     ok: bool
     value: str = ""
     abort: str = ""
+
+
+class FrameListener:
+    """The frames arriving on some COB-IDs from the moment it was opened, for
+    a caller waiting on its own answer. An LSS exchange is over after 10 ms;
+    the trace, drained once a tick, cannot serve that. Close it after use."""
+
+    def __init__(self, cobs: Iterable[int], on_close: Callable[[FrameListener], None]) -> None:
+        self.cobs = frozenset(cobs)
+        self._frames: queue.SimpleQueue[tuple[int, bytes]] = queue.SimpleQueue()
+        self._on_close = on_close
+
+    def put(self, cob: int, data: bytes) -> None:
+        self._frames.put((cob, data))
+
+    def get(self, timeout: float) -> tuple[int, bytes] | None:
+        """The next frame, or None once ``timeout`` seconds passed without one."""
+        try:
+            return self._frames.get(timeout=max(timeout, 0.0))
+        except queue.Empty:
+            return None
+
+    def clear(self) -> None:
+        while self.get(0) is not None:
+            pass
+
+    def close(self) -> None:
+        on_close, self._on_close = self._on_close, lambda _: None  # once, however often asked
+        on_close(self)
+
+    def __enter__(self) -> FrameListener:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
 
 class BusInterface(ABC):
@@ -97,6 +133,21 @@ class BusInterface(ABC):
 
         return pace_frames(payloads, one, stop, gap)
 
+    def listen(self, cobs: Iterable[int]) -> FrameListener:
+        """Frames received on ``cobs`` from now on, until the listener is
+        closed. A backend hands them over through ``_deliver``; one that
+        does not, delivers nothing, and a caller waiting on it times out."""
+        listeners = self.__dict__.setdefault("_frame_listeners", [])
+        listener = FrameListener(cobs, listeners.remove)
+        listeners.append(listener)
+        return listener
+
+    def _deliver(self, cob: int, data: bytes) -> None:
+        """One received frame to whoever listens for its COB-ID — called from
+        the backend's receive path, which may be a thread of its own."""
+        for listener in tuple(self.__dict__.get("_frame_listeners", ())):
+            if cob in listener.cobs:
+                listener.put(cob, data)
 
     # -- standard addressing (format-v2 primitive lss_assign) ----------------
     def lss_assign(self, count: int) -> int:
