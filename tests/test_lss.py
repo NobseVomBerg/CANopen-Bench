@@ -3,6 +3,7 @@ demo bus's LSS slaves, the `lss_fastscan` step, and how the trace reads it."""
 from __future__ import annotations
 
 import threading
+import time
 
 import can
 import pytest
@@ -118,6 +119,13 @@ def test_a_late_answer_does_not_count_for_the_next_question(bench, monkeypatch):
     expected = sorted(slave["address"] for slave in bus._lss)
     original = bus._lss_request
 
+    # not a threading.Timer: it waits on an Event, which on Windows wakes on the
+    # ~15.6 ms system tick, past the 10 ms window, so the test itself made the
+    # late answer it is about. time.sleep is high-resolution there (Python 3.11+)
+    def answer_after(delay, deliver, answer):
+        time.sleep(delay)
+        deliver(*answer)
+
     def staggered(data):
         answers = []
         bus.queue_raw = lambda cob, payload: answers.append((cob, payload))
@@ -126,7 +134,9 @@ def test_a_late_answer_does_not_count_for_the_next_question(bench, monkeypatch):
         finally:
             del bus.queue_raw
         for i, answer in enumerate(answers):
-            threading.Timer(0.002 * i, bus.queue_raw, answer).start()
+            # bound now, not when the thread wakes: by then the next
+            # question may have the collecting lambda in its place
+            threading.Thread(target=answer_after, args=(0.002 * i, bus.queue_raw, answer)).start()
 
     monkeypatch.setattr(bus, "_lss_request", staggered)
     found = lsslib.assign(bus, 1, 20, {0: vendor, 1: product})
