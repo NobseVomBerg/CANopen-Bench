@@ -263,6 +263,24 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if "into" in val and val["into"] not in REGISTERS:
             return f"lss_assign: into must be a register R0–R15, got {val['into']!r}"
         return None
+    if key == "lss_fastscan":
+        # a part of the LSS address every device shares (vendor, product)
+        # is confirmed with one question instead of 32
+        if not isinstance(val, dict):
+            return "lss_fastscan: needs a mapping, e.g. {vendor: \"0x4D2\", first: 1, last: 32}"
+        if unknown := set(val) - {"vendor", "product", "revision", "serial", "first", "last",
+                                  "timeout", "bootup", "into"} - _NOTE:
+            return f"lss_fastscan: unknown field(s) {sorted(unknown)}"
+        for name in ("vendor", "product", "revision", "serial", "first", "last"):
+            if name in val and not _is_value(val[name]):
+                return f"lss_fastscan: invalid {name} {val[name]!r}"
+        for name in ("timeout", "bootup"):
+            if name in val and (isinstance(val[name], bool) or not isinstance(val[name], (int, float))
+                                or val[name] <= 0):
+                return f"lss_fastscan: {name} must be a duration in seconds"
+        if "into" in val and val["into"] not in REGISTERS:
+            return f"lss_fastscan: into must be a register R0–R15, got {val['into']!r}"
+        return None
     if key == "can_send":
         if not isinstance(val, dict) or set(val) - _NOTE != {"cob", "data"}:
             return "can_send: needs {cob, data}"
@@ -480,8 +498,9 @@ def _step_lines(text: str) -> dict[str, list[int]]:
             and isinstance(value, yaml.SequenceNode)}
 
 
-def button_of(text: str) -> str:
-    """The ``button:`` a flow declares, read from the header alone.
+def flow_header(text: str) -> tuple[str, str]:
+    """The ``name:`` and the ``button:`` a flow declares, read from the
+    header alone.
 
     Nothing else in the file has to be sound for this: a flow whose steps
     do not parse still has a name on its button, and pressing it is where
@@ -490,8 +509,10 @@ def button_of(text: str) -> str:
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError:
-        return ""
-    return str(doc.get("button") or "").strip() if isinstance(doc, dict) else ""
+        return "", ""
+    if not isinstance(doc, dict):
+        return "", ""
+    return str(doc.get("name") or "").strip(), str(doc.get("button") or "").strip()
 
 
 def parse_testcase(text: str, filename: str, require_prefix: bool = True,

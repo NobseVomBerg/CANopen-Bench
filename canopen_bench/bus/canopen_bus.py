@@ -217,13 +217,17 @@ class _TraceListener(can.Listener):
     epoch-based (see ``poll_frames``).
     """
 
-    def __init__(self, maxlen: int = 16384) -> None:
+    def __init__(self, maxlen: int = 16384,
+                 deliver: Callable[[int, bytes], None] | None = None) -> None:
         # sized to the tick-loop drain (4096 frames / 0.8 s): absorbs full-bus
         # bursts between polls instead of silently dropping the oldest frames
         self.queue: deque[tuple[str, can.Message, float]] = deque(maxlen=maxlen)
+        self.deliver = deliver  # BusInterface._deliver: a frame for someone listening
 
     def on_message_received(self, msg: can.Message) -> None:
         self.queue.append(("RX", msg, time.time()))
+        if self.deliver is not None and not (msg.is_error_frame or msg.is_remote_frame):
+            self.deliver(msg.arbitration_id, bytes(msg.data))
 
     def stop(self) -> None:
         pass
@@ -390,7 +394,7 @@ class CanopenBus(BusInterface):
         TX send hook — the Notifier only sees received frames, so our own
         outgoing traffic (SDO requests, NMT commands, ...) is mirrored into
         the trace queue at send time."""
-        self._trace = _TraceListener()
+        self._trace = _TraceListener(deliver=self._deliver)
         network.listeners.append(self._trace)
         trace = self._trace
 
@@ -804,6 +808,8 @@ class CanopenBus(BusInterface):
 
 
 def _decode_cob(cob_id: int) -> str:
+    if cob_id in (0x7E4, 0x7E5):  # LSS (CiA 305), not node 100/101 of 0x780
+        return "LSS resp" if cob_id == 0x7E4 else "LSS req"
     function = cob_id & 0x780
     node_id = cob_id & 0x7F
     if function == 0x080:  # 0x080 itself is SYNC, 0x081..0x0FF are EMCYs
