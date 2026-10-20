@@ -91,8 +91,11 @@ def run_selected(bench: Bench, ids: set[str], during=None, timeout: float = 5.0)
             if during:
                 during(bench)  # must be idempotent — called every poll
             await asyncio.sleep(0.02)
+        # in here, not after asyncio.run: on the way out that cancels the
+        # run task, whose `finally` clears `running` — an overrun would look
+        # like a finished run and fail later, on a result that is missing
+        assert not bench.running, f"executor did not finish within {timeout:g} s"
     asyncio.run(go())
-    assert not bench.running, "executor did not finish in time"
 
 
 def test_catalog_comes_from_folder(tc_bench):
@@ -2043,6 +2046,24 @@ def test_a_stop_ends_a_wait_rather_than_sitting_it_out(tc_bench):
     wait = tc_bench._run_cases[0].steps[-1]
     assert wait.text == "wait R0 = 4294967295 ms"
     assert (wait.state, wait.detail) == ("error", "aborted")
+
+
+OVERRUN_TC = """\
+id: "0046"
+name: "longer than run_selected waits"
+steps:
+  - wait: 10
+"""
+
+
+def test_a_run_that_outlasts_run_selected_fails_on_that(tc_bench):
+    """An overrun has to say so. Checked after asyncio.run, the guard never
+    could: that cancels the run task on the way out, the task's `finally`
+    clears `running`, and the overrun surfaced as whatever was asserted
+    next — `{} == {'0301': 'PASS'}` for a fastscan run on Windows."""
+    _add_tc(tc_bench, "TC0046_overrun.yaml", OVERRUN_TC)
+    with pytest.raises(AssertionError, match=r"did not finish within 0\.2 s"):
+        run_selected(tc_bench, {"0046"}, timeout=0.2)
 
 
 # -- how far back an EMCY check may look -------------------------------------
