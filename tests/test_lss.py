@@ -179,7 +179,7 @@ def test_the_step_counts_and_logs_what_it_assigned(bench, bus, tmp_path):
     bench.dispatch("dev_toggle", {"node": 1})
     # 406 fastscan questions, each waiting out its window: on Windows a wait
     # nobody answers ends on the 15.6 ms system tick, 6.6 s in all, past the
-    # default 5 s after which run_selected returns with no verdict yet
+    # default 5 s run_selected waits for a run
     run_selected(bench, {"0301"}, timeout=30.0)
     assert bench.results == {"0301": "PASS"}
     assert bus.device_nodes() == [4, 5, 6]
