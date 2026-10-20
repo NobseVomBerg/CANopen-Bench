@@ -20,7 +20,7 @@ from conftest import connect_and_scan, write_seed_eds_files
 import canopen_bench.core as core_mod
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
-from canopen_bench.plugin import BenchPlugin
+from canopen_bench.plugin import AddressingProvider, BenchPlugin
 
 
 def _run(coro_fn) -> None:
@@ -237,6 +237,22 @@ def test_a_fresh_workspace_prefers_the_procedure_a_plugin_brought(tmp_path):
     vendor."""
     bench = Bench(Db(tmp_path / "x.db"), plugins=[_FlowOnlyPlugin(_vendor_flow(tmp_path))])
     assert bench.mc["teachFlow"] == "acme_buttons.yaml"
+
+
+class _TwoWaysPlugin(_FlowOnlyPlugin):
+    def addressing_provider(self):
+        provider = AddressingProvider()
+        provider.flow = "teach.yaml"
+        return provider
+
+
+def test_the_plugin_says_which_of_its_procedures_comes_first(tmp_path):
+    """A family with two ways to address it names the one a workspace
+    starts with, rather than the alphabet."""
+    flows = _vendor_flow(tmp_path, "a_fastscan.yaml")
+    _vendor_flow(tmp_path, "teach.yaml")
+    bench = Bench(Db(tmp_path / "x.db"), plugins=[_TwoWaysPlugin(flows)])
+    assert bench.mc["teachFlow"] == "teach.yaml"
 
 
 def test_a_chosen_procedure_survives_the_next_start(tmp_path):
@@ -461,3 +477,40 @@ def test_a_procedure_needs_the_interface(tmp_path):
     bench.dispatch("mc_procedure", {"file": "marker.yaml"})
     assert bench.teach is None
     assert any("not connected" in ln["msg"] for ln in bench.logs)
+
+
+# -- the Addressing box: every procedure by its name, each one runnable --------
+
+def test_every_flow_is_listed_by_its_name(teach_bench):
+    bench = teach_bench
+    _write_flow(bench, "marker.yaml", BUTTON_FLOW)
+    names = bench.snapshot()["mc"]["flowNames"]
+    assert names["lss_standard.yaml"] == "Standard addressing (LSS / CiA 305)"
+    assert names["marker.yaml"] == "put a marker on the bus"
+
+
+def test_a_procedure_runs_by_name_without_becoming_the_chosen_one(teach_bench):
+    """Which procedure machine control falls back on is one choice, which
+    one addresses the bus right now is another."""
+    bench = teach_bench
+    _write_flow(bench, "other.yaml", 'id: "other"\nname: "other way"\nsteps:\n  - log: "other"\n')
+
+    async def go():
+        bench.dispatch("mc_readdress", {"file": "other.yaml"})
+        assert bench.teach["name"] == "other way"
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 3.0
+        while (bench.teach is not None or bench.mc["busy"]) and loop.time() < deadline:
+            await asyncio.sleep(0.02)
+    _run(go)
+
+    assert any('flow "other way"' in ln["msg"] for ln in bench.logs)
+    assert bench.mc["teachFlow"] == "lss_standard.yaml"
+
+
+def test_a_pressed_procedure_does_not_run_as_addressing(teach_bench):
+    bench = teach_bench
+    _write_flow(bench, "marker.yaml", BUTTON_FLOW)
+    bench.dispatch("mc_readdress", {"file": "marker.yaml"})
+    assert bench.teach is None
+    assert any('"marker.yaml" is not an addressing procedure' in ln["msg"] for ln in bench.logs)
