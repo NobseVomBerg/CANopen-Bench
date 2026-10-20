@@ -149,10 +149,14 @@ def drive_verify(bench: Bench, timeout: float = 10.0) -> None:
             deadline = loop.time() + timeout
             while bench.mc["busy"] and loop.time() < deadline:
                 await asyncio.sleep(0.02)
+            # in here, not after asyncio.run: on the way out that cancels the
+            # verify task, whose `finally` clears `busy` — an overrun would
+            # look like a finished verify and fail later, on a result that
+            # is not there yet
+            assert not bench.mc["busy"], f"scan & verify did not finish within {timeout}s"
         asyncio.run(go())
     finally:
         core_mod.SCAN_DELAY_S = orig
-    assert not bench.mc["busy"], f"scan & verify did not finish within {timeout}s"
 
 
 class FakeSupplyPort:

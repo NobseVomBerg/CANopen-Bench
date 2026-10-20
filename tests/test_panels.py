@@ -245,7 +245,8 @@ def test_a_box_read_asks_only_for_what_is_showing(tmp_path):
         asked.clear()
         bench.dispatch("panel_read", params)
         if bench._tasks:
-            await asyncio.wait(set(bench._tasks), timeout=5)
+            _, still = await asyncio.wait(set(bench._tasks), timeout=5)
+            assert not still, "panel read did not finish in time"
 
     asyncio.run(go({}))                       # every open box: Identity is folded
     assert asked == [("0x2040", "01"), ("0x2040", "02")]
@@ -584,7 +585,8 @@ def test_a_page_read_asks_what_the_conditions_are_about(tmp_path):
     async def go():
         bench.dispatch("panel_read", {})
         if bench._tasks:
-            await asyncio.wait(set(bench._tasks), timeout=5)
+            _, still = await asyncio.wait(set(bench._tasks), timeout=5)
+            assert not still, "panel read did not finish in time"
 
     asyncio.run(go())
     assert ("0x2050", "00") in asked
@@ -801,7 +803,8 @@ def test_a_page_read_leaves_the_write_only_objects_alone(tmp_path):
     async def go():
         bench.dispatch("panel_read", {})
         if bench._tasks:
-            await asyncio.wait(set(bench._tasks), timeout=5)
+            _, still = await asyncio.wait(set(bench._tasks), timeout=5)
+            assert not still, "panel read did not finish in time"
 
     asyncio.run(go())
     assert "0x1008:00" in asked and "0x2000:00" in asked

@@ -1674,7 +1674,7 @@ def test_a_bit_level_expectation_is_not_a_nibble_one(tc_bench):
     assert tc_bench.results == {"0023": "PASS"}
 
 
-def _order_for(bench: Bench, visible: list[str]) -> list[str]:
+def _order_for(bench: Bench, visible: list[str], timeout: float = 5.0) -> list[str]:
     """What a run would execute, given those ids on screen. Started and
     stopped inside a loop, because run_start hands the case list to a task."""
     bench.test_sel = {"0001", "0002", "0005"}
@@ -1683,8 +1683,14 @@ def _order_for(bench: Bench, visible: list[str]) -> list[str]:
         bench.dispatch("run_start", {"ids": visible})
         order = list(bench.run_order)
         bench.dispatch("run_stop", {})
-        while bench.running:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while bench.running and loop.time() < deadline:
             await asyncio.sleep(0.02)
+        # bounded, so a stop that is not honoured fails instead of hanging
+        # the suite, and checked in here: on the way out asyncio.run cancels
+        # the run task, whose `finally` clears `running`
+        assert not bench.running, f"executor did not finish within {timeout:g} s"
         return order
     return asyncio.run(go())
 
