@@ -39,6 +39,14 @@ from: the version shown under Extensions belongs to one of them, and the
 running code may be the other. That looks exactly like a change that did
 not arrive.
 
+A wheel uploaded under Setup > Extensions is unpacked into the workspace,
+not installed: nothing fetches what it depends on. The bench reads the
+wheel's `Requires-Dist` and says in the state log which of them this
+Python lacks — missing or too old — with the pip command that adds them,
+naming the interpreter that runs the bench. A plugin that then fails to
+load says the same instead of a traceback; any other load failure is said
+in the state log as well, not only on the console.
+
 Every hook is optional and defaults to "contributes nothing"; override
 only what you provide.
 
