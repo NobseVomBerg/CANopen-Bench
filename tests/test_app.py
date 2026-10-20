@@ -222,8 +222,14 @@ def test_state_pushes_coalesce_but_never_drop_the_last_one():
             bench.run_idx = i
             bench._changed()
             await asyncio.sleep(0)
-        while bench._push_task is not None and not bench._push_task.done():
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while bench._push_task is not None and not bench._push_task.done() \
+                and loop.time() < deadline:
             await asyncio.sleep(0.01)
+        # bounded, so a push that never stops pushing fails instead of hanging
+        assert bench._push_task is None or bench._push_task.done(), \
+            "the trailing push did not finish within 5 s"
     asyncio.run(go())
 
     assert len(seen) < 20, f"{len(seen)} pushes for 200 requests — not coalescing"

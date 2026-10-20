@@ -186,6 +186,10 @@ def _run_all(bench: Bench) -> None:
         deadline = loop.time() + 5
         while bench.running and loop.time() < deadline:
             await asyncio.sleep(0.02)
+        # in here, not after asyncio.run: on the way out that cancels the run
+        # task, whose `finally` clears `running` — an overrun would only show
+        # as a report that is missing
+        assert not bench.running, "executor did not finish within 5 s"
     asyncio.run(go())
 
 
@@ -282,6 +286,7 @@ def _loop_report(tmp_path) -> str:
         deadline = loop.time() + 20
         while bench.running and loop.time() < deadline:
             await asyncio.sleep(0.02)
+        assert not bench.running, "executor did not finish within 20 s"  # in here — see _run_all
     asyncio.run(go())
     path = next(p for p in Path(bench.paths["res"]).iterdir() if "__0103__" in p.name)
     return path.read_text(encoding="utf-8")
@@ -363,6 +368,7 @@ def test_a_step_carries_the_time_it_started(tmp_path):
         deadline = loop.time() + 20
         while bench.running and loop.time() < deadline:
             await asyncio.sleep(0.02)
+        assert not bench.running, "executor did not finish within 20 s"  # in here — see _run_all
     asyncio.run(go())
 
     fmt = "%Y%m%d_%H%M%S.%f"

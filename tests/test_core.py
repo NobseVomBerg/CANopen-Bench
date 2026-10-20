@@ -686,6 +686,20 @@ def test_mc_verify_detects_missing_device(connected_bench):
     assert bench.mc["found"] == 2
 
 
+def test_a_verify_that_outlasts_drive_verify_fails_on_that(connected_bench, monkeypatch):
+    """An overrun has to say so. Checked after asyncio.run, the guard never
+    could: that cancels the verify task on the way out, the task's `finally`
+    clears `busy`, and the overrun surfaced as whatever was asserted next."""
+    bench = connected_bench
+    bench.dispatch("mc_adopt", {})
+
+    async def slow_scan():
+        await asyncio.sleep(10)
+    monkeypatch.setattr(bench, "_scan_async", slow_scan)
+    with pytest.raises(AssertionError, match=r"scan & verify did not finish within 0\.2s"):
+        drive_verify(bench, timeout=0.2)
+
+
 def test_suites_save_load_delete(bench):
     bench.test_sel = {"0001", "1000"}
     bench.repeat_case = 2
