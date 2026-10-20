@@ -147,7 +147,16 @@ def test_run_without_selected_device_refuses(tc_bench):
     assert any("no target device" in ln["msg"] for ln in tc_bench.logs)
 
 
-def test_progress_is_published_during_run(tc_bench):
+async def _thread_done_first(fn, /, *args, **kwargs):
+    """`asyncio.to_thread` the way Python 3.13 and later can run it: the
+    thread finished before anything waited for it, and the await returns
+    without the loop getting a turn. Always so for the call that starts
+    the pool's first worker; now and then for any other."""
+    return fn(*args, **kwargs)
+
+
+@pytest.mark.parametrize("threads", ["as-they-come", "done-first"])
+def test_progress_is_published_during_run(tc_bench, monkeypatch, threads):
     """The panel must move while the run does, not jump to the end.
 
     Which steps reach a client is deliberately not fixed: `Bench._changed`
@@ -156,10 +165,21 @@ def test_progress_is_published_during_run(tc_bench):
     that pushes every step floods the socket and the page never repaints).
     So this asserts what the executor promises — progress that is about
     this case, that advances, and that is visible *before* the last step —
-    and not which particular steps a given event loop let through. It used
-    to demand the first push be step 1, which held on 3.10 to 3.12 by
-    scheduling accident and stopped holding on 3.13.
+    and not which particular steps a given event loop let through.
+
+    A push goes out only while the run lets go of the loop. That used to
+    be left to the steps — each one on the bus awaits a thread, and up to
+    3.12 that await always suspended. From 3.13 on it does not when the
+    thread is done first: always for step 1 here, which starts the pool's
+    first worker (so the first push stopped being step 1 on 3.13), and now
+    and then for the reads after it — CI saw `[4, 4]` on 3.14, the first
+    push inside the last step. `_run_program` now hands the loop over after
+    every step that is not bookkeeping; `done-first` makes every thread
+    finish first, which is the worst 3.13 does, so this is checked on every
+    Python, every time.
     """
+    if threads == "done-first":
+        monkeypatch.setattr(asyncio, "to_thread", _thread_done_first)
     seen: list[dict] = []
 
     async def notify():  # the executor asks for a push after every step
