@@ -899,7 +899,7 @@ function SetupPage({ s }) {
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-weight:600;font-size:13px">Machine control</span>
-        <span style="font-size:10.5px;color:var(--faint)">tool acts as CANopen master · addressing procedure = exchangeable flow file</span>
+        <span style="font-size:10.5px;color:var(--faint)">tool acts as CANopen master · checks the bus against the expected state</span>
         ${toggle(mc.enabled, 'Machine Control', () => send('mc_toggle'),
           `Machine Control is ${mc.enabled ? 'active — the bench acts as CANopen master. Click to hand that back' : 'inactive. Click to let the bench act as CANopen master'}`,
           'margin-left:auto;')}
@@ -916,29 +916,7 @@ function SetupPage({ s }) {
         <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">
           <div style="display:flex;gap:8px">
             <span class="hv-b" onClick=${() => send('mc_verify')} style="${btn.acc}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${mc.busy ? 'Scanning…' : '⌕ Scan & verify'}</span>
-            <span class="hv" onClick=${() => send('mc_readdress')} title="Addresses across the whole address range (Bus interface) — ends via the procedure's end signal; the freshly addressed bus is then adopted as the expected state"
-              style="${btn.ghost}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${mc.teach ? 'Teaching…' : 'Re-address (teach)'}</span>
           </div>
-          ${''/* A flow may ask for a button of its own (`button:` in its
-                header) — a procedure somebody presses a key for rather
-                than one that runs as part of addressing. The words are
-                the file's, because what it does is the vendor's business
-                and the tool has nothing to add to it. */}
-          ${!!(mc.procedures || []).length && html`
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${mc.procedures.map((proc) => html`
-              <span class="hv" onClick=${() => send('mc_procedure', { file: proc.file })}
-                title=${`Runs the procedure in ${proc.file} once — no session is distributed and nothing is adopted`}
-                style="${btn.ghost}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${proc.label}</span>`)}
-          </div>`}
-          ${mc.teach && html`
-          <div style="border:1px solid var(--acc-bd);background:var(--acc-soft);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
-            <div style="font-size:11.5px;color:var(--acc);font-weight:600">${mc.teach.name || 'Teach'} ${mc.teach.step}/${mc.teach.of} — ${mc.teach.text}</div>
-            <div style="display:flex;gap:8px">
-              ${s.adapter === 'demo' && html`<span class="hv-b" onClick=${() => send('demo_press')} style="${btn.acc}font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Simulate button press</span>`}
-              <span class="hv" onClick=${() => send('mc_teach_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Abort teach</span>
-            </div>
-          </div>`}
           ${mc.last
             ? html`<div style="font-size:11.5px;color:${mc.result === 'ok' ? 'var(--grn)' : 'var(--red)'};line-height:1.5">${mc.result === 'ok' ? '✓ Expected state valid — all devices found, EDS assignments match.' : '⚠ Mismatch — devices missing or wrong EDS assignment.'}</div>`
             : html`<div style="font-size:11.5px;color:var(--faint);line-height:1.5">No verification yet — adopt an expected state, then Scan & verify.</div>`}
@@ -960,16 +938,45 @@ function SetupPage({ s }) {
               style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 7px;font:11.5px ${MONO};width:64px;outline:none;text-align:right" />
             <span style="font-size:11px;color:var(--dim)">ms</span>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:11px;color:var(--dim)">Addressing procedure</span>
-            <${OptionSelect} value=${mc.teachFlow}
-              options=${(mc.flows || []).map((f) => [f, f])}
-              style=${`flex:1;border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:3px 6px;font:11px ${MONO};outline:none`}
-              onPick=${(file) => send('mc_flow', { file })} />
-          </div>
-          ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
         </div>
       </div>
+    </div>
+
+    ${''/* Every addressing procedure is a flow file, the vendor's or the
+          core's. One of them (●) is what machine control falls back on
+          when a verification fails; any of them can address the bus now.
+          A flow with a `button:` header is pressed rather than chosen:
+          the words on its button are the file's. */}
+    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-weight:600;font-size:13px">Addressing</span>
+        <span style="font-size:10.5px;color:var(--faint)">each procedure is a flow file · ● is the one machine control re-addresses with when a verification fails</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${[...(mc.flows || []).map((file) => ({ file, chosen: file === mc.teachFlow, act: () => send('mc_readdress', { file }), label: 'Run',
+              title: 'Addresses across the whole address range (Bus interface) and adopts the freshly addressed bus as the expected state' })),
+           ...(mc.procedures || []).map((proc) => ({ file: proc.file, act: () => send('mc_procedure', { file: proc.file }), label: proc.label,
+              title: `Runs the procedure in ${proc.file} once — no session is distributed and nothing is adopted` }))].map((row) => html`
+          <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--bd2);border-radius:7px;padding:6px 10px">
+            ${row.chosen === undefined
+              ? html`<span style="width:14px"></span>`
+              : html`<span class="hv" onClick=${() => send('mc_flow', { file: row.file })} title=${row.chosen ? 'Machine control re-addresses with this procedure' : 'Let machine control re-address with this procedure'}
+                  style="width:14px;cursor:pointer;font-size:13px;color:${row.chosen ? 'var(--acc)' : 'var(--faint)'}">${row.chosen ? '●' : '○'}</span>`}
+            <span style="flex:1;font-size:12px;color:var(--tx)">${mc.flowNames?.[row.file] || row.file}</span>
+            <span style="font:10.5px ${MONO};color:var(--faint)">${row.file}</span>
+            <span class="hv" onClick=${row.act} title=${row.title}
+              style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">${row.label}</span>
+          </div>`)}
+      </div>
+      ${mc.teach && html`
+      <div style="border:1px solid var(--acc-bd);background:var(--acc-soft);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:11.5px;color:var(--acc);font-weight:600">${mc.teach.name || 'Addressing'} ${mc.teach.step}/${mc.teach.of} — ${mc.teach.text}</div>
+        <div style="display:flex;gap:8px">
+          ${s.adapter === 'demo' && html`<span class="hv-b" onClick=${() => send('demo_press')} style="${btn.acc}font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Simulate button press</span>`}
+          <span class="hv" onClick=${() => send('mc_teach_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Abort</span>
+        </div>
+      </div>`}
+      ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
     </div>
 
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
