@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.160"
+version = "1.0.161"
 description = "CANopen Bench — web tool to test and control CANopen devices (IXXAT, PCAN, demo mode; vendor hardware and device families via plugins)"
 readme = "README.md"
 license = "MIT"
@@ -44,6 +44,9 @@ dependencies = [
     # importer.
     "python-can>=4.4",
     "canopen>=2.3",
+    # the core reads a plugin's Requires-Dist with it (plugin.unmet_requirements);
+    # python-can depends on it already, declared because the core imports it
+    "packaging>=23",
     # test-case files (TestCases folder) are YAML, see docs/ablaeufe/testfall-format.md
     "pyyaml>=6",
 ]

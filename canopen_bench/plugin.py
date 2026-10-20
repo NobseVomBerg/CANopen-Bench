@@ -20,6 +20,10 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
+
 from .bus.interface import SdoResult
 from .values import Field, Quantity
 
@@ -631,10 +635,93 @@ def _loaded_from(plugin: BenchPlugin) -> str:
     return str(getattr(module, "__file__", "?"))
 
 
+def unmet_requirements(requires) -> list[tuple[str, str | None]]:
+    """Which of a distribution's ``Requires-Dist`` lines this Python does not
+    meet, as ``(requirement, version found or None)`` — the requirement in
+    the form pip takes, e.g. ``pyusb>=1.2``.
+
+    A wheel uploaded under Setup > Extensions is unpacked, not installed, so
+    nothing fetched what it needs; this is how the bench can say so instead
+    of a traceback. An optional extra is not asked (nobody asked for it),
+    nor is a line whose environment marker does not hold here (a package
+    for another platform). A line that cannot be parsed is skipped rather
+    than reported: this feeds a diagnostic, and a wrong one is worse than
+    none.
+    """
+    out: list[tuple[str, str | None]] = []
+    for text in requires or ():
+        try:
+            req = Requirement(text)
+        except InvalidRequirement:
+            continue
+        if req.marker is not None and not req.marker.evaluate({"extra": ""}):
+            continue
+        # the extras stay: pip installs what they pull in only when asked
+        extras = f"[{','.join(sorted(req.extras))}]" if req.extras else ""
+        want = f"{req.name}{extras}{req.specifier}"
+        have = _installed_version(req.name)
+        if have is None:
+            out.append((want, None))
+            continue
+        # read here rather than inside the comparison: one packaging release
+        # raises on a version it cannot parse, the next answers "not in
+        # range" — which would call a package too old for having an odd name
+        try:
+            version = Version(have)
+        except InvalidVersion:
+            continue      # a version packaging cannot read: nothing said beats a guess
+        if req.specifier and not req.specifier.contains(version, prereleases=True):
+            out.append((want, have))
+    return out
+
+
+def _installed_version(name: str) -> str | None:
+    """The version of ``name`` this Python runs, None where it is not
+    installed. The bench's own is the version it runs as: started from a
+    checkout without being installed it has no metadata, and is no less
+    present for that."""
+    if canonicalize_name(name) == "canopen-bench":
+        from . import __version__
+        return __version__
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def pip_command(wanted: list[str]) -> str:
+    """The command that installs ``wanted`` into the Python running the
+    bench — named by its path, because the ``python`` a console finds first
+    need not be this one. Quoted where the path has a space; each
+    requirement quoted, since ``>`` is a redirection in every Windows shell."""
+    exe = sys.executable or "python"
+    head = f'"{exe}"' if " " in exe else exe
+    return f"{head} -m pip install " + " ".join(f'"{w}"' for w in wanted)
+
+
+def describe_unmet(unmet: list[tuple[str, str | None]]) -> str:
+    """One sentence: what is missing or too old, and how to add it."""
+    what = ", ".join(f"{want} ({'found ' + have if have else 'not installed'})"
+                     for want, have in unmet)
+    return (f"needs {what} — {pip_command([want for want, _ in unmet])}, "
+            f"then restart the bench")
+
+
+def _unmet_of(ep) -> list[tuple[str, str | None]]:
+    """``unmet_requirements`` of an entry point's distribution; nothing where
+    the metadata cannot be asked (a diagnostic must not fail the startup)."""
+    try:
+        return unmet_requirements(ep.dist.requires)
+    except Exception:
+        return []
+
+
 def load_plugins(note=None) -> list[BenchPlugin]:
     """Discover and instantiate all installed plugins, sorted by entry-point
     name for a stable order. A broken plugin is logged and skipped — it must
-    never take the bench down.
+    never take the bench down. A plugin that cannot load is said in the
+    state log too (``note``), with what it lacks where a missing dependency
+    is the reason.
 
     A name that appears twice is loaded once, and ``note`` is told about
     it. Two installations of the same package both register their entry
@@ -671,8 +758,21 @@ def load_plugins(note=None) -> list[BenchPlugin]:
         seen[ep.name] = where
         try:
             plugin = ep.load()()
-        except Exception:
-            log.exception("plugin %r failed to load — skipped", ep.name)
+        except Exception as exc:
+            # Said in the bench's own log, not only on a console nobody
+            # watches. A missing dependency is the usual cause — a wheel
+            # uploaded under Setup > Extensions brings none — and then the
+            # traceback is noise: what is missing, and how to add it, is
+            # the whole message.
+            unmet = _unmet_of(ep)
+            if unmet:
+                message = f"PLUGIN {ep.name!r} cannot load: it {describe_unmet(unmet)}"
+                log.error("%s", message)
+            else:
+                message = f"PLUGIN {ep.name!r} failed to load — {type(exc).__name__}: {exc}"
+                log.exception("plugin %r failed to load — skipped", ep.name)
+            if note:
+                note(message)
             continue
         plugins.append(plugin)
         log.info("loaded plugin %r (%s) from %s",
