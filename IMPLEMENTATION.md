@@ -362,6 +362,12 @@ a `.whl`, and it's active immediately, no server restart. Mechanism
   `load_plugins()` discovery included, so every hook (adapters,
   addressing, demo hooks, trace decoders, emcy codes, actions, step
   types, SWDL strategy) activates without dropping workspace state.
+- The wheel is unpacked, not installed: nothing fetches its
+  `Requires-Dist`. `act_plugin_install` reads them (`_wheel_requires`)
+  and logs what this Python lacks — missing or too old — with the pip
+  command for the interpreter running the bench
+  (`plugin.unmet_requirements` / `describe_unmet`); a plugin that then
+  fails to load says the same in `load_plugins` instead of a traceback.
 - `act_plugin_remove` deletes a package's recorded files and reloads
   the same way.
 

@@ -119,6 +119,13 @@ development; the version counts from here.
   right. The variant left the row for its tooltip, which also gives the
   full name, the variant in decimal and the object it was read from, the
   EDS file and the serial number
+- A plugin says what it is missing: a wheel uploaded under Setup >
+  Extensions brings no dependencies, and the bench now reads its
+  Requires-Dist and names in the state log what this Python lacks, with
+  the pip command for the interpreter running the bench — on upload, and
+  instead of a traceback when the plugin fails to load at startup. Any
+  plugin load failure now reaches the state log, not only the console.
+  `packaging` is now a direct dependency (python-can already required it)
 - Machine Control: expected-state verification with adopt/teach flow;
   an operator-initiated teach addresses across the whole address range
   and adopts the freshly addressed bus as the new expected state;

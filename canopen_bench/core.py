@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import csv
+import email.parser
 import importlib
 import io
 import json
@@ -47,7 +48,7 @@ from .eds_od import (
     pdo_mapping,
 )
 from .panelspec import load_panels
-from .plugin import BenchPlugin, SwdlStrategy, load_plugins
+from .plugin import BenchPlugin, SwdlStrategy, describe_unmet, load_plugins, unmet_requirements
 from .symbols import SymbolTables, load_symbols
 from .values import (
     BASES,
@@ -888,6 +889,22 @@ def _session_bytes(session_str: str) -> bytes:
         return bytes.fromhex(digits) if digits else b"\x00"
     except ValueError:
         return b"\x00"
+
+
+def _wheel_requires(content: bytes) -> list[str]:
+    """The ``Requires-Dist`` lines of a wheel, read from its METADATA; none
+    where the archive has no readable metadata (the install itself decides
+    whether such a wheel is acceptable — this only feeds a diagnostic)."""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+        names = [n for n in zf.namelist()
+                 if n.count("/") == 1 and n.endswith(".dist-info/METADATA")]
+        if not names:
+            return []
+        text = zf.read(names[0]).decode("utf-8", errors="replace")
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return []
+    return email.parser.HeaderParser().parsestr(text).get_all("Requires-Dist") or []
 
 
 class SimSwdlStrategy(SwdlStrategy):
@@ -3177,6 +3194,15 @@ class Bench:
             self.log(f"PLUGIN install rejected — {msg}", "emcy0")
             return
         self.log(f'PLUGIN "{msg}" installed — reloading to activate it')
+        # unpacked, not installed: what the wheel needs has to be here already.
+        # Guarded, because the files are in place by now and the reload below
+        # is what activates them — a diagnostic must not stop it halfway
+        try:
+            unmet = unmet_requirements(_wheel_requires(content))
+        except Exception:
+            unmet = []
+        if unmet:
+            self.log(f'PLUGIN "{msg}" {describe_unmet(unmet)}', "emcy0")
         if self.on_plugin_reload:
             self.on_plugin_reload()
         else:
