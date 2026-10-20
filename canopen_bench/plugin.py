@@ -22,7 +22,7 @@ from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
-from packaging.version import InvalidVersion
+from packaging.version import InvalidVersion, Version
 
 from .bus.interface import SdoResult
 from .values import Field, Quantity
@@ -659,11 +659,14 @@ def unmet_requirements(requires) -> list[tuple[str, str | None]]:
         if have is None:
             out.append((want, None))
             continue
+        # read here rather than inside the comparison: one packaging release
+        # raises on a version it cannot parse, the next answers "not in
+        # range" — which would call a package too old for having an odd name
         try:
-            fits = not req.specifier or req.specifier.contains(have, prereleases=True)
+            version = Version(have)
         except InvalidVersion:
             continue      # a version packaging cannot read: nothing said beats a guess
-        if not fits:
+        if req.specifier and not req.specifier.contains(version, prereleases=True):
             out.append((want, have))
     return out
 
