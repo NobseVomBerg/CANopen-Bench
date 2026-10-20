@@ -420,18 +420,19 @@ class EdsDemoBus(BusInterface):
                     self._activate(slave, slave["pending"])
         elif cs == lsslib.FASTSCAN:
             id_number, bit, sub, nxt = int.from_bytes(data[1:5], "little"), data[5], data[6], data[7]
-            answered = False
+            answers = 0
             for slave in self._lss:
                 if slave["config"] or slave["pending"] not in (None, 0xFF):
                     continue  # only a slave waiting without a node-ID takes part
                 if bit == lsslib.RESET_SCAN:
-                    slave["pos"], answered = 0, True
+                    slave["pos"] = 0
+                    answers += 1
                 elif bit < 32 and slave["pos"] == sub and sub < 4 \
                         and (slave["address"][sub] ^ id_number) >> bit == 0:
-                    answered = True
+                    answers += 1
                     slave["pos"] = nxt
                     slave["config"] = bit == 0 and nxt < sub  # the whole address matched
-            if answered:
+            for _ in range(answers):  # each slave answers on its own, as on a real bus
                 self.queue_raw(lsslib.ANSWER, lsslib.frame(lsslib.IDENTIFIED))
         elif cs in (lsslib.CONFIGURE_NODE_ID, lsslib.STORE):
             chosen = [slave for slave in self._lss if slave["config"]]
