@@ -35,6 +35,22 @@ def _run(coro_fn) -> None:
         core_mod.SCAN_DELAY_S = orig
 
 
+async def _until(done, timeout: float, what: str) -> None:
+    """Poll until ``done()`` holds, and fail with ``what`` if it does not
+    within ``timeout`` seconds.
+
+    The check is in here, not after _run: on its way out asyncio.run cancels
+    the bench task still going, and that task's `finally` clears the very
+    flag being waited on (`teach`, `mc["busy"]`) — an overrun would look
+    like a finished teach and fail later, on something it never got to.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not done() and loop.time() < deadline:
+        await asyncio.sleep(0.02)
+    assert done(), what
+
+
 def _write_flow(bench: Bench, filename: str, text: str) -> None:
     (bench.flows_dir / filename).write_text(text, encoding="utf-8")
 
@@ -60,17 +76,11 @@ def test_standard_lss_end_to_end_readdresses_and_adopts(teach_bench):
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
-        deadline = loop.time() + 5.0
-        while bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 5.0, "teach did not finish in time")
+        await _until(lambda: not bench.mc["busy"], 5.0,
+                     "post-teach scan/adopt did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not finish in time"
-    assert not bench.mc["busy"], "post-teach scan/adopt did not finish in time"
     assert {d["node"] for d in bench.devices} == {1, 2, 3}
     assert bench.mc_ref["expected"] == 3
     assert any("teach complete" in ln["msg"] for ln in bench.logs)
@@ -90,13 +100,9 @@ def test_operator_abort_stops_teach(teach_bench):
         await asyncio.sleep(0.05)  # let the task start waiting
         assert bench.teach is not None
         bench.dispatch("mc_teach_abort", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 3.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 3.0, "teach did not end in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not end in time"
     assert any("teach aborted" in ln["msg"] for ln in bench.logs)
 
 
@@ -109,14 +115,26 @@ def test_failure_path_logs_teach_fail(teach_bench):
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 3.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 3.0, "teach did not end in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not end in time"
     assert any("teach FAIL" in ln["msg"] for ln in bench.logs)
+
+
+def test_a_teach_that_outlasts_its_wait_fails_on_that(teach_bench):
+    """An overrun has to say so. Checked after asyncio.run, the guard never
+    could: that cancels the teach task on the way out, the task's `finally`
+    clears `teach`, and the overrun surfaced as whatever was asserted next."""
+    bench = teach_bench
+    _write_flow(bench, "slow.yaml",
+                'id: "slow"\nname: "longer than the test waits"\nsteps:\n'
+                '  - wait: 10\n')
+
+    async def go():
+        bench.dispatch("mc_readdress", {"file": "slow.yaml"})
+        await _until(lambda: bench.teach is None, 0.2, "teach did not finish in time")
+    with pytest.raises(AssertionError, match="teach did not finish in time"):
+        _run(go)
 
 
 def test_auto_gating_starts_teach_when_mc_enabled(teach_bench):
@@ -131,18 +149,10 @@ def test_auto_gating_starts_teach_when_mc_enabled(teach_bench):
 
     async def go():
         bench.dispatch("mc_verify", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 3.0
-        while bench.teach is None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
-        assert bench.teach is not None, "teach did not start"
+        await _until(lambda: bench.teach is not None, 3.0, "teach did not start")
         bench.dispatch("mc_teach_abort", {})  # cleanup: don't leave a task running
-        deadline = loop.time() + 3.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 3.0, "teach did not clean up in time")
     _run(go)
-
-    assert bench.teach is None, "teach did not clean up in time"
 
 
 def test_auto_gating_skips_teach_when_mc_disabled(teach_bench):
@@ -152,15 +162,13 @@ def test_auto_gating_skips_teach_when_mc_disabled(teach_bench):
 
     async def go():
         bench.dispatch("mc_verify", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 3.0
-        while bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: not bench.mc["busy"], 3.0, "verify did not finish in time")
+        # in here as well: a teach started by mistake would be cancelled on
+        # the way out, and its `finally` would clear `teach` again
+        assert bench.teach is None
     _run(go)
 
-    assert not bench.mc["busy"], "verify did not finish in time"
     assert bench.mc["result"] == "mismatch"
-    assert bench.teach is None
 
 
 def test_mc_flow_selects_alternate_procedure_and_persists(teach_bench):
@@ -190,13 +198,9 @@ def test_can_send_session_without_provider_fails_the_teach(teach_bench):
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 3.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 3.0, "teach did not end in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not end in time"
     fail_logs = [ln["msg"] for ln in bench.logs if "teach FAIL" in ln["msg"]]
     assert fail_logs, "no teach FAIL log line found"
     assert "no addressing provider" in fail_logs[-1]
@@ -279,16 +283,11 @@ def test_operator_teach_starts_without_any_adopted_state(tmp_path):
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
-        deadline = loop.time() + 5.0
-        while bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 5.0, "teach did not finish in time")
+        await _until(lambda: not bench.mc["busy"], 5.0,
+                     "post-teach scan/adopt did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not finish in time"
     assert not any("expected device count unknown" in ln["msg"] for ln in bench.logs)
     assert bench.mc_ref is not None and bench.mc_ref["expected"] == 3, \
         "the freshly scanned bus should be adopted, with no prior state required"
@@ -304,16 +303,11 @@ def test_operator_teach_adopts_freshly_scanned_count_over_a_stale_reference(teac
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
-        deadline = loop.time() + 5.0
-        while bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 5.0, "teach did not finish in time")
+        await _until(lambda: not bench.mc["busy"], 5.0,
+                     "post-teach scan/adopt did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not finish in time"
     assert bench.mc_ref["expected"] == 3, "the freshly scanned state should be re-adopted"
     assert any("expected state adopted" in ln["msg"] for ln in bench.logs)
     assert not any("scan & verify against the expected state" in ln["msg"] for ln in bench.logs)
@@ -328,16 +322,11 @@ def test_operator_teach_bounded_by_a_narrower_address_range(teach_bench):
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
-        deadline = loop.time() + 5.0
-        while bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 5.0, "teach did not finish in time")
+        await _until(lambda: not bench.mc["busy"], 5.0,
+                     "post-teach scan/adopt did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not finish in time"
     assert bench.mc_ref["expected"] == 2, "node 3 is outside the narrowed range"
 
 
@@ -353,13 +342,9 @@ def test_operator_teach_logs_when_post_teach_scan_finds_nothing(teach_bench, mon
 
     async def go():
         bench.dispatch("mc_readdress", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 5.0, "teach did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not finish in time"
     assert any("scan found nothing" in ln["msg"] for ln in bench.logs)
     assert bench.mc_ref["expected"] == expected_before, "unchanged — nothing to adopt"
 
@@ -381,21 +366,19 @@ def test_auto_readdress_verifies_and_never_adopts_a_shrunken_bus(teach_bench):
 
     async def go():
         bench.dispatch("mc_verify", {})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while not bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)  # let the first (failing) verify start
-        deadline = loop.time() + 5.0
-        while bench.mc["busy"] and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        # the failed verify starts the re-address, which ends with a verify
+        # of its own: `busy` goes clear in between, `teach` stays set until
+        # the very end
+        await _until(lambda: not bench.mc["busy"] and bench.teach is None, 5.0,
+                     "verify and teach did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "teach did not finish in time"
-    assert not bench.mc["busy"], "verify did not finish in time"
     assert bench.mc_ref["expected"] == 3, "the shrunken bus must not be silently adopted"
     assert bench.mc["result"] == "mismatch"
-    new_logs = bench.logs[n_logs_before:]
-    assert not any("expected state adopted" in ln["msg"] for ln in new_logs)
+    new_logs = [ln["msg"] for ln in bench.logs[n_logs_before:]]
+    assert sum("scan & verify against the expected state" in m for m in new_logs) == 2, \
+        "the re-address ends with a verify of its own"
+    assert not any("expected state adopted" in m for m in new_logs)
 
 
 # -- a flow may ask for a button of its own ---------------------------------
@@ -442,13 +425,9 @@ def test_pressing_it_runs_the_flow_once(teach_bench):
 
     async def go():
         bench.dispatch("mc_procedure", {"file": "marker.yaml"})
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5.0
-        while bench.teach is not None and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None, 5.0, "the procedure did not finish in time")
     _run(go)
 
-    assert bench.teach is None, "the procedure did not finish in time"
     sent = [f for f in bench.bus.poll_frames(4096)
             if f.cob_id == "0x333" and f.direction == "TX"]
     assert sent, "the frame never reached the bus"
@@ -498,10 +477,8 @@ def test_a_procedure_runs_by_name_without_becoming_the_chosen_one(teach_bench):
     async def go():
         bench.dispatch("mc_readdress", {"file": "other.yaml"})
         assert bench.teach["name"] == "other way"
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 3.0
-        while (bench.teach is not None or bench.mc["busy"]) and loop.time() < deadline:
-            await asyncio.sleep(0.02)
+        await _until(lambda: bench.teach is None and not bench.mc["busy"], 3.0,
+                     "teach did not finish in time")
     _run(go)
 
     assert any('flow "other way"' in ln["msg"] for ln in bench.logs)
