@@ -5619,6 +5619,21 @@ class Bench:
                     # on the passing path this is what came back, not a
                     # reason — both belong in the file for the same reason
                     detail=info, ts=started_at, key=key))
+            if key not in _FLOW_KEYS:
+                # Let the loop run before the next step. on_step asked for a
+                # push, and a push only goes out while this task is not
+                # running; the tick and a Stop wait for the same turn. That
+                # used to be left to the steps — every one on the bus awaits
+                # a thread, and that await suspended. From Python 3.13 on it
+                # does not when the thread finished before anything waited
+                # for it: always for the call that starts the pool's first
+                # worker, now and then after that. A case on the demo bus
+                # then reached its last step, or its end, with nothing on
+                # the screen. The case's bookkeeping keeps the loop — it is
+                # most of a case's steps, and what _changed coalesces. After
+                # the step rather than before, so that a Stop arriving in
+                # this turn is seen at the top of the loop, not one step on.
+                await asyncio.sleep(0)
             if key == "loop":
                 count = val.get("n") if isinstance(val, dict) else val
                 # resolved once, here: from now on the frame holds the
