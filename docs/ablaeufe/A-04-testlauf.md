@@ -95,6 +95,21 @@ die würde reines Wegwerfen verlieren. Der Tick-Loop geht durch dieselbe
 Schleuse, damit Tick und laufender Fall nicht gleichzeitig auf denselben
 Socket schreiben.
 
+Ein Push geht nur hinaus, während der Lauf-Task den Event-Loop freigibt
+— Tick und Stop warten auf dieselbe Lücke. Das war den Schritten
+überlassen: jeder Bus-Schritt wartet auf einen Thread
+(`asyncio.to_thread`), und bis Python 3.12 hat dieses `await` immer
+unterbrochen. Ab 3.13 nicht mehr, wenn der Thread fertig ist, bevor
+jemand auf ihn wartet — beim Aufruf, der den ersten Worker des Pools
+startet, immer, danach ab und zu. Ein Fall auf dem Demo-Bus kam so bis
+zu seinem letzten Schritt oder bis zum Ende, ohne dass etwas auf dem
+Schirm stand. `_run_program` gibt den Event-Loop deshalb selbst frei,
+nach jedem Schritt, der nicht Buchhaltung des Falls ist (Label, Sprung,
+Registerrechnung, Schleife — `_FLOW_KEYS`): die macht die meisten
+Schritte eines Falls aus, und genau die fasst `_changed()` zusammen.
+Nach dem Schritt und nicht davor, damit ein Stop aus dieser Lücke vor
+dem nächsten Schritt ankommt.
+
 ### Step-Executor **[Ist]**
 
 Die frühere Tick-getriebene Simulation ist durch einen **eigenen
