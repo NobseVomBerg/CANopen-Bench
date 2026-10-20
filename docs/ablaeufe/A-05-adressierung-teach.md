@@ -29,7 +29,7 @@ und anschließend allen Geräten eine gemeinsame Session-ID verteilen.
    Bediener. Ist die Maschinensteuerung **nicht aktiv**, passiert nie
    etwas automatisch.
 2. Bediener fordert die Adressierung manuell an
-   („Re-address (teach)" im Machine-Control-Panel → `act_mc_readdress`) —
+   („Run" neben dem Verfahren in der Box „Addressing" → `act_mc_readdress`) —
    unabhängig vom Maschinensteuerungs-Modus.
 
 Geräte sind standardmäßig unadressiert; bereits adressierte Geräte werden
