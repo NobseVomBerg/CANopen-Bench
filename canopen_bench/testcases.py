@@ -38,7 +38,10 @@ _BUILTINS = {"$node", "$expected", "$session", "$line"}
 _SYMBOL_REF = re.compile(r"^\$([A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$")
 
 _HEAD_KEYS = {"id", "name", "desc", "grade", "tools", "est", "dut",
-              "variants", "on_fail", "preconditions", "steps", "button"}
+              "variants", "on_fail", "preconditions", "steps", "button", "inputs"}
+#: a flow's `inputs:` names, used in its steps as `$name` — the builtins
+#: keep theirs, and a name is a word, so `$fw` cannot be read as a number
+_INPUT_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 #: what a failed expectation does to the rest of the case. "continue"
 #: (the default) records the failure and keeps going; "stop" ends the
 #: case there.
@@ -81,6 +84,8 @@ _STEP_FIELDS = {
     "psu": (set(), {"ch", "volt", "curr", "output"}),
     "rand": ({"to"}, {"min", "max"}),
     "adjust": ({"index", "sub"}, {"text", "size", "node", "timeout"}),
+    #: a firmware download to one device, by file name or `$input`
+    "swdl": ({"file"}, {"node", "mode"}),
 }
 
 
@@ -138,6 +143,12 @@ class TestCase:
     #: what to call it. Empty means no button, which is every ordinary
     #: flow and every test case.
     button: str = ""
+    #: flows only: what the person starting it chooses first, name -> label.
+    #: Each one is a firmware file from the library and reaches the steps
+    #: as `$name` (e.g. `swdl: {file: $fw}`). A production procedure that
+    #: flashes "the" firmware would otherwise carry a file name that is
+    #: out of date with the next build.
+    inputs: dict[str, str] = field(default_factory=dict)
     preconditions: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     #: the line each of those steps stands on in the file, 1-based and
@@ -200,6 +211,20 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         return None  # value is ignored ("- end:")
     if key == "emcy_clear":
         return None  # value is ignored ("- emcy_clear:")
+    if key == "scan":
+        # "- scan:" on its own, or {expect: n} for the number of devices
+        # the bus has to have afterwards
+        if val is None:
+            return None
+        if not isinstance(val, dict):
+            return "scan: takes nothing, or {expect: <number of devices>}"
+        if unknown := set(val) - {"expect"} - _NOTE:
+            return f"scan: unknown field(s) {sorted(unknown)}"
+        if "expect" in val and not (isinstance(val["expect"], int)
+                                    and not isinstance(val["expect"], bool)
+                                    and val["expect"] >= 0):
+            return "scan: expect must be a number of devices"
+        return None
     if key == "dump_registers":
         # "- dump_registers:" on its own, or with a note saying why here
         if isinstance(val, dict) and (unknown := set(val) - _NOTE):
@@ -366,6 +391,8 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
                     return f"rand: {name} must be a value or a register"
             if val["to"] not in REGISTERS:
                 return f"rand: to must be a register R0–R15, got {val['to']!r}"
+        if key == "swdl" and val.get("mode", "sdo") not in ("sdo", "pdo"):
+            return "swdl: mode must be sdo or pdo"
         if key == "adjust":
             if "size" in val and val["size"] not in (1, 2, 4):
                 return "adjust: size must be 1, 2 or 4"
@@ -458,7 +485,35 @@ def _check_labels(steps: list) -> str | None:
     return None
 
 
-def _substitute_symbols(doc: object, symbols) -> object:
+def _check_inputs(raw: object, groups: list) -> tuple[dict[str, str], list[str]]:
+    """The `inputs:` header as name -> label, and what is wrong with it or
+    with the `$name` the steps use: an undeclared one would reach the
+    device as the literal text."""
+    problems: list[str] = []
+    inputs: dict[str, str] = {}
+    if raw is not None and not isinstance(raw, dict):
+        return {}, ["inputs must be a mapping of name: label"]
+    for name, label in (raw or {}).items():
+        if not (isinstance(name, str) and _INPUT_NAME.match(name))                 or f"${name}" in _BUILTINS:
+            problems.append(f"input name {name!r} must be a lowercase word, not a builtin")
+            continue
+        inputs[name] = str(label or name)
+    for group in groups:
+        for step in group if isinstance(group, list) else []:
+            if not (isinstance(step, dict) and len(step) == 1):
+                continue
+            key, val = next(iter(step.items()))
+            if key != "swdl" or not isinstance(val, dict):
+                continue
+            file = val.get("file")
+            if not (isinstance(file, str) and file.strip()):
+                problems.append("swdl: file must be a file name or $input")
+            elif file.startswith("$") and file[1:] not in inputs:
+                problems.append(f"swdl: {file} is not one of the inputs this file declares")
+    return inputs, problems
+
+
+def _substitute_symbols(doc: object, symbols, keep: frozenset = frozenset()) -> object:
     """Replace every ``$Symbol`` with its hex value, before validation.
 
     Resolving here rather than at run time is the whole point: an unknown
@@ -467,10 +522,10 @@ def _substitute_symbols(doc: object, symbols) -> object:
     SymbolError, which the caller turns into the file's .error.
     """
     if isinstance(doc, dict):
-        return {k: _substitute_symbols(v, symbols) for k, v in doc.items()}
+        return {k: _substitute_symbols(v, symbols, keep) for k, v in doc.items()}
     if isinstance(doc, list):
-        return [_substitute_symbols(v, symbols) for v in doc]
-    if isinstance(doc, str) and doc not in _BUILTINS:
+        return [_substitute_symbols(v, symbols, keep) for v in doc]
+    if isinstance(doc, str) and doc not in _BUILTINS and doc not in keep:
         ref = _SYMBOL_REF.match(doc)
         if ref:
             return f"0x{symbols.value(ref.group(1)):X}"
@@ -498,9 +553,10 @@ def _step_lines(text: str) -> dict[str, list[int]]:
             and isinstance(value, yaml.SequenceNode)}
 
 
-def flow_header(text: str) -> tuple[str, str]:
-    """The ``name:`` and the ``button:`` a flow declares, read from the
-    header alone.
+def flow_header(text: str) -> dict:
+    """What a flow declares about itself, read from the header alone:
+    ``name``, ``desc``, ``button``, ``production`` (``grade: production``)
+    and ``inputs`` (name -> label).
 
     Nothing else in the file has to be sound for this: a flow whose steps
     do not parse still has a name on its button, and pressing it is where
@@ -509,10 +565,15 @@ def flow_header(text: str) -> tuple[str, str]:
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError:
-        return "", ""
+        doc = None
     if not isinstance(doc, dict):
-        return "", ""
-    return str(doc.get("name") or "").strip(), str(doc.get("button") or "").strip()
+        doc = {}
+    raw = doc.get("inputs")
+    return {"name": str(doc.get("name") or "").strip(),
+            "desc": str(doc.get("desc") or "").strip(),
+            "button": str(doc.get("button") or "").strip(),
+            "production": str(doc.get("grade") or "") == "production",
+            "inputs": {str(k): str(v or k) for k, v in raw.items()} if isinstance(raw, dict) else {}}
 
 
 def parse_testcase(text: str, filename: str, require_prefix: bool = True,
@@ -532,9 +593,12 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
     if not isinstance(doc, dict):
         tc.error = "not a mapping"
         return tc
+    # a flow's own `$name`s are its inputs, not symbols from the headers
+    raw_inputs = doc.get("inputs")
+    keep = frozenset(f"${k}" for k in raw_inputs) if isinstance(raw_inputs, dict) else frozenset()
     if symbols is not None:
         try:
-            doc = _substitute_symbols(doc, symbols)
+            doc = _substitute_symbols(doc, symbols, keep)
         except Exception as exc:
             tc.error = str(exc)
             return tc
@@ -588,6 +652,11 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
             problems.append(f"{group_name}: {err}")
         if err := _check_loops(group):
             problems.append(f"{group_name}: {err}")
+    tc.inputs, input_problems = _check_inputs(doc.get("inputs"), [tc.preconditions, tc.steps])
+    problems += input_problems
+    if require_prefix and tc.inputs:
+        # a case runs from the catalog, where nobody is asked for a file
+        problems.append("inputs: only a flow takes inputs, a test case names its files")
     tc.error = "; ".join(problems) or None
     return tc
 
