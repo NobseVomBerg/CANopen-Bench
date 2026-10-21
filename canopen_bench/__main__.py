@@ -14,6 +14,7 @@ from pathlib import Path
 
 import uvicorn
 
+from . import usersettings
 from .app import create_app
 
 #: How long uvicorn may wait for open connections when stopping. The state
@@ -124,7 +125,8 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--db", default=None,
                     help="expert override: explicit sqlite workspace db path. Normally "
-                         "workspaces live as subfolders of ./data (or $CANOPEN_BENCH_DATA) "
+                         "workspaces live as subfolders of the data folder (Setup > Folders, "
+                         "or $CANOPEN_BENCH_DATA) "
                          "and are selected on the Setup page. Skips the one-bench-per-data-"
                          "folder check, since there is no data folder to speak of")
     ap.add_argument("--takeover", action="store_true",
@@ -135,7 +137,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if not (args.db or os.environ.get("CANOPEN_BENCH_DB")):
-        root = Path(os.environ.get("CANOPEN_BENCH_DATA", "data"))
+        root = usersettings.data_root()
         held_by = claim_data_folder(root)
         if held_by is not None and args.takeover:
             print(f"Stopping the bench on {root.resolve()} (process {held_by}) …")
@@ -153,6 +155,9 @@ def main() -> None:
                   f"  CANOPEN_BENCH_DATA=<folder> canopen-bench --port <other port>",
                   file=sys.stderr)
             raise SystemExit(1)
+        # said before anybody goes looking for a workspace in another one;
+        # Setup names it too, and changes it (usersettings.data_root)
+        print(f"CANopen Bench data folder: {root.resolve()}", flush=True)
 
     uvicorn.run(create_app(args.db), host=args.host, port=args.port,
                 timeout_graceful_shutdown=SHUTDOWN_S)

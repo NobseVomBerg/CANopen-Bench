@@ -26,7 +26,7 @@ from typing import Any, NamedTuple, TextIO
 
 from canopen.objectdictionary import ODVariable
 
-from . import __version__, data, instruments
+from . import __version__, data, instruments, usersettings
 from . import lss as lsslib
 from . import report as reportlib
 from . import testcases as tclib
@@ -981,6 +981,13 @@ class Bench:
         # (db + eds/traces/flows inside); the app layer swaps the Bench on
         # switch and registers the callback below
         self.workspaces_root = workspaces_root
+        #: shown under Setup, so nobody has to guess where the files are
+        self.workspace_folder = str(db.path.parent.resolve())
+        #: the data folder this bench runs on, and the one the next start
+        #: will — chosen under Setup, kept per user (usersettings)
+        self.data_folder = str(workspaces_root.resolve()) if workspaces_root else ""
+        self.data_folder_next = (usersettings.load().get("data") or self.data_folder
+                                 if workspaces_root else "")
         self.on_workspace_switch: Callable[[str], None] | None = None
         # GUI plugin install (Setup > Extensions): one directory next to the
         # workspaces, shared across all of them since plugins are a process
@@ -3008,6 +3015,9 @@ class Bench:
         if which == "eds":
             self._set_eds_dir(str(value).strip())
             return
+        if which == "data":
+            self._set_data_folder(str(value).strip())
+            return
         if which in self.paths:
             self.paths[which] = value
             self.db.set("paths", self.paths)
@@ -3017,6 +3027,26 @@ class Bench:
                 # the cache is keyed by file name, and another folder may
                 # hold the same name — nothing of the old one survives
                 self._fw_cache.clear()
+
+    def _set_data_folder(self, value: str) -> None:
+        """The data folder of the next start (empty = this one again). Kept
+        per user, outside every data folder, since that is what it finds;
+        not switched at once, because the workspaces, the uploaded plugins
+        and the one-bench-per-folder lock all hang off it."""
+        if not self.workspaces_root:
+            return
+        if usersettings.data_fixed():
+            self.log(f"CFG  data folder is set by {usersettings.ENV_DATA} — not changed", "emcy0")
+            return
+        folder = str(Path(value).expanduser().resolve()) if value else self.data_folder
+        try:
+            usersettings.save(data=folder)
+        except OSError as exc:
+            self.log(f"CFG  data folder not remembered — {exc}", "emcy0")
+            return
+        self.data_folder_next = folder
+        later = "" if folder == self.data_folder else " — from the next start on"
+        self.log(f"CFG  data folder → {folder}{later}")
 
     def _set_eds_dir(self, value: str) -> None:
         """Move the EDS folder (empty = back to the workspace default) and
@@ -3262,9 +3292,10 @@ class Bench:
 
     def act_browse_open(self, p: dict) -> None:
         which = p.get("which")
-        if which != "eds" and which not in self.paths:
+        if which not in ("eds", "data") and which not in self.paths:
             return
-        configured = str(self.db.eds_dir) if which == "eds" else self.paths[which]
+        configured = (str(self.db.eds_dir) if which == "eds" else
+                      self.data_folder_next if which == "data" else self.paths[which])
         start = Path(configured or "~").expanduser()
         while not start.is_dir() and start.parent != start:
             start = start.parent  # configured path may not exist on this machine
@@ -3321,25 +3352,25 @@ class Bench:
 
     def _seed_plugin_eds(self) -> None:
         """The EDS files a plugin ships (``eds_dirs()``), into the workspace
-        EDS folder. Never over a file already there: that one is what the
-        devices on this bench answer to, and it is regularly newer than the
-        packaged copy — the same rule flows and headers follow.
+        EDS folder, written over on every start where they differ — the
+        same rule as flows, test cases and headers. A copy left behind by
+        an older plugin is what the next colleague debugs; an EDS of one's
+        own goes in under a name no plugin ships.
 
-        Every start, not only the first, so a workspace made before a
-        plugin shipped its files still gets them. Failing to copy one is
-        logged rather than raised: a bench whose EDS folder is read-only
-        still runs, it just cannot match identities.
+        Failing to copy one is logged rather than raised: a bench whose EDS
+        folder is read-only still runs, it just cannot match identities.
         """
         for packaged in [d for p in self.plugins for d in p.eds_dirs()]:
             if not packaged.is_dir():
                 continue
             for src in sorted(packaged.glob("*.eds")):
                 dst = self.db.eds_dir / src.name
-                if dst.exists():
-                    continue
                 try:
+                    data = src.read_bytes()
+                    if dst.is_file() and dst.read_bytes() == data:
+                        continue
                     self.db.eds_dir.mkdir(parents=True, exist_ok=True)
-                    dst.write_bytes(src.read_bytes())
+                    dst.write_bytes(data)
                 except OSError as exc:
                     self.log(f"EDS  {src.name} could not be installed — {exc}", "emcy0")
 
@@ -3700,9 +3731,12 @@ class Bench:
                     shutil.copy2(src, dst)
 
     def _seed_default_flows(self) -> None:
-        """Workspace flows dir with the shipped default procedures — from the
-        core package and from every plugin's flow_dirs(); existing (possibly
-        locally customized) files are never overwritten.
+        """Workspace flows dir with the shipped procedures — from the core
+        package and from every plugin's flow_dirs() — written over on every
+        start where they differ, the same rule as test cases, headers and
+        EDS files. Kept as they were, an update brought its new procedure
+        and the bench went on running the old one. A flow of one's own goes
+        in under a name no package ships.
 
         Which names a plugin brought is remembered: that, and not the name
         itself, is what makes one of them the addressing procedure to
@@ -3717,8 +3751,9 @@ class Bench:
                 if from_plugin:
                     self._plugin_flows.add(src.name)
                 dst = self.flows_dir / src.name
-                if not dst.exists():
-                    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+                data = src.read_bytes()
+                if not dst.is_file() or dst.read_bytes() != data:
+                    dst.write_bytes(data)
 
     def _load_flow(self, name: str) -> tclib.TestCase | None:
         path = self.flows_dir / name
@@ -7740,7 +7775,10 @@ class Bench:
             "version": VERSION,
             "workspace": self.workspace_name,
             "workspaces": {"list": self._workspace_names(),
-                           "canSwitch": bool(self.workspaces_root and self.on_workspace_switch)},
+                           "canSwitch": bool(self.workspaces_root and self.on_workspace_switch),
+                           "folder": self.workspace_folder,
+                           "data": self.data_folder, "dataNext": self.data_folder_next,
+                           "dataFixed": usersettings.data_fixed()},
             "busLoad": round(self.bus_load, 1),
             "errFrames": self.err_frames,
             "scanBusy": self.scan_busy,
