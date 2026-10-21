@@ -604,6 +604,12 @@ def _step_text(key: str, val) -> str:
         return "clear EMCY list"
     if key == "dump_registers":
         return "dump registers"
+    if key == "scan":
+        want = val.get("expect") if isinstance(val, dict) else None
+        return "scan the bus" + (f", expect {want} device(s)" if want is not None else "")
+    if key == "swdl":
+        return (f"SWDL {val['file']}" + (f" → node {val['node']}" if "node" in val else "")
+                + (f" ({val['mode'].upper()})" if "mode" in val else ""))
     if key in ("fail", "skip"):
         return f"{key}: {val}"
     if key == "end":
@@ -632,6 +638,13 @@ class _StepBudget:
         """Count one executed step; False once the limit is passed."""
         self.used += 1
         return self.limit is None or self.used <= self.limit
+
+
+def _input_file(text: str, builtins: dict) -> str:
+    """A file name as a step writes it: literal, or `$name` for one of the
+    flow's inputs, as picked when the run started."""
+    text = str(text)
+    return builtins.get("inputs", {}).get(text[1:], "") if text.startswith("$") else text
 
 
 def _resolve(value, regs: dict, builtins: dict) -> int:
@@ -1357,11 +1370,14 @@ class Bench:
         self.active_suite: str = db.get("active_suite", "")
         # button-teach addressing (A-05): flow files + live progress
         self.flows_dir = self.db.path.parent / "flows"
-        #: file name -> ((mtime, size), button label), so the snapshot can
-        #: ask what is on the buttons without re-reading the folder
-        self._flow_header_cache: dict[str, tuple[tuple[int, int], tuple[str, str]]] = {}
+        #: file name -> ((mtime, size), header), so the snapshot can ask
+        #: what is on the buttons without re-reading the folder
+        self._flow_header_cache: dict[str, tuple[tuple[int, int], dict]] = {}
         #: which of them a plugin brought — see the normalization below
         self._plugin_flows: set[str] = set()
+        #: production flow file -> how its last run ended, {ok, text}: the
+        #: Production view still says so once the run itself is gone
+        self.production_last: dict[str, dict] = {}
         self._seed_default_flows()
         # normalize the persisted procedure choice: heal names that no longer
         # exist (e.g. plugin uninstalled) and prefer a procedure a plugin
@@ -2074,6 +2090,8 @@ class Bench:
             data = _frame_bytes(val, regs, builtins or {})
             if data:
                 text += f" = {_frame_text(data)}"
+        if key == "swdl" and isinstance(val, dict) and str(val["file"]).startswith("$"):
+            text += f" = {_input_file(val['file'], builtins or {}) or '?'}"
         if key == "loop" and regs is not None:
             # a count the case worked out is a register in the file, and
             # "LoopBegin R11" says nothing about how long this run turned
@@ -2250,8 +2268,16 @@ class Bench:
             self._changed()
         task.add_done_callback(done)
 
+    def _production_running(self) -> bool:
+        """A production procedure owns the bus while it runs: a scan, a
+        verify or a test run beside it would pull its board away mid-download."""
+        return bool(self.teach and self.teach.get("file"))
+
     def act_scan(self, p: dict) -> None:
         if not self.connected or self.scan_busy:
+            return
+        if self._production_running():
+            self.log("SCAN not started — a production procedure is running", "emcy0")
             return
         self.spawn(self._scan_async())
 
@@ -3603,6 +3629,9 @@ class Bench:
     def act_mc_verify(self, p: dict) -> None:
         if self.mc["busy"] or self.scan_busy:
             return
+        if self._production_running():
+            self.log("MC   scan & verify skipped — a production procedure is running", "emcy0")
+            return
         if not self.connected:
             self.log("MC   scan & verify skipped — interface not connected", "emcy0")
             return
@@ -3722,8 +3751,8 @@ class Bench:
         be selectable as one: auto re-address runs the selected procedure
         by itself, on a bus with every device still on it.
         """
-        pressed = {b["file"] for b in self._flow_buttons()}
-        return [f for f in self._flow_files() if f not in pressed]
+        return [f for f, head in self._flow_headers().items()
+                if not head["button"] and not head["production"]]
 
     def _flow_buttons(self) -> list[dict]:
         """The flows that ask for a button of their own — ``{file, label}``.
@@ -3736,11 +3765,13 @@ class Bench:
         edit it without touching the tool. What the tool cannot work out
         is what to call it, so the file says (``button:``).
         """
-        return [{"file": name, "label": button}
-                for name, (_, button) in self._flow_headers().items() if button]
+        return [{"file": name, "label": head["button"]}
+                for name, head in self._flow_headers().items()
+                if head["button"] and not head["production"]]
 
-    def _flow_headers(self) -> dict[str, tuple[str, str]]:
-        """``{file: (name, button)}`` of every flow in the folder.
+    def _flow_headers(self) -> dict[str, dict]:
+        """``{file: header}`` of every flow in the folder, as
+        ``tclib.flow_header`` reads it.
 
         Read from the folder, so a file that appeared or lost its button
         is the truth about what can be pressed — but only re-read when it
@@ -3752,7 +3783,7 @@ class Bench:
         still has a name on its button, and pressing it is where that is
         said.
         """
-        out: dict[str, tuple[str, str]] = {}
+        out: dict[str, dict] = {}
         for name in self._flow_files():
             try:
                 info = (self.flows_dir / name).stat()
@@ -3823,6 +3854,11 @@ class Bench:
     def act_mc_teach_abort(self, p: dict) -> None:
         if self.teach is not None:
             self._teach_abort = True
+            # a flow waiting on the person at the bench is let go too, not
+            # left waiting out its prompt's timeout after Abort — but only
+            # its own: with a test run going, the open prompt is the run's
+            if not self.running:
+                self._answer("abort", {})
 
     def act_mc_procedure(self, p: dict) -> None:
         """Run one flow that declared a button, once.
@@ -3881,6 +3917,161 @@ class Bench:
             self.teach = None
             self._teach_abort = False
             self._changed()
+
+    # -- production procedures (grade: production) ---------------------------
+    # A flow marked `grade: production` is a procedure for the bench at the
+    # end of a line rather than for development: flash a board, address it,
+    # check it. The Production view lists these, each with the firmware
+    # files it asks for (`inputs:`), and runs one at the press of a button.
+    def _production_flows(self) -> list[dict]:
+        chosen = self.db.get("flow_inputs", {})
+        usable = {e["file"] for e in self._fw_catalog() if e["known"] and e.get("disk")}
+        return [{"file": f, "name": head["name"] or f, "desc": head["desc"],
+                 "inputs": [{"name": k, "label": label,
+                             "value": v if (v := chosen.get(f, {}).get(k, "")) in usable else ""}
+                            for k, label in head["inputs"].items()],
+                 "last": self.production_last.get(f)}
+                for f, head in self._flow_headers().items() if head["production"]]
+
+    def _fw_file(self, name: str) -> bool:
+        """A file in the firmware library a download can use: on disk, in a
+        format an installed extension knows."""
+        return bool(name) and any(e["file"] == name and e["known"] and e.get("disk")
+                                  for e in self._fw_catalog())
+
+    def act_flow_input(self, p: dict) -> None:
+        """What was picked for one input of a production flow, kept per
+        workspace, so the next run starts from it."""
+        file, name, value = (str(p.get(k) or "") for k in ("file", "name", "value"))
+        head = self._flow_headers().get(file)
+        if not head or name not in head["inputs"] or (value and not self._fw_file(value)):
+            return
+        chosen = self.db.get("flow_inputs", {})
+        chosen.setdefault(file, {})[name] = value
+        self.db.set("flow_inputs", chosen)
+
+    def act_flow_run(self, p: dict) -> None:
+        """Run a production flow with the inputs picked for it.
+
+        It runs the way an addressing run does, with a session of its own
+        (a board taught by the procedure stores it) and its progress where
+        the addressing shows it, which also keeps machine control from
+        re-addressing in the middle of it. Nothing is adopted or verified
+        afterwards: what the procedure leaves on the bus is its business.
+        """
+        file = str(p.get("file") or "")
+        head = self._flow_headers().get(file)
+        if not head or not head["production"]:
+            self.log(f'PROD "{file}" is not a production procedure', "emcy0")
+            return
+        what = head["name"] or file
+        if self.teach is not None or self.scan_busy or self.running or self.swdl_run:
+            self.log(f'PROD "{what}" not started — the bench is busy', "emcy0")
+            return
+        if not self.connected:
+            self.log(f'PROD "{what}" not started — interface not connected', "emcy0")
+            return
+        chosen = self.db.get("flow_inputs", {}).get(file, {})
+        inputs = {k: chosen.get(k, "") for k in head["inputs"]}
+        if missing := [head["inputs"][k] for k, v in inputs.items() if not self._fw_file(v)]:
+            self.log(f'PROD "{what}" not started — choose {", ".join(missing)} first', "emcy0")
+            return
+        flow = self._load_flow(file)
+        if flow is None:
+            return
+        self._teach_abort = False
+        self.production_last.pop(file, None)
+        self.teach = {"step": 0, "of": len(flow.steps), "text": "starting…",
+                      "name": flow.name, "file": file, "say": ""}
+        self.spawn(self._production_task(flow, file, inputs))
+
+    async def _production_task(self, flow: tclib.TestCase, file: str, inputs: dict) -> None:
+        self._sequence_started_at = time.monotonic()
+        session = self.addressing.new_session(self.db) if self.addressing else None
+        self.log(f'PROD "{flow.name}" started'
+                 + "".join(f" · {k} {v}" for k, v in inputs.items()))
+        say = ""  # what the flow's last `log` step told the person at the bench
+        try:
+            regs = {name: 0 for name in tclib.REGISTERS}
+            builtins = {"node": 0, "expected": int(self.mc.get("expected") or 0),
+                        "session": session, "inputs": inputs}
+
+            def on_step(idx: int, text: str) -> None:
+                nonlocal say
+                if 0 < idx <= len(flow.steps) and "log" in flow.steps[idx - 1]:
+                    say = text
+                self.teach = {"step": idx, "of": len(flow.steps), "text": text,
+                              "name": flow.name, "file": file, "say": say}
+                self._changed()
+
+            status, why = await self._run_program(
+                flow, flow.steps, 0, regs, builtins, 0, on_step,
+                lambda: self._teach_abort)
+            if status == "ok":
+                self.production_last[file] = {"ok": True, "text": say or "done"}
+                self.log(f'PROD "{flow.name}" done')
+            else:
+                label = "aborted" if self._teach_abort else status.upper()
+                reason = "by operator" if self._teach_abort else why
+                self.production_last[file] = {"ok": False, "text": f"{label} — {reason}"}
+                self.log(f'PROD "{flow.name}" {label} — {reason}', "emcy0")
+        finally:
+            self.teach = None
+            self._teach_abort = False
+            self._changed()
+
+    async def _swdl_step(self, val: dict, node: int, regs: dict, builtins: dict,
+                         should_stop) -> tuple[str, str]:
+        """``swdl``: one firmware download to one device, waited for.
+
+        The download machinery works on what the SWDL page has selected, so
+        the step selects its own device and file for the length of the
+        download and puts the page's choice back afterwards. A download
+        counts as done when the strategy says "done" for that device, not
+        when no error arrived: one whose task died leaves no error behind.
+        """
+        file = _input_file(val["file"], builtins)
+        if not self._fw_file(file):
+            return "fail", (f"swdl: {file or val['file']} is not a firmware file in the "
+                            "library that an installed extension knows")
+        n = _resolve(val["node"], regs, builtins) if "node" in val else node
+        if not n and len(self.devices) == 1:
+            n = self.devices[0]["node"]
+        dev = next((d for d in self.devices if d["node"] == n), None)
+        if dev is None:
+            return "fail", (f"swdl: no device on node {n} — scan first" if n else
+                            "swdl: which device? Name a node, or scan a bus with exactly one")
+        if self.swdl_run:
+            return "error", "swdl: a download is already running"
+        if self.adapter != "demo" and isinstance(self._swdl, SimSwdlStrategy):
+            return "error", "swdl: no vendor download protocol installed"
+        kept = ({d["node"]: d["sel"] for d in self.devices}, self.fw_sel, self.swdl_mode)
+        for d in self.devices:
+            d["sel"] = d is dev
+        self.fw_sel, self.swdl_mode = file, val.get("mode", "sdo")
+        stopping = False
+        try:
+            self._swdl.start(self)
+            if not self.swdl_run:
+                return "fail", f"swdl: {file} did not start — the log says why"
+            while self.swdl_run:
+                if (should_stop() or not self.connected) and not stopping:
+                    self._swdl.stop(self)  # it finishes cleanly, then says so
+                    stopping = True
+                self._drain_frames()  # a rejected header is told by EMCY
+                await asyncio.sleep(0.2)
+        finally:
+            sel, self.fw_sel, self.swdl_mode = kept
+            for d in self.devices:
+                d["sel"] = sel.get(d["node"], False)
+            self._changed()
+        err = self.swdl_err.get(n)
+        if stopping:
+            return "error", ("connection lost" if not self.connected else "aborted") + (
+                f" — {err}" if err else "")
+        if err or self.swdl_phase.get(n) != "done":
+            return "fail", f"swdl {file} node {n:02d}: {err or 'did not finish'}"
+        return "ok", f"{file} on node {n:02d}"
 
     def act_demo_press(self, p: dict) -> None:
         """Demo mode only: simulate the operator pressing a device button."""
@@ -5137,6 +5328,9 @@ class Bench:
         return {tc.id for tc in self.testcases.values() if not tc.error}
 
     def act_run_start(self, p: dict) -> None:
+        if self._production_running():
+            self.log("RUN  not started — a production procedure is running", "emcy0")
+            return
         # Re-read the folder first, so a case edited since the last scan runs
         # as it stands on disk rather than as it stood at startup. Whatever
         # the re-read costs is said out loud: the selection is narrowed to
@@ -6071,6 +6265,19 @@ class Bench:
             if on_timeout:
                 return "jump", on_timeout
             return "fail", f"wait_for heartbeat {target} — timeout after {timeout:g}s"
+        if key == "scan":
+            while self.scan_busy:  # one the page started: wait for it, not a second one
+                if should_stop():
+                    return "error", "aborted"
+                await asyncio.sleep(0.1)
+            await self._scan_async()
+            found = [f"{d['node']:02d} {d['name']}" for d in self.devices]
+            want = val.get("expect") if isinstance(val, dict) else None
+            if want is not None and len(found) != want:
+                return "fail", f"scan found {len(found)} device(s), expected {want}"
+            return "ok", f"{len(found)} device(s)" + (f": {', '.join(found)}" if found else "")
+        if key == "swdl":
+            return await self._swdl_step(val, node, regs, builtins, should_stop)
         if key in self._step_types:  # plugin step "<plugin>.<key>"
             try:
                 return await self._step_types[key].execute(
@@ -6346,6 +6553,12 @@ class Bench:
 
     def act_swdl_start(self, p: dict) -> None:
         if self.swdl_run or not self.sel_devices:
+            return
+        if self.teach is not None:
+            # a running flow chose its own device and file and puts them
+            # back when it is done; a start from the page now would flash
+            # whatever the page has selected in the middle of it
+            self.log("SWDL not started — a procedure is running", "emcy0")
             return
         if self.adapter != "demo" and isinstance(self._swdl, SimSwdlStrategy):
             # never fake-flash real hardware: the simulation is demo-only
@@ -7541,8 +7754,9 @@ class Bench:
             "eds": {"files": eds_files, "match": self._eds_matches()},
             "mc": self.mc | {"ref": self.mc_ref, "hbLost": sorted(self._hb_lost),
                              "teach": self.teach, "flows": self._addressing_flows(),
-                             "flowNames": {f: name for f, (name, _) in self._flow_headers().items()},
+                             "flowNames": {f: head["name"] for f, head in self._flow_headers().items()},
                              "procedures": self._flow_buttons()},
+            "production": self._production_flows(),
             "paths": self.paths | {"eds": str(self.db.eds_dir)},
             "objects": {
                 "catalog": catalog,

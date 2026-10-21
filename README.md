@@ -52,6 +52,10 @@ and every access shows up in the Trace like real bus traffic.
 - **Setup** — adapter/bitrate/scan-range, EDS registry with identity
   matching (0x1018), machine control: adopt the bench's expected state,
   scan & verify against it, re-address via exchangeable flow files.
+- **Production view**: a switch to a reduced bench for the end of a line,
+  showing the procedures a vendor package ships (flows marked
+  `grade: production`, e.g. flash a board) with their firmware choices,
+  a Start button, instructions and progress.
 - **Objects** — EDS object browser with read/write, favorites
   (auto-saved), typed RAW rows (SDO / PDO / NMT with per-row node-id),
   last-known values per device serial number.

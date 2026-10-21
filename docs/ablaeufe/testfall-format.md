@@ -35,6 +35,8 @@ variants: ["820", "920"]    # optional; HW-Varianten, für die der Fall gilt,
                             #   so wie das Gerät sie meldet. [] = alle
 on_fail: continue           # optional; continue (Default) | stop
 button: "Gerät → Node 1"    # nur Abläufe; Aufschrift eines eigenen Knopfes
+inputs: {fw: "Firmware"}    # nur Abläufe; Firmware-Dateien, die vor dem Start
+                            #   gewählt werden, in den Schritten als $fw
 preconditions: []           # optional; Schritte; Fehlschlag → SKIP
 steps: []                   # Pflicht; die eigentliche Sequenz
 ```
@@ -70,6 +72,21 @@ darf von dort nicht erreichbar sein.
 
 Bei Testfällen (`TC<id>_…`) steht der Schlüssel nur herum: sie werden über
 den Katalog gestartet, nicht über einen Knopf.
+
+### `grade: production` — ein Ablauf für die Fertigung
+
+Ein Ablauf mit `grade: production` erscheint nur in der Ansicht
+**Production** (Umschalter Development/Production oben rechts), nicht
+unter Addressing und nicht als Verfahren der Maschinensteuerung. Dort
+steht er mit den Dateien, die er unter `inputs:` verlangt (Auswahllisten
+aus der Firmware-Bibliothek, die Wahl wird je Arbeitsbereich gemerkt),
+einem Start-Knopf und rechts seiner `desc` als Anleitung. Während er
+läuft, steht dort, was sein letzter `log`-Schritt sagt, der Fortschritt
+und jede Rückfrage (`manual`/`ask`) an die Person an der Bench.
+
+Er läuft wie eine Adressierung mit einer eigenen Session (`$session`),
+übernimmt danach aber nichts als Soll-Zustand. Ein Hersteller-Paket
+bringt solche Abläufe über `flow_dirs()` mit.
 
 ### `id` — eindeutig, und zwar nachprüfbar
 
@@ -301,6 +318,8 @@ Jeder Schritt ist ein Ein-Schlüssel-Mapping.
 | `wait_for` | `{heartbeat: <zustand>, timeout, node?, on_timeout?}` **oder** `{cob: <wert> \| [<wert>, …], timeout, data?: "00" \| [...], into?: Rn, value_into?: Rn, on_timeout?}` | auf Heartbeat-Zustand warten oder (v2) auf einen Frame mit dieser COB-ID, optional mit Datenpräfix. `cob`/`data` als **Liste** racen mehrere (COB, Präfix)-Paare **gleichzeitig in einem Wait** (nicht nacheinander) — mit `into: Rn` landet der Index des zuerst getroffenen Paars in diesem Register (ohne `into` wird kein Register beschrieben); mit `value_into: Rn` landen die **Nutzdaten** des getroffenen Frames in diesem Register — als Zahl, niedrigstes Byte zuerst wie jeder CANopen-Wert, über **alle** Bytes des Frames: eine 4-Byte-PDO kommt als der U32 an, den das Gerät gesendet hat, ein längeres Frame als entsprechend breitere Zahl (ein Register ist eine ganze Zahl ohne Breite; ein Teilfeld holt man mit `and`/`div` heraus). Damit kann ein Fall mit dem Wert einer PDO rechnen statt ihn nur zu vergleichen; damit lässt sich ein Nebensignal (z. B. Addr-End) nicht mehr verpassen, während auf das Hauptsignal gewartet wird — kein blindes Zeitfenster zwischen zwei getrennten Polls mehr nötig. Der Schritt liest den **Trace** (die Aufzeichnung dessen, was der Bus tatsächlich getragen hat), nicht eine ab Schrittbeginn laufende Subskription: es zählt daher auch ein Frame, das **kurz vor** dem Schritt eingetroffen ist (`core.FRAME_LOOKBACK_S`, 400 ms — nicht das `timeout`: wie lange der Fall zu warten bereit ist und wie alt ein Frame sein darf, um noch das Jetzt zu beschreiben, sind zwei verschiedene Fragen. Das Fenster überbrückt ein Gerät, das kurz still ist — eine Kalibrierung kann seine Threads 150–180 ms anhalten, in denen nichts eine PDO auslöst). **Nie über den Start des Testfalls hinaus**: was davor auf dem Bus lag, beschreibt ein Gerät, das seither umgeschaltet, zurückgesetzt oder neu adressiert wurde — bei einem wiederholten Fall den vorherigen Durchlauf. Ein Gerät antwortet, wenn es soweit ist — nicht, wenn der Prüfstand gerade hinsieht. Je COB-ID wird dabei **nur das neueste** Frame befragt: eine PDO trägt einen Zustand, den das Gerät wiederholt, und das Frame davor beschreibt einen vergangenen Moment. Ein Schritt, der auf eine Änderung wartet, wird also nicht vom Zustand davor bedient. Eigene gesendete Frames (TX) zählen nicht als Antwort. Mit `on_timeout: <label>` wird bei Timeout dorthin **gesprungen** statt FAIL | Timeout → FAIL (ohne `on_timeout`) |
 | `can_send` | `{cob: <wert>, data: [<byte-werte>] \| $session}` | (v2) rohen CAN-Frame senden; Listeneinträge liefern je 1 Byte (Register: Low-Byte); `$session` als Eintrag expandiert zu seinen Bytes. `data: []` sendet einen Frame **ohne Daten** — ein CiA-301-SYNC trägt genau dann keine, wenn kein Zähler konfiguriert ist. Ohne installierten Addressing-Provider (Vendor-Plugin) gibt es keine Session-Identität — ein Schritt mit `$session` schlägt dann fehl | Fehler ohne Verbindung → ERROR; `$session` ohne Provider → FAIL |
 | `lss_assign` | `{count: <wert>, into?: Rn}` | (v2) Standard-Adressierung nach CiA 305: unkonfigurierte Slaves (Node-ID 0xFF) einzeln per LSS-Fastscan identifizieren und auf die Node-IDs 1..count konfigurieren/speichern; genau ein bereits konfiguriertes Gerät wird per globalem State-Switching umadressiert. Die Anzahl tatsächlich zugewiesener Nodes landet in `into` (Default `R0`) — auf echter LSS-Hardware bislang **ungetestet** (A-03) | Fehler nur ohne Verbindung → ERROR; Unterzahl per `jump_lt`/`fail` im Ablauf behandeln |
+| `scan` | `scan:` oder `{expect?: <anzahl>}` | den Bus scannen wie der Knopf Scan und warten, bis er fertig ist; mit `expect` muss danach genau so viele Geräte finden. Läuft schon ein Scan von der Seite, wird auf den gewartet | falsche Anzahl → FAIL |
+| `swdl` | `{file: <datei> \| $input, node?: <wert>, mode?: sdo \| pdo}` | eine Firmware-Datei aus der Bibliothek per SWDL auf **ein** Gerät laden und auf das Ende warten. Ohne `node` der Prüfling, im Ablauf das einzige Gerät am Bus. Wählt dafür selbst Gerät, Datei und Übertragungsart (`mode`, Default SDO) und stellt die Einstellungen der SWDL-Seite danach wieder her. Fertig heißt: die Download-Strategie meldet „done“ für dieses Gerät | Datei unbekannt, kein Gerät, Download-Fehler → FAIL; läuft schon ein Download → ERROR |
 | `lss_fastscan` | `{vendor?, product?, revision?, serial?: <wert>, first?: <wert>, last?: <wert>, timeout?: <s>, bootup?: <s>, into?: Rn}` | (v2) LSS-Fastscan nach CiA 305 auf Rohframes (0x7E5 fragt, 0x7E4 antwortet, immer 8 Byte): erst *Switch state global* Waiting, dann je Runde den unkonfigurierten Slave (Node-ID 0xFF) mit der kleinsten LSS-Adresse finden, ihm die nächste Node-ID ab `first` (Default 1) geben, *Store*, und **sofort** wieder Waiting — ein Slave, der in Configuration bliebe, nähme die nächste Node-ID mit. Danach muss sein Boot-up auf der neuen ID binnen `bootup` Sekunden (Default 0,5) kommen. Schluss, wenn auf den Start eines Fastscans niemand antwortet. Bekannte Teile der Adresse (`vendor`, `product`, …) werden mit **einer** Frage bestätigt statt mit 32 abgefragt; `timeout` ist das Antwortfenster je Fastscan-Frage (Default 0,01 s), und es wird **ganz** abgewartet: mehrere Slaves antworten einzeln, um eine Millisekunde versetzt, und eine späte Antwort darf nicht der nächsten Frage zufallen. Configure und Store warten bis 0,5 s auf ihre Antwort. Die Zahl der vergebenen IDs landet in `into`, jede Zuweisung im Log und im Bericht | Kein unkonfiguriertes Gerät → ok mit 0; Gerät mit anderem bekanntem Adressteil, Fehlerantwort, fehlender Boot-up, mehr Geräte als IDs bis `last` (Default 127) → FAIL (Rest wieder Waiting) |
 | `manual` | `manual: "Text"` bzw. `{text, timeout?}` | Bedieneranweisung, wartet auf Bestätigung (Default 120 s) | Abbruch/Timeout → ERROR |
 | `ask` | `ask: "Frage?"` bzw. `{text, title?, timeout?}` | Frage an den Bediener mit **drei** Antworten. Ja läuft weiter, Nein ist eine Aussage über das Gerät (kein Abbruch), Abbrechen heißt „gilt hier nicht" | Nein → FAIL mit der Frage als Begründung; Abbrechen → SKIP; Timeout → ERROR |
