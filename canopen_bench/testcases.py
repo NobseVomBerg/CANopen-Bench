@@ -555,8 +555,9 @@ def _step_lines(text: str) -> dict[str, list[int]]:
 
 def flow_header(text: str) -> dict:
     """What a flow declares about itself, read from the header alone:
-    ``name``, ``desc``, ``button``, ``production`` (``grade: production``)
-    and ``inputs`` (name -> label).
+    ``name``, ``desc``, ``button``, ``production`` (``grade: production``),
+    ``on_fail`` as written ("" when it does not say) and ``inputs``
+    (name -> label).
 
     Nothing else in the file has to be sound for this: a flow whose steps
     do not parse still has a name on its button, and pressing it is where
@@ -573,6 +574,7 @@ def flow_header(text: str) -> dict:
             "desc": str(doc.get("desc") or "").strip(),
             "button": str(doc.get("button") or "").strip(),
             "production": str(doc.get("grade") or "") == "production",
+            "on_fail": str(doc.get("on_fail") or ""),
             "inputs": {str(k): str(v or k) for k, v in raw.items()} if isinstance(raw, dict) else {}}
 
 
@@ -654,9 +656,10 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
             problems.append(f"{group_name}: {err}")
     tc.inputs, input_problems = _check_inputs(doc.get("inputs"), [tc.preconditions, tc.steps])
     problems += input_problems
-    if require_prefix and tc.inputs:
-        # a case runs from the catalog, where nobody is asked for a file
-        problems.append("inputs: only a flow takes inputs, a test case names its files")
+    if tc.inputs and (require_prefix or tc.grade != "production"):
+        # only the Production view asks for a file; a case from the catalog
+        # or a button would run with `$name` meaning nothing
+        problems.append("inputs: only a production flow (grade: production) takes inputs")
     tc.error = "; ".join(problems) or None
     return tc
 
