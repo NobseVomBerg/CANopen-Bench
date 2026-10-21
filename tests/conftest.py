@@ -16,6 +16,13 @@ def _no_installed_plugins(monkeypatch):
     monkeypatch.setattr("canopen_bench.core.load_plugins", lambda **kw: [])
 
 
+@pytest.fixture(autouse=True)
+def _own_user_settings(monkeypatch, tmp_path):
+    """The user settings (where the data folder is) of the machine running
+    the suite are neither read nor written by it."""
+    monkeypatch.setenv("CANOPEN_BENCH_SETTINGS", str(tmp_path / "user-settings.json"))
+
+
 # Registry rows the suite historically relied on being seeded (used to come
 # from data.SEED_EDS_FILES, now neutralized — see write_seed_eds_files /
 # seed_test_registry below).
