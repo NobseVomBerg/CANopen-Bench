@@ -3983,21 +3983,29 @@ class Bench:
         self.production_last.pop(file, None)
         self.teach = {"step": 0, "of": len(flow.steps), "text": "starting…",
                       "name": flow.name, "file": file, "say": ""}
-        self.spawn(self._production_task(flow, file, inputs))
+        # a failure ends the run where it happened, unless the file asks to
+        # go on to its own clean-up (on_fail: continue + jump_on_error):
+        # going on by default would start the next download after a failed one
+        self.spawn(self._production_task(flow, file, inputs,
+                                         on_to_the_end=head["on_fail"] == "continue"))
 
-    async def _production_task(self, flow: tclib.TestCase, file: str, inputs: dict) -> None:
+    async def _production_task(self, flow: tclib.TestCase, file: str, inputs: dict,
+                               on_to_the_end: bool = False) -> None:
         self._sequence_started_at = time.monotonic()
         session = self.addressing.new_session(self.db) if self.addressing else None
         self.log(f'PROD "{flow.name}" started'
                  + "".join(f" · {k} {v}" for k, v in inputs.items()))
         say = ""  # what the flow's last `log` step told the person at the bench
+        failed_at = None  # ... when its first failure happened, which a clean-up outlives
         try:
             regs = {name: 0 for name in tclib.REGISTERS}
             builtins = {"node": 0, "expected": int(self.mc.get("expected") or 0),
                         "session": session, "inputs": inputs}
 
             def on_step(idx: int, text: str) -> None:
-                nonlocal say
+                nonlocal say, failed_at
+                if failed_at is None and builtins.get("failed"):
+                    failed_at = say
                 if 0 < idx <= len(flow.steps) and "log" in flow.steps[idx - 1]:
                     say = text
                 self.teach = {"step": idx, "of": len(flow.steps), "text": text,
@@ -4006,14 +4014,17 @@ class Bench:
 
             status, why = await self._run_program(
                 flow, flow.steps, 0, regs, builtins, 0, on_step,
-                lambda: self._teach_abort)
+                lambda: self._teach_abort, allow_continue=on_to_the_end)
             if status == "ok":
                 self.production_last[file] = {"ok": True, "text": say or "done"}
                 self.log(f'PROD "{flow.name}" done')
             else:
                 label = "aborted" if self._teach_abort else status.upper()
                 reason = "by operator" if self._teach_abort else why
-                self.production_last[file] = {"ok": False, "text": f"{label} — {reason}"}
+                # where it stood: what the flow last told the operator
+                phase = say if failed_at is None else failed_at
+                where = f" at \"{phase}\"" if phase else ""
+                self.production_last[file] = {"ok": False, "text": f"{label}{where} — {reason}"}
                 self.log(f'PROD "{flow.name}" {label} — {reason}', "emcy0")
         finally:
             self.teach = None
