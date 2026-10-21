@@ -111,7 +111,7 @@ function OptionSelect({ value, options, onPick, style, title, disabled }) {
 // the new value — resyncing immediately would flash the stale value for the
 // duration of the action round-trip. If the server never adopts the input
 // (invalid text), the field reverts to the server value after a grace period.
-function SyncInput({ value, onCommit, style, klass, title, placeholder, width }) {
+function SyncInput({ value, onCommit, style, klass, title, placeholder, width, disabled }) {
   const [focused, setFocused] = useState(false);
   const [val, setVal] = useState(value ?? '');
   const refs = useRef({ prop: value, prev: value, holdUntil: 0, focused: false }).current;
@@ -124,7 +124,7 @@ function SyncInput({ value, onCommit, style, klass, title, placeholder, width })
     setVal(value ?? '');
   }, [value, focused]);
   return html`<input
-    value=${val} title=${title} placeholder=${placeholder} class=${klass} style=${style}
+    value=${val} title=${title} placeholder=${placeholder} class=${klass} style=${style} disabled=${disabled}
     onFocus=${() => { refs.focused = true; setFocused(true); }}
     onInput=${(e) => setVal(e.target.value)}
     onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
@@ -745,7 +745,7 @@ function SetupPage({ s }) {
           note: 'letters, digits, space and . _ - only',
         }).then((name) => { if (name) send('workspace_create', { name }); })}
         style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">＋ New…</span>
-      <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: data/${s.workspace}</span>
+      <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: <span style="font-family:${MONO};user-select:all">${s.workspaces.folder}</span></span>
     </div>`}
     <div style=${BOX}>
       <div style="font-weight:600;font-size:13px">Bus interface</div>
@@ -988,6 +988,20 @@ function SetupPage({ s }) {
 
     <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
       <div style="font-weight:600;font-size:13px">Folders</div>
+      ${s.workspaces.data && html`
+      <div style="display:flex;flex-direction:column;gap:4px"
+        title="Where the workspaces live, each a subfolder. Kept per user, so the bench finds it wherever it is started from.">
+        <span style="font-size:11px;color:var(--dim);font-weight:600">DATA FOLDER</span>
+        <div style="display:flex;gap:6px">
+          <${SyncInput} value=${s.workspaces.dataNext} disabled=${s.workspaces.dataFixed}
+            onCommit=${(v) => send('set_path', { which: 'data', value: v })} style="flex:1;${inputStyle}" />
+          ${!s.workspaces.dataFixed && html`<span class="hv" onClick=${() => send('browse_open', { which: 'data' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>`}
+        </div>
+        <span style="font:10.5px ${MONO};color:${s.workspaces.dataNext !== s.workspaces.data ? 'var(--amb)' : 'var(--faint)'}">${
+          s.workspaces.dataFixed ? 'set by CANOPEN_BENCH_DATA for this start'
+          : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — this one runs on ${s.workspaces.data}`
+          : 'the workspaces are its subfolders'}</span>
+      </div>`}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim);font-weight:600">TESTCASES FOLDER</span>

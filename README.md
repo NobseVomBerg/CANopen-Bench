@@ -109,11 +109,19 @@ it was bought with. Bring-up checklists live in
 
 ## Workspaces
 
-Every subfolder of `./data` (or `$CANOPEN_BENCH_DATA`, e.g. a mounted
-Docker volume) is one workspace: its own sqlite db, EDS files, trace
-captures and flow files. Create and switch workspaces on the Setup page;
-copy a folder to clone or back up a bench. `--db <path>` remains as an
-expert override for a single explicit database file.
+Every subfolder of the data folder is one workspace: its own sqlite db,
+EDS files, trace captures and flow files. Create and switch workspaces on
+the Setup page; copy a folder to clone or back up a bench. The data folder
+is chosen under Setup > Folders and kept per user (`%APPDATA%\CANopen-Bench`,
+`~/.config/canopen-bench`), so the bench finds it wherever it is started
+from; on the first start it is `./data` where there is one, else
+`~/CANopen-Bench`. `$CANOPEN_BENCH_DATA` names it for one start (a script,
+a mounted Docker volume). `--db <path>` remains as an expert override for a
+single explicit database file.
+
+Flows and EDS files a package ships are written over in the workspace on
+every start, like its test cases: an update arrives without anybody
+looking for the old copy. A file of one's own goes in under another name.
 
 ## Docker
 
