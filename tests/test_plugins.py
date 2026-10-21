@@ -270,7 +270,10 @@ def test_seeded_variant_fills_device_variant_on_scan(tmp_path):
     assert dev["variant"] == "HV"
 
 
-def test_plugin_flow_seeded_and_not_overwritten(tmp_path):
+def test_a_plugin_flow_is_the_packaged_one_after_every_start(tmp_path):
+    """A copy kept from an older plugin went on running after an update had
+    brought the new procedure — on a colleague's bench, who never found the
+    file. One of one's own goes in under a name no package ships."""
     flow_src = tmp_path / "flow_src"
     flow_src.mkdir()
     (flow_src / "custom.yaml").write_text("steps: []\n", encoding="utf-8")
@@ -278,12 +281,20 @@ def test_plugin_flow_seeded_and_not_overwritten(tmp_path):
     db = Db(tmp_path / "x.db")
     bench = Bench(db, plugins=[FakePlugin(flow_src)])
     dst = bench.flows_dir / "custom.yaml"
-    assert dst.exists()
+    assert dst.read_text(encoding="utf-8") == "steps: []\n"
 
-    customized = "# customized locally\n"
-    dst.write_text(customized, encoding="utf-8")
+    dst.write_text("# the old version\n", encoding="utf-8")
+    (bench.flows_dir / "custom_mine.yaml").write_text("# my own\n", encoding="utf-8")
     again = Bench(db, plugins=[FakePlugin(flow_src)])
-    assert (again.flows_dir / "custom.yaml").read_text(encoding="utf-8") == customized
+    assert (again.flows_dir / "custom.yaml").read_text(encoding="utf-8") == "steps: []\n"
+    assert (again.flows_dir / "custom_mine.yaml").read_text(encoding="utf-8") == "# my own\n"
+
+
+def test_setup_says_which_folder_the_workspace_is(tmp_path):
+    """./data is wherever the bench was started from; a double-clicked
+    canopen-bench.exe puts it next to the exe, where nobody looks."""
+    bench = Bench(Db(tmp_path / "ws" / "canopen-bench.db"), plugins=[])
+    assert bench.snapshot()["workspaces"]["folder"] == str((tmp_path / "ws").resolve())
 
 
 def test_firmware_aggregation(tmp_path):
@@ -1889,19 +1900,20 @@ def test_a_plugin_brings_the_eds_files_its_rows_name(tmp_path):
     assert not (bench.db.eds_dir / "notes.txt").exists()
 
 
-def test_the_workspaces_own_eds_outranks_the_packaged_one(tmp_path):
-    """The file in the workspace is what the devices on this bench answer
-    to, and it is regularly newer than the packaged copy. Editing it there
-    has to stick — the same rule flows and headers follow."""
+def test_the_packaged_eds_wins_and_one_of_ones_own_has_another_name(tmp_path):
+    """The same rule as flows, test cases and headers: what a plugin ships
+    is the plugin's, on every start. A different EDS goes in renamed."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
     (packaged / "acme_feeder.eds").write_text("packaged", encoding="utf-8")
 
     bench = Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])
     (bench.db.eds_dir / "acme_feeder.eds").write_text("edited here", encoding="utf-8")
+    (bench.db.eds_dir / "acme_feeder_new.eds").write_text("mine", encoding="utf-8")
     Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])   # a later start
 
-    assert (bench.db.eds_dir / "acme_feeder.eds").read_text() == "edited here"
+    assert (bench.db.eds_dir / "acme_feeder.eds").read_text() == "packaged"
+    assert (bench.db.eds_dir / "acme_feeder_new.eds").read_text() == "mine"
 
 
 def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
@@ -1924,8 +1936,7 @@ def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
     bench.logs.clear()
     bench._seed_plugin_eds()                          # must not raise
 
-    assert not any("efs2_920" in entry["msg"] for entry in bench.logs), \
-        "an existing name is left alone, whatever it is"
+    assert any("acme_feeder.eds could not be installed" in entry["msg"] for entry in bench.logs)
 
 
 # -- packaged test cases -----------------------------------------------------

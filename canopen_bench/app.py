@@ -24,6 +24,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from . import usersettings
 from .bus.interface import BusInterface
 from .core import Bench
 from .db import Db
@@ -48,7 +49,7 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         root: Path | None = None
         path = Path(explicit)
     else:
-        root = Path(os.environ.get("CANOPEN_BENCH_DATA", "data"))
+        root = usersettings.data_root()
         path = root / _active_workspace(root) / "canopen-bench.db"
 
     clients: set[WebSocket] = set()

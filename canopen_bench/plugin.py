@@ -525,9 +525,9 @@ class BenchPlugin:
 
     def flow_dirs(self) -> list[Path]:
         """Directories with packaged flow files (*.yaml, format v2).
-        Seeded into the workspace flows dir on startup; existing files
-        are never overwritten, so vendor updates don't clobber local
-        customizations."""
+        Copied into the workspace flows dir on every start, over the copy
+        there where it differs, so an update arrives; a flow of one's own
+        goes in under another name."""
         return []
 
     def addressing_provider(self) -> AddressingProvider | None:
@@ -556,7 +556,8 @@ class BenchPlugin:
     def eds_dirs(self) -> list[Path]:
         """Directories with the device family's own EDS files, copied into
         the workspace EDS folder like flows and headers — and like those,
-        never over a file that is already there.
+        over the copy there on every start; an EDS of one's own goes in
+        under another name.
 
         ``seed_eds()`` registers the rows; this brings the files those rows
         name. Without it a fresh bench has a registry pointing at nothing
