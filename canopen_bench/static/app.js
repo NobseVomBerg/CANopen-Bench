@@ -148,6 +148,10 @@ const ledFor = (nmt) =>
   nmt === 'Operational' ? '#4ecb71' : nmt === 'Emergency' ? '#ff5252' : nmt === 'Stopped' ? '#98a1af' : '#e8b23a';
 
 const PAGES = [['setup', 'ST', 'Setup'], ['objects', 'OB', 'Objects'], ['tests', 'TS', 'Tests'], ['swdl', 'DL', 'SWDL'], ['trace', 'TR', 'Trace']];
+// The Production view is the bench at the end of a line: the procedures a
+// vendor package ships (flows marked grade: production) on a page of their
+// own, and none of the development pages somebody could wander into there.
+const PROD_PAGES = [['setup', 'ST', 'Setup'], ['production', 'PR', 'Production'], ['swdl', 'DL', 'SWDL']];
 
 const btn = {
   acc: 'border:1px solid var(--acc-bd);background:var(--acc-soft);color:var(--acc);font-weight:600;',
@@ -468,7 +472,10 @@ function Sidebar({ s, ui, setUi }) {
   const menuAct = (what) => () => { send('dev_menu', { node: mDev.node, what }); closeMenu(); };
   // device commands are per-EDS data (special functions like a vendor's
   // SuperUser) — chips, badges and menu entries render from the registry
-  const edsCmds = (file) => (s.eds.files.find((e) => e.file === file) || {}).device_commands || [];
+  // a command marked development (a vendor's SuperUser, say) is not for
+  // the bench at the end of a line: the Production view leaves it out
+  const edsCmds = (file) => ((s.eds.files.find((e) => e.file === file) || {}).device_commands || [])
+    .filter((c) => ui.view !== 'prod' || !c.development);
   const edsRow = (file) => s.eds.files.find((e) => e.file === file);
   const devCmds = Object.values(Object.fromEntries(
     s.devices.flatMap((d) => edsCmds(d.eds)).map((c) => [c.key, c])));
@@ -511,7 +518,7 @@ function Sidebar({ s, ui, setUi }) {
       <div style="font:11px ${MONO};color:var(--faint);margin-top:2px">v${s.version} · workspace: ${s.workspace}</div>
     </div>
     <div style="padding:10px 10px 6px;display:flex;flex-direction:column;gap:2px">
-      ${PAGES.map(([key, code, label]) => {
+      ${(ui.view === 'prod' ? PROD_PAGES : PAGES).map(([key, code, label]) => {
         const on = ui.page === key;
         return html`
         <div class=${on ? '' : 'hv-nav'} onClick=${() => setUi({ ...ui, page: key })}
@@ -1847,7 +1854,7 @@ function TestsPage({ s, ui, setUi }) {
 // reads an object, lets it be corrected, and writes it back.
 const promptBtn = 'font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer;text-align:center';
 
-function OperatorPrompt({ p }) {
+function OperatorPrompt({ p, what }) {
   const [val, setVal] = useState(p.value ?? '');
   const kind = p.kind || 'confirm';
   const key = `${p.tid}:${p.index || ''}:${p.sub || ''}:${p.text || ''}`;
@@ -1855,7 +1862,7 @@ function OperatorPrompt({ p }) {
   return html`
   <div style="border:1px solid var(--acc-bd);border-radius:8px;padding:10px 12px;background:var(--acc-soft)">
     <div style="font-size:10.5px;color:var(--acc);font-weight:700;letter-spacing:.05em;margin-bottom:4px">
-      ${kind === 'ask' ? 'QUESTION' : kind === 'adjust' ? 'ADJUST' : 'OPERATOR ACTION'} · TEST ${p.tid}
+      ${kind === 'ask' ? 'QUESTION' : kind === 'adjust' ? 'ADJUST' : 'OPERATOR ACTION'} · ${what || `TEST ${p.tid}`}
     </div>
     ${p.title && html`<div style="font-size:12.5px;color:var(--tx);font-weight:600">${p.title}</div>`}
     <div style="font-size:12.5px;color:var(--tx);margin-bottom:8px">${p.text}</div>
@@ -2754,10 +2761,75 @@ function BrowseDialog({ b }) {
 }
 
 // -------------------------------------------------------------------- app --
+// The procedures marked grade: production, each with the firmware files it
+// asks for and a Start button. The column on the right is the person at the
+// bench's: what the procedure asks of them, how far it is, and the prompt
+// when it waits for them — the same box the Tests page shows.
+function ProductionPage({ s }) {
+  const procs = s.production || [];
+  const run = s.mc.teach && s.mc.teach.file ? s.mc.teach : null;
+  const files = (s.swdl.fw || []).filter((f) => f.known && f.disk).map((f) => [f.file, f.file]);
+  const sel = `border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 8px;font:12px ${MONO};outline:none;flex:1;min-width:0`;
+  const downloads = run && s.swdl.run ? Object.keys(s.swdl.prog) : [];
+  return html`
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="flex:1;overflow:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px">
+      ${!procs.length && html`<div style="color:var(--faint);font-size:12px;line-height:1.5">No production procedures installed. A vendor package brings them as flow files marked <span style="font-family:${MONO}">grade: production</span>.</div>`}
+      ${procs.map((p) => {
+        const missing = p.inputs.filter((i) => !i.value).map((i) => i.label);
+        const why = !s.connected ? 'connect the interface first'
+          : s.mc.teach || s.scanBusy || s.tests.running || s.swdl.run ? 'the bench is busy'
+          : missing.length ? `choose ${missing.join(', ')} first` : '';
+        return html`
+        <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-weight:600;font-size:13px">${p.name}</span>
+            <span style="font:10.5px ${MONO};color:var(--faint)">${p.file}</span>
+            ${p.last && html`<span style="margin-left:auto;font-size:11.5px;font-weight:600;color:${p.last.ok ? 'var(--grn)' : 'var(--red)'}">${p.last.ok ? '✓' : '⚠'} ${p.last.text}</span>`}
+          </div>
+          ${p.inputs.map((i) => html`
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:130px;flex:none;font-size:11px;color:var(--dim);font-weight:600">${i.label}</span>
+              <${OptionSelect} value=${i.value} options=${[['', '— choose a file —'], ...files]} style=${sel}
+                onPick=${(v) => send('flow_input', { file: p.file, name: i.name, value: v })} />
+            </div>`)}
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="hv-b" onClick=${() => !why && send('flow_run', { file: p.file })} title=${why || `Runs ${p.file}`}
+              style="background:${why ? 'var(--faint)' : 'var(--grn)'};color:#fff;font-weight:600;padding:8px 22px;border-radius:7px;cursor:pointer">▶ Start</span>
+            ${why && html`<span style="font-size:11px;color:var(--faint)">${why}</span>`}
+          </div>
+        </div>`;
+      })}
+    </div>
+    <div style="width:300px;flex:none;border-left:1px solid var(--bd);background:var(--panel);display:flex;flex-direction:column;padding:14px 16px;gap:12px;overflow:auto">
+      <div style="font-weight:600;font-size:13px">${run ? run.name : 'Instructions'}</div>
+      ${s.tests.manual && html`<${OperatorPrompt} p=${s.tests.manual} what=${run ? run.name : ''} />`}
+      ${run ? html`
+        ${run.say && html`<div style="font-size:14px;font-weight:600;line-height:1.4">${run.say}</div>`}
+        <div style="border:1px solid var(--bd);border-radius:8px;padding:10px 12px;background:var(--panel2);display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mid)"><span>step</span><span>${run.step} / ${run.of}</span></div>
+          <div style="height:6px;border-radius:3px;background:var(--bd);overflow:hidden"><span style="display:block;width:${run.of ? Math.round(100 * run.step / run.of) : 0}%;height:100%;background:var(--acc);transition:width .4s"></span></div>
+          <div title=${run.text} style="font:10.5px ${MONO};color:var(--dim);line-height:1.6;min-height:34px;overflow:hidden">${run.text}</div>
+          ${downloads.map((n) => html`
+            <div style="font:10.5px ${MONO};color:var(--mid)">node ${String(n).padStart(2, '0')} · ${s.swdl.phase[n] || 'download'} · ${s.swdl.prog[n]} %</div>
+            <div style="height:4px;border-radius:2px;background:var(--bd);overflow:hidden"><span style="display:block;width:${s.swdl.prog[n]}%;height:100%;background:var(--grn)"></span></div>`)}
+        </div>
+        <span class="hv" onClick=${() => send('mc_teach_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;padding:6px 12px;border-radius:7px;cursor:pointer;text-align:center">■ Abort</span>`
+      : procs.map((p) => p.desc && html`
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${procs.length > 1 && html`<div style="font-size:11px;color:var(--dim);font-weight:600">${p.name}</div>`}
+          <div style="font-size:12px;color:var(--mid);line-height:1.55;white-space:pre-line">${p.desc}</div>
+        </div>`)}
+    </div>
+  </div>`;
+}
+
 function App() {
   const s = useServerState();
+  const view = localStorage.getItem('cb-view') === 'prod' ? 'prod' : 'dev';
   const [ui, setUi] = useState({
-    page: 'setup',
+    view,
+    page: view === 'prod' ? 'production' : 'setup',
     theme: localStorage.getItem('cb-theme') || 'light',
     menuNode: null,
     menuEds: false,
@@ -2767,6 +2839,9 @@ function App() {
     resultFilter: '',
   });
   useEffect(() => { localStorage.setItem('cb-theme', ui.theme); }, [ui.theme]);
+  useEffect(() => { localStorage.setItem('cb-view', ui.view); }, [ui.view]);
+  const setView = (v) => setUi({ ...ui, view: v,
+    page: v === 'prod' ? 'production' : ui.page === 'production' ? 'setup' : ui.page });
 
   if (!s) {
     return html`<div style="height:100vh;display:grid;place-items:center;background:#f5f6f8;color:#7a8494;font:13px 'IBM Plex Sans',system-ui,sans-serif">Connecting to CANopen Bench server…</div>`;
@@ -2778,6 +2853,7 @@ function App() {
   const adapterInfo = s.adapters.find((a) => a.key === s.adapter);
   const titles = {
     setup: ['Setup', 'workspace · interface · machine control'],
+    production: ['Production', 'procedures from the installed packages'],
     objects: ['Object Access', 'EDS: ' + edsCur],
     tests: ['System Tests', s.tests.activeSuite ? 'suite: ' + s.tests.activeSuite : 'no suite loaded'],
     swdl: ['Software Download', 'SDO serial · PDO parallel'],
@@ -2801,10 +2877,16 @@ function App() {
             if (cycRows) parts.push(`${cycRows} cyclic row${cycRows > 1 ? 's' : ''}`);
             if (s.sync.run) parts.push(`SYNC every ${s.sync.ms} ms`);
             if (!parts.length) return '';
-            return html`<span class="hv" onClick=${() => setUi({ ...ui, page: cycRows ? 'objects' : 'setup' })}
+            return html`<span class="hv" onClick=${() => setUi({ ...ui, view: cycRows ? 'dev' : ui.view, page: cycRows ? 'objects' : 'setup' })}
               title="Cyclic transmit active: ${parts.join(' · ')} — runs server-side until stopped or the bus disconnects. Click to open the controls."
               style="white-space:nowrap;border:1px solid var(--acc-bd);background:var(--acc-soft);color:var(--acc);font:600 10.5px ${MONO};padding:4px 10px;border-radius:9px;cursor:pointer">⟳ TX ${parts.join(' · ')}</span>`;
           })()}
+          <span style="display:flex;border:1px solid var(--inp);border-radius:6px;overflow:hidden;font:600 11px 'IBM Plex Sans'">
+            ${[['dev', 'Development'], ['prod', 'Production']].map(([v, label]) => html`
+              <span class=${ui.view === v ? '' : 'hv'} onClick=${() => ui.view !== v && setView(v)}
+                title=${v === 'prod' ? 'The production procedures, without Objects, Tests and Trace' : 'Every page'}
+                style="padding:5px 10px;cursor:pointer;background:${ui.view === v ? 'var(--acc)' : 'transparent'};color:${ui.view === v ? '#fff' : 'var(--mid)'}">${label}</span>`)}
+          </span>
           <span class="hv" onClick=${() => setUi({ ...ui, theme: dark ? 'light' : 'dark' })} title="Toggle theme"
             style="width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--inp);border-radius:6px;cursor:pointer;color:var(--mid);font-size:13px">${dark ? '☀' : '☾'}</span>
           ${toggle(s.connected, s.connected ? 'Connected' : 'Disconnected', () => send('connect_toggle'),
@@ -2813,6 +2895,7 @@ function App() {
         </div>
       </div>
 
+      ${ui.page === 'production' && html`<${ProductionPage} s=${s} />`}
       ${ui.page === 'setup' && html`<${SetupPage} s=${s} />`}
       ${ui.page === 'objects' && html`<${ObjectsPage} s=${s} ui=${ui} setUi=${setUi} />`}
       ${ui.page === 'tests' && html`<${TestsPage} s=${s} ui=${ui} setUi=${setUi} />`}

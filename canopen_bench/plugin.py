@@ -386,7 +386,8 @@ class BenchPlugin:
         be told by hand, row by row:
 
         ``commands``
-            The SDO commands offered for this device.
+            The SDO commands offered for this device. One marked
+            ``development: true`` is left out of the Production view.
         ``variant``
             ``{index, sub, map?}`` — where the device keeps its variant
             number, so a scan reads it and the run report says which
