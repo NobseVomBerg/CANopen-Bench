@@ -18,10 +18,7 @@ def _no_installed_plugins(monkeypatch):
 
 
 def test_root_mode_defaults_to_default_workspace(tmp_path, monkeypatch):
-    monkeypatch.setenv("CANOPEN_BENCH_DATA", str(tmp_path))
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
-
-    app = create_app()
+    app = create_app(data=tmp_path)
     with TestClient(app) as client:
         state = client.get("/api/state").json()
 
@@ -31,10 +28,7 @@ def test_root_mode_defaults_to_default_workspace(tmp_path, monkeypatch):
 
 
 def test_workspace_create_swaps_bench_and_persists_active_workspace(tmp_path, monkeypatch):
-    monkeypatch.setenv("CANOPEN_BENCH_DATA", str(tmp_path))
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
-
-    app = create_app()
+    app = create_app(data=tmp_path)
     with TestClient(app) as client:
         resp = client.post("/api/action", json={"action": "workspace_create",
                                                  "params": {"name": "LinieA"}})
@@ -52,8 +46,6 @@ def test_workspace_create_swaps_bench_and_persists_active_workspace(tmp_path, mo
 
 
 def test_explicit_db_path_disables_workspace_switching(tmp_path, monkeypatch):
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     app = create_app(db_path=str(tmp_path / "x.db"))
     with TestClient(app) as client:
@@ -75,8 +67,6 @@ def _seed_trace(app) -> None:
 
 
 def test_trace_export_csv_endpoint(tmp_path, monkeypatch):
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     app = create_app(db_path=str(tmp_path / "x.db"))
     with TestClient(app) as client:
@@ -93,8 +83,6 @@ def test_trace_export_csv_endpoint(tmp_path, monkeypatch):
 
 
 def test_trace_export_candump_endpoint(tmp_path, monkeypatch):
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     app = create_app(db_path=str(tmp_path / "x.db"))
     with TestClient(app) as client:
@@ -250,8 +238,6 @@ def test_a_report_can_be_fetched_and_only_from_the_results_folder(tmp_path, monk
     operator chose, so "anything under that folder" must not widen into
     "anything on the disk".
     """
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     app = create_app(db_path=str(tmp_path / "x.db"))
     with TestClient(app) as client:
@@ -276,8 +262,6 @@ def test_only_a_report_that_exists_is_offered_as_a_link(tmp_path, monkeypatch):
     """The demo's example runs name files that were never on any disk. A
     link to a 404 is worse than plain text, so the entry the UI links to is
     the one a run actually wrote — it carries `file`, the examples do not."""
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     from canopen_bench import data
 
@@ -298,8 +282,6 @@ def test_only_a_report_that_exists_is_offered_as_a_link(tmp_path, monkeypatch):
 # -- the window the panel is scrolled to ------------------------------------
 
 def test_trace_rows_endpoint_answers_a_window_newest_first(tmp_path, monkeypatch):
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     app = create_app(db_path=str(tmp_path / "x.db"))
     with TestClient(app) as client:
@@ -317,8 +299,6 @@ def test_trace_rows_endpoint_answers_a_window_newest_first(tmp_path, monkeypatch
 def test_trace_rows_endpoint_falls_back_on_junk_and_caps_the_page(tmp_path, monkeypatch):
     """The query string comes from a scroll handler, and a request for the
     whole 200k-row buffer is what the exports are for."""
-    monkeypatch.delenv("CANOPEN_BENCH_DATA", raising=False)
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
 
     app = create_app(db_path=str(tmp_path / "x.db"))
     bench = None
@@ -343,9 +323,7 @@ def _seed_trace_row(i: int) -> dict:
 def test_the_page_and_its_files_are_asked_for_again_after_an_update(tmp_path, monkeypatch):
     """Without Cache-Control the browser guessed how long a file stays fresh,
     and after an update kept the old stylesheet beside the new script."""
-    monkeypatch.setenv("CANOPEN_BENCH_DATA", str(tmp_path))
-    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(data=tmp_path)) as client:
         for url in ("/", "/static/styles.css", "/static/app.js"):
             assert client.get(url).headers["cache-control"] == "no-cache", url
         page = client.get("/").text
