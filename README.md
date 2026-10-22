@@ -115,8 +115,8 @@ the Setup page; copy a folder to clone or back up a bench. The data folder
 is chosen under Setup > Folders and kept per user (`%APPDATA%\CANopen-Bench`,
 `~/.config/canopen-bench`), so the bench finds it wherever it is started
 from; on the first start it is `./data` where there is one, else
-`~/CANopen-Bench`. `$CANOPEN_BENCH_DATA` names it for one start (a script,
-a mounted Docker volume). `--db <path>` remains as an expert override for a
+`~/CANopen-Bench`. `--data <folder>` names it for one start (a second bench
+beside the everyday one, a mounted Docker volume). `--db <path>` remains as an expert override for a
 single explicit database file.
 
 Flows and EDS files a package ships are written over in the workspace on

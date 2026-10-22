@@ -13,8 +13,7 @@ RUN pip install --no-cache-dir .
 
 # All workspaces (db, EDS files, traces, test cases, results) live under
 # one volume — back up or migrate by copying the folder.
-ENV CANOPEN_BENCH_DATA=/data
 VOLUME /data
 
 EXPOSE 8000
-CMD ["canopen-bench", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["canopen-bench", "--host", "0.0.0.0", "--port", "8000", "--data", "/data"]
