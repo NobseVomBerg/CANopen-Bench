@@ -986,8 +986,8 @@ class Bench:
         #: the data folder this bench runs on, and the one the next start
         #: will — chosen under Setup, kept per user (usersettings)
         self.data_folder = str(workspaces_root.resolve()) if workspaces_root else ""
-        self.data_folder_next = (usersettings.load().get("data") or self.data_folder
-                                 if workspaces_root else "")
+        chosen = usersettings.load().get("data") if workspaces_root else None
+        self.data_folder_next = str(Path(chosen).resolve()) if chosen else self.data_folder
         self.on_workspace_switch: Callable[[str], None] | None = None
         # GUI plugin install (Setup > Extensions): one directory next to the
         # workspaces, shared across all of them since plugins are a process
@@ -1339,24 +1339,19 @@ class Bench:
         self.panel_busy = False  # a box- or page-wide read is walking the objects
         self.symbols_dir = db.path.parent / "symbols"
         self.symbols: SymbolTables = self._load_symbols()
-        # test-config paths default into the workspace folder; the default is
-        # computed (not persisted) so a copied workspace keeps pointing at its
-        # own copy — act_set_path persists once the user configures something
-        stored_paths = db.get("paths")
-        if stored_paths is None:
-            stored_paths = {"tc": str(db.path.parent / "testcases"),
-                            "res": str(db.path.parent / "results"),
-                            "fw": str(db.path.parent / "firmware")}
-            for p in stored_paths.values():
-                Path(p).mkdir(parents=True, exist_ok=True)
-        elif "fw" not in stored_paths:
-            # a workspace configured before the firmware folder existed:
-            # it gets the default a fresh one gets, written back so the
-            # setup page shows a folder rather than an empty field
-            stored_paths["fw"] = str(db.path.parent / "firmware")
-            Path(stored_paths["fw"]).mkdir(parents=True, exist_ok=True)
-            db.set("paths", stored_paths)
-        self.paths = stored_paths
+        # the test-case, results and firmware folders are the workspace's own
+        # subfolders, computed rather than stored so a copied or moved
+        # workspace keeps pointing at its own copy. Folders elsewhere are a
+        # choice ("custom folders" under Setup); a workspace that already
+        # had one keeps it.
+        self.paths_custom: bool = db.get("paths_custom")
+        if self.paths_custom is None:
+            stored = db.get("paths") or {}
+            self.paths_custom = any(stored.get(k) and Path(stored[k]) != Path(v)
+                                    for k, v in self._default_paths().items())
+        self.paths = self._chosen_paths()
+        # the results folder's run count, recounted only when it changed
+        self._report_count_cache: tuple[tuple | None, int] = (None, 0)
         # the firmware library, once, so a download started before the
         # page was ever drawn still has a version selected
         self._fw_catalog()
@@ -1763,6 +1758,19 @@ class Bench:
         # never on any disk, and a link to a 404 is worse than plain text
         self.reports = [{"name": name, "file": name,
                          "score": f"{passed}/{total}", "ok": ok}] + self.reports[:4]
+
+    def _report_count(self) -> int:
+        """Runs in the results folder, one summary each — not the few this
+        start made, which after a restart are none: a full folder read
+        "0 reports". Counted again only when the folder changed."""
+        folder = Path(self.paths.get("res") or "")
+        try:
+            key = (str(folder), folder.stat().st_mtime_ns)
+        except OSError:
+            return 0
+        if self._report_count_cache[0] != key:
+            self._report_count_cache = (key, sum(1 for _ in folder.glob(reportlib.SUMMARY_GLOB)))
+        return self._report_count_cache[1]
 
     def _report_stamp(self) -> str:
         """The run's own stamp, so every file it writes shares one — the
@@ -3010,6 +3018,42 @@ class Bench:
         self.db.set("scan_range", [lo, hi])
         self.log(f"CFG  scan range set to node-id {lo}…{hi}")
 
+    def _default_paths(self) -> dict[str, str]:
+        ws = self.db.path.parent
+        return {"tc": str(ws / "testcases"), "res": str(ws / "results"),
+                "fw": str(ws / "firmware")}
+
+    def _chosen_paths(self) -> dict[str, str]:
+        """The folders in use: the workspace's own, or with custom folders
+        on, the ones chosen (a gap filled from the defaults). Only the
+        workspace's own are created — a chosen one that is missing is a
+        typo or a share not mounted today, not a folder to make."""
+        paths = self._default_paths()
+        for folder in paths.values():
+            Path(folder).mkdir(parents=True, exist_ok=True)
+        if self.paths_custom:
+            paths |= {k: v for k, v in (self.db.get("paths") or {}).items() if k in paths and v}
+        return paths
+
+    def _use_paths(self, paths: dict[str, str]) -> None:
+        changed = {k for k in paths if paths[k] != self.paths.get(k)}
+        self.paths = paths
+        if "tc" in changed:
+            self._load_testcases()
+        if "fw" in changed:
+            # the cache is keyed by file name, and another folder may hold
+            # the same name — nothing of the old one survives
+            self._fw_cache.clear()
+
+    def act_paths_custom(self, p: dict) -> None:
+        """Custom folders on or off. Off, the workspace's own subfolders are
+        used again and cannot be edited by accident; the chosen ones stay
+        stored, so on brings them back."""
+        self.paths_custom = bool(p.get("on"))
+        self.db.set("paths_custom", self.paths_custom)
+        self._use_paths(self._chosen_paths())
+        self.log("CFG  folders: " + ("custom" if self.paths_custom else "the workspace's own"))
+
     def act_set_path(self, p: dict) -> None:
         which, value = p["which"], p["value"]
         if which == "eds":
@@ -3019,14 +3063,13 @@ class Bench:
             self._set_data_folder(str(value).strip())
             return
         if which in self.paths:
-            self.paths[which] = value
-            self.db.set("paths", self.paths)
-            if which == "tc":
-                self._load_testcases()
-            elif which == "fw":
-                # the cache is keyed by file name, and another folder may
-                # hold the same name — nothing of the old one survives
-                self._fw_cache.clear()
+            # setting a folder is choosing one: Setup asks for the box to be
+            # ticked first, a script just says which folder it wants
+            if not self.paths_custom:
+                self.paths_custom = True
+                self.db.set("paths_custom", True)
+            self.db.set("paths", self.paths | {which: value})
+            self._use_paths(self._chosen_paths())
 
     def _set_data_folder(self, value: str) -> None:
         """The data folder of the next start (empty = this one again). Kept
@@ -3293,6 +3336,8 @@ class Bench:
     def act_browse_open(self, p: dict) -> None:
         which = p.get("which")
         if which not in ("eds", "data") and which not in self.paths:
+            return
+        if which in self.paths and not self.paths_custom:
             return
         configured = (str(self.db.eds_dir) if which == "eds" else
                       self.data_folder_next if which == "data" else self.paths[which])
@@ -7827,6 +7872,8 @@ class Bench:
             },
             "raw": self.raw_rows,
             "sync": {"run": self.sync_run, "ms": self.sync_ms},
+            "reportCount": self._report_count(),
+            "pathsCustom": self.paths_custom,
             "tests": {
                 # the last column is what act_run_start's DUT guard reads:
                 # a case addressing its device by code carries its own
