@@ -67,3 +67,54 @@ def test_setup_leaves_a_folder_the_environment_names_alone(elsewhere, monkeypatc
     bench.dispatch("set_path", {"which": "data", "value": str(tmp_path / "shared")})
     assert usersettings.load() == {}
     assert "set by CANOPEN_BENCH_DATA" in bench.logs[-1]["msg"]
+
+
+# -- the folders of a workspace ------------------------------------------------
+
+def _ws_bench(tmp_path) -> Bench:
+    return Bench(Db(tmp_path / "ws" / "canopen-bench.db"), plugins=[])
+
+
+def test_a_workspace_uses_its_own_folders_and_shows_them_locked(tmp_path):
+    bench = _ws_bench(tmp_path)
+    snap = bench.snapshot()
+    assert not snap["pathsCustom"]
+    assert snap["paths"]["res"] == str(tmp_path / "ws" / "results")
+    assert (tmp_path / "ws" / "firmware").is_dir()
+
+
+def test_a_workspace_that_had_a_folder_elsewhere_keeps_it(tmp_path):
+    db = Db(tmp_path / "ws" / "canopen-bench.db")
+    db.set("paths", {"tc": str(tmp_path / "ws" / "testcases"), "res": str(tmp_path / "ws" / "results"),
+                     "fw": str(tmp_path / "build")})
+    bench = Bench(db, plugins=[])
+    assert bench.paths_custom and bench.paths["fw"] == str(tmp_path / "build")
+
+
+def test_custom_folders_off_and_on_again(tmp_path):
+    """Off, the workspace's own folders are back and cannot be changed by
+    accident; the chosen ones stay stored, so on brings them back."""
+    bench = _ws_bench(tmp_path)
+    bench.dispatch("set_path", {"which": "fw", "value": str(tmp_path / "build")})
+    assert bench.paths_custom, "choosing a folder is choosing custom folders"
+    bench.dispatch("paths_custom", {"on": False})
+    assert bench.paths["fw"] == str(tmp_path / "ws" / "firmware")
+    bench.dispatch("browse_open", {"which": "fw"})
+    assert bench.browse is None, "a locked folder offers nothing to browse"
+    bench.dispatch("paths_custom", {"on": True})
+    assert bench.paths["fw"] == str(tmp_path / "build")
+    assert Bench(Db(tmp_path / "ws" / "canopen-bench.db"), plugins=[]).paths["fw"] == str(tmp_path / "build")
+
+
+def test_the_reports_are_counted_in_the_folder_not_in_this_start(tmp_path):
+    """After a restart the runs of this start are none, and a full results
+    folder read "0 reports"."""
+    results = tmp_path / "ws" / "results"
+    results.mkdir(parents=True)
+    for stamp in ("20261020_090000", "20261021_090000"):
+        (results / f"{stamp}__summary.json").write_text("{}", encoding="utf-8")
+        (results / f"{stamp}__summary.html").write_text("", encoding="utf-8")
+    bench = _ws_bench(tmp_path)
+    assert bench.snapshot()["reportCount"] == 2
+    (results / "20261022_090000__summary.json").write_text("{}", encoding="utf-8")
+    assert bench.snapshot()["reportCount"] == 3
