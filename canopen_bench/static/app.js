@@ -715,22 +715,22 @@ function SetupPage({ s }) {
     reader.readAsDataURL(file);  // data: URL — base64 payload after the comma
     ev.target.value = '';
   };
-  // one folder: its name and what is in it on one line, the path under it.
+  // one folder per line: its name, the path, Browse, and what is in it.
   // Locked, the field shows the folder without letting it be edited, and
-  // Browse says why it does nothing
+  // Browse says why it does nothing. Indented, it is one inside the workspace
   const ownFolder = "The workspace's own subfolder — tick 'custom folders' to choose another";
-  const folderRow = ({ label, which, value, note, warn, locked, why, title }) => html`
-    <div style="display:flex;flex-direction:column;gap:3px" title=${title}>
-      <div style="display:flex;align-items:baseline;gap:10px">
-        <span style="font-size:11px;color:var(--dim);font-weight:600;white-space:nowrap">${label}</span>
-        <span style="flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:${warn ? 'var(--amb)' : 'var(--faint)'}">${note}</span>
-      </div>
-      <div style="display:flex;gap:6px">
-        <${SyncInput} value=${value || ''} disabled=${locked} title=${locked ? why : ''}
-          onCommit=${(v) => send('set_path', { which, value: v })} style="flex:1;min-width:0;${inputStyle};${locked ? 'opacity:.65' : ''}" />
-        <span class=${locked ? '' : 'hv'} title=${locked ? why : ''} onClick=${() => { if (!locked) send('browse_open', { which }); }}
-          style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;white-space:nowrap;cursor:${locked ? 'not-allowed;opacity:.45' : 'pointer'}">Browse…</span>
-      </div>
+  const rowLabel = (text, indent) => html`
+    <span style="width:${indent ? 98 : 110}px;flex:none;font-size:11px;color:var(--dim);font-weight:600">${text}</span>`;
+  const rowNote = (note, warn) => html`
+    <span title=${note} style="flex:0 1 200px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:${warn ? 'var(--amb)' : 'var(--faint)'}">${note}</span>`;
+  const folderRow = ({ label, which, value, note, warn, locked, why, title, indent }) => html`
+    <div style="display:flex;align-items:center;gap:8px;${indent ? 'padding-left:12px;' : ''}" title=${title}>
+      ${rowLabel(label, indent)}
+      <${SyncInput} value=${value || ''} disabled=${locked} title=${locked ? why : ''}
+        onCommit=${(v) => send('set_path', { which, value: v })} style="flex:1;min-width:0;${inputStyle};${locked ? 'opacity:.65' : ''}" />
+      <span class=${locked ? '' : 'hv'} title=${locked ? why : ''} onClick=${() => { if (!locked) send('browse_open', { which }); }}
+        style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;white-space:nowrap;cursor:${locked ? 'not-allowed;opacity:.45' : 'pointer'}">Browse…</span>
+      ${rowNote(note, warn)}
     </div>`;
   const mcOpt = (key, text, note) => html`
     <label onClick=${() => send('mc_opt', { key })} style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -739,31 +739,6 @@ function SetupPage({ s }) {
 
   return html`
   <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-content:start;min-height:0">
-    ${s.workspaces.canSwitch && html`
-    <div style="grid-column:1 / -1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 16px;display:flex;align-items:center;gap:12px">
-      <span style="font-weight:600;font-size:13px">Workspace</span>
-      <${OptionSelect} value=${s.workspace}
-        options=${s.workspaces.list.map((w) => [w, w])}
-        style=${`border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 8px;font:12px ${MONO};outline:none;min-width:160px`}
-        onPick=${(name, e) => {
-          // put the box back by hand, and at once: it names the workspace
-          // that is open until the switch has happened, and the memo returns
-          // the identical vnode while `value` is unchanged — a declined
-          // switch would leave the new name showing over the old workspace
-          e.target.value = s.workspace;
-          if (!name || name === s.workspace) return;
-          ask({ title: 'Switch workspace', ok: 'Switch',
-                text: `Switch to workspace "${name}"? The bus will be disconnected.` })
-            .then((yes) => { if (yes) send('workspace_switch', { name }); });
-        }} />
-      <span class="hv" onClick=${() => ask({
-          title: 'New workspace', input: '', placeholder: 'name', ok: 'Create',
-          text: 'The bench switches to it at once — the bus will be disconnected.',
-          note: 'letters, digits, space and . _ - only',
-        }).then((name) => { if (name) send('workspace_create', { name }); })}
-        style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer">＋ New…</span>
-      <span style="font-size:10.5px;color:var(--faint)">each workspace keeps its own EDS files, machine-control state, test config and captures · folder: <span style="font-family:${MONO};user-select:all">${s.workspaces.folder}</span></span>
-    </div>`}
     <div style=${BOX}>
       <div style="font-weight:600;font-size:13px">Bus interface</div>
       <!-- grid, not a wrapping flex row: with flex-grow a card that wraps into
@@ -835,12 +810,6 @@ function SetupPage({ s }) {
 
     <div style=${BOX}>
       <div style="font-weight:600;font-size:13px">EDS files</div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <span style="font-size:11px;color:var(--dim);font-weight:600;flex:none">EDS FOLDER</span>
-        <${SyncInput} value=${s.paths.eds} title="Folder holding the registered EDS files — e.g. a central pool shared between workspaces. Clear the field to reset to the workspace default."
-          onCommit=${(v) => send('set_path', { which: 'eds', value: v })} style="flex:1;${inputStyle}" />
-        <span class="hv" onClick=${() => send('browse_open', { which: 'eds' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>
-      </div>
       <div style="font-size:11px;color:var(--dim);font-weight:600">DEVICE PROFILES <span style="font-weight:400;color:var(--faint)">· active files are matched to devices on scan via Identity (0x1018)</span></div>
       <input type="file" id="eds-file-input" accept=".eds,.dcf" style="display:none" onChange=${handleEdsFile} />
       <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
@@ -1003,14 +972,8 @@ function SetupPage({ s }) {
       ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
     </div>
 
-    <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-weight:600;font-size:13px">Folders</span>
-        <span style="flex:1"></span>
-        <label onClick=${() => send('paths_custom', { on: !s.pathsCustom })}
-          title="Off, test cases, results and firmware are the workspace's own subfolders and cannot be changed by accident"
-          style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--mid)">${Cb(s.pathsCustom, 'flex:none;')}custom folders</label>
-      </div>
+    <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <span style="font-weight:600;font-size:13px;margin-bottom:4px">Folders</span>
       ${s.workspaces.data && folderRow({ label: 'DATA FOLDER', which: 'data', value: s.workspaces.dataNext,
           locked: s.workspaces.dataFixed, why: 'Set by CANOPEN_BENCH_DATA for this start (a start script, Docker) — change it there',
           warn: s.workspaces.dataNext !== s.workspaces.data,
@@ -1018,13 +981,48 @@ function SetupPage({ s }) {
             : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — now ${s.workspaces.data}`
             : 'the workspaces are its subfolders',
           title: 'Where the workspaces live, each a subfolder. Kept per user, so the bench finds it wherever it is started from.' })}
-      ${folderRow({ label: 'TESTCASES FOLDER', which: 'tc', value: s.paths.tc, locked: !s.pathsCustom, why: ownFolder,
+      ${s.workspaces.canSwitch && html`
+      <div style="display:flex;align-items:center;gap:8px" title=${`A subfolder of the data folder: ${s.workspaces.folder}`}>
+        ${rowLabel('WORKSPACE')}
+        <${OptionSelect} value=${s.workspace}
+          options=${s.workspaces.list.map((w) => [w, w])}
+          style=${`flex:1;min-width:0;${inputStyle}`}
+          onPick=${(name, e) => {
+            // put the box back by hand, and at once: it names the workspace
+            // that is open until the switch has happened, and the memo returns
+            // the identical vnode while `value` is unchanged — a declined
+            // switch would leave the new name showing over the old workspace
+            e.target.value = s.workspace;
+            if (!name || name === s.workspace) return;
+            ask({ title: 'Switch workspace', ok: 'Switch',
+                  text: `Switch to workspace "${name}"? The bus will be disconnected.` })
+              .then((yes) => { if (yes) send('workspace_switch', { name }); });
+          }} />
+        <span class="hv" onClick=${() => ask({
+            title: 'New workspace', input: '', placeholder: 'name', ok: 'Create',
+            text: 'The bench switches to it at once — the bus will be disconnected.',
+            note: 'letters, digits, space and . _ - only',
+          }).then((name) => { if (name) send('workspace_create', { name }); })}
+          style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">＋ New…</span>
+        ${rowNote('its own db, EDS files, machine-control state, test config and captures · switching disconnects the bus')}
+      </div>`}
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <span style="font-size:10.5px;color:var(--faint);white-space:nowrap">in the workspace</span>
+        <span style="flex:1;border-top:1px solid var(--bd2)"></span>
+        <label onClick=${() => send('paths_custom', { on: !s.pathsCustom })}
+          title="Off, these are the workspace's own subfolders and cannot be changed by accident"
+          style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--mid);white-space:nowrap">${Cb(s.pathsCustom, 'flex:none;')}custom folders</label>
+      </div>
+      ${folderRow({ label: 'TESTCASES', which: 'tc', value: s.paths.tc, locked: !s.pathsCustom, why: ownFolder, indent: true,
           note: `${s.tests.fileCount} test case file${s.tests.fileCount === 1 ? '' : 's'}` })}
-      ${folderRow({ label: 'RESULTS FOLDER', which: 'res', value: s.paths.res, locked: !s.pathsCustom, why: ownFolder,
+      ${folderRow({ label: 'RESULTS', which: 'res', value: s.paths.res, locked: !s.pathsCustom, why: ownFolder, indent: true,
           note: `${s.reportCount} report${s.reportCount === 1 ? '' : 's'}` })}
-      ${folderRow({ label: 'FIRMWARE FOLDER', which: 'fw', value: s.paths.fw, locked: !s.pathsCustom, why: ownFolder,
+      ${folderRow({ label: 'FIRMWARE', which: 'fw', value: s.paths.fw, locked: !s.pathsCustom, why: ownFolder, indent: true,
           note: 'listed on the SWDL page',
           title: 'The folder the SWDL page lists firmware files from — often the build output folder of the firmware project. What each file is comes from the extension that knows the format.' })}
+      ${folderRow({ label: 'EDS', which: 'eds', value: s.paths.eds, locked: !s.pathsCustom, why: ownFolder, indent: true,
+          note: `${s.eds.files.length} EDS file${s.eds.files.length === 1 ? '' : 's'}`,
+          title: 'The registered EDS files — with custom folders, e.g. a pool shared between workspaces' })}
     </div>
 
   </div>`;

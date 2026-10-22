@@ -977,6 +977,15 @@ class Bench:
                  plugins: list[BenchPlugin] | None = None,
                  workspaces_root: Path | None = None):
         self.db = db
+        # the EDS folder is one of the workspace's folders (see paths_custom),
+        # settled here, before anything reads it: one chosen before that
+        # existed becomes one of the stored choices, and with custom folders
+        # off it is the workspace's own
+        stored = db.get("paths") or {}
+        if db.get("eds_dir") and "eds" not in stored:
+            db.set("paths", stored | {"eds": db.get("eds_dir")})
+        if db.get("paths_custom") is False and db.get("eds_dir"):
+            db.set_eds_dir("")
         # multi-workspace mode: every subfolder of the root is one workspace
         # (db + eds/traces/flows inside); the app layer swaps the Bench on
         # switch and registers the callback below
@@ -1348,7 +1357,8 @@ class Bench:
         if self.paths_custom is None:
             stored = db.get("paths") or {}
             self.paths_custom = any(stored.get(k) and Path(stored[k]) != Path(v)
-                                    for k, v in self._default_paths().items())
+                                    for k, v in self._default_paths().items()) \
+                or db.eds_dir != db.path.parent / "eds"
         self.paths = self._chosen_paths()
         # the results folder's run count, recounted only when it changed
         self._report_count_cache: tuple[tuple | None, int] = (None, 0)
@@ -3052,24 +3062,31 @@ class Bench:
         self.paths_custom = bool(p.get("on"))
         self.db.set("paths_custom", self.paths_custom)
         self._use_paths(self._chosen_paths())
+        self._use_eds_dir()
         self.log("CFG  folders: " + ("custom" if self.paths_custom else "the workspace's own"))
 
     def act_set_path(self, p: dict) -> None:
         which, value = p["which"], p["value"]
-        if which == "eds":
-            self._set_eds_dir(str(value).strip())
-            return
         if which == "data":
             self._set_data_folder(str(value).strip())
             return
-        if which in self.paths:
+        if which in self.paths or which == "eds":
             # setting a folder is choosing one: Setup asks for the box to be
             # ticked first, a script just says which folder it wants
             if not self.paths_custom:
                 self.paths_custom = True
                 self.db.set("paths_custom", True)
-            self.db.set("paths", self.paths | {which: value})
+            value = str(value).strip() if which == "eds" else value
+            self.db.set("paths", (self.db.get("paths") or {}) | {which: value})
             self._use_paths(self._chosen_paths())
+            self._use_eds_dir()
+
+    def _use_eds_dir(self) -> None:
+        """The EDS folder the custom-folders choice says (empty = the
+        workspace's own), moved to only where it is another one."""
+        chosen = (self.db.get("paths") or {}).get("eds", "") if self.paths_custom else ""
+        if (self.db.get("eds_dir") or "") != chosen:
+            self._set_eds_dir(chosen)
 
     def _set_data_folder(self, value: str) -> None:
         """The data folder of the next start (empty = this one again). Kept
@@ -3337,7 +3354,7 @@ class Bench:
         which = p.get("which")
         if which not in ("eds", "data") and which not in self.paths:
             return
-        if which in self.paths and not self.paths_custom:
+        if (which in self.paths or which == "eds") and not self.paths_custom:
             return
         configured = (str(self.db.eds_dir) if which == "eds" else
                       self.data_folder_next if which == "data" else self.paths[which])
