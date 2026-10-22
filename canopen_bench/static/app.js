@@ -738,294 +738,299 @@ function SetupPage({ s }) {
     </label>`;
 
   return html`
-  <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-content:start;min-height:0">
-    <div style=${BOX}>
-      <div style="font-weight:600;font-size:13px">Bus interface</div>
-      <!-- grid, not a wrapping flex row: with flex-grow a card that wraps into
-           a row of its own stretches across the full panel, so the adapters
-           end up different sizes. Equal columns keep every card the same. -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px">
-        ${s.adapters.map((a) => {
-          const on = s.adapter === a.key;
-          return html`
-          <div class="hv-bd" onClick=${() => send('set_adapter', { adapter: a.key })}
-            style="min-width:0;border:1px solid ${on ? 'var(--acc)' : 'var(--bd)'};background:${on ? 'var(--acc-soft)' : 'var(--panel)'};border-radius:7px;padding:9px 11px;cursor:pointer">
-            <div style="font-weight:600;font-size:12px;color:${on ? 'var(--acc)' : 'var(--tx)'}">${a.label}</div>
-            <div style="font:10.5px ${MONO};color:var(--dim);margin-top:2px">${a.sub}</div>
-            <div style="font:10px ${MONO};color:var(--faint);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.driver || ''}</div>
-          </div>`;
-        })}
-      </div>
-      <div style="display:flex;gap:24px">
-        <div>
-          ${label('BITRATE')}
-          <div style="display:flex;gap:6px">
-            ${['125', '250', '500', '1000'].map((b) => {
-              const on = s.bitrate === b;
-              return html`<span onClick=${() => send('set_bitrate', { bitrate: b })}
-                style="border:1px solid ${on ? 'var(--acc)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'};font:600 11.5px ${MONO};padding:5px 12px;border-radius:6px;cursor:pointer">${b === '1000' ? '1 M' : b + ' k'}</span>`;
-            })}
-          </div>
+  <div style="flex:1;overflow:auto;padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;align-content:flex-start;min-height:0">
+    ${''/* two columns that stack their boxes each on its own, so a tall box
+          on one side leaves no gap on the other; one column where the page
+          is too narrow for two */}
+    <div style="flex:1 1 560px;min-width:0;display:flex;flex-direction:column;gap:14px">
+      <div style=${BOX}>
+        <div style="font-weight:600;font-size:13px">Bus interface</div>
+        <!-- grid, not a wrapping flex row: with flex-grow a card that wraps into
+             a row of its own stretches across the full panel, so the adapters
+             end up different sizes. Equal columns keep every card the same. -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px">
+          ${s.adapters.map((a) => {
+            const on = s.adapter === a.key;
+            return html`
+            <div class="hv-bd" onClick=${() => send('set_adapter', { adapter: a.key })}
+              style="min-width:0;border:1px solid ${on ? 'var(--acc)' : 'var(--bd)'};background:${on ? 'var(--acc-soft)' : 'var(--panel)'};border-radius:7px;padding:9px 11px;cursor:pointer">
+              <div style="font-weight:600;font-size:12px;color:${on ? 'var(--acc)' : 'var(--tx)'}">${a.label}</div>
+              <div style="font:10.5px ${MONO};color:var(--dim);margin-top:2px">${a.sub}</div>
+              <div style="font:10px ${MONO};color:var(--faint);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.driver || ''}</div>
+            </div>`;
+          })}
         </div>
-        ${s.adapter !== 'demo' && html`
-        <div title="Which channel of this adapter to open — empty uses the backend's default. Takes effect on the next connect.">
-          ${label('CHANNEL')}
-          <div style="display:flex;gap:6px;align-items:center">
-            <${SyncInput} value=${s.channel || ''} placeholder="default"
-              onCommit=${(v) => send('set_channel', { channel: v })}
-              style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:64px;outline:none;text-align:center" />
-            <span class="hv" onClick=${() => send('detect_channels')} title="ask the driver what is attached"
-              style="${btn.ghost}font-size:11px;padding:5px 11px;border-radius:6px;cursor:pointer;white-space:nowrap">Detect</span>
-          </div>
-          ${(s.channelList.adapter === s.adapter ? s.channelList.rows : []).map((c) => html`
-            <div class="hv" onClick=${() => send('set_channel', { channel: c.value })}
-              title="use this channel"
-              style="margin-top:4px;padding:3px 7px;border-radius:5px;cursor:pointer;font:10.5px ${MONO};color:${s.channel === c.value ? 'var(--acc)' : 'var(--faint)'}">
-              ${c.label}
-            </div>`)}
-        </div>`}
-        <div title="Cyclic SYNC frames (COB 0x080) — devices with synchronous TPDOs only transmit while a SYNC producer runs">
-          ${label('SYNC PRODUCER')}
-          <div style="display:flex;gap:8px;align-items:center">
-            ${toggle(s.sync.run, s.sync.run ? 'On' : 'Off', () => send('sync_toggle'),
-              `The bench is ${s.sync.run ? 'sending' : 'not sending'} SYNC — click to turn it ${s.sync.run ? 'off' : 'on'}`)}
-            <span style="font-size:11px;color:var(--dim)">every</span>
-            <${SyncInput} value=${String(s.sync.ms)} onCommit=${(v) => send('set_sync_ms', { ms: v })}
-              style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:52px;outline:none;text-align:right" />
-            <span style="font-size:11px;color:var(--dim)">ms</span>
-          </div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <label style="font-size:11px;color:var(--dim);font-weight:600;display:flex;flex-direction:column;gap:4px">ADDRESS RANGE (NODE-ID)
-          <${SyncInput} value=${`${s.scanRange[0]} – ${s.scanRange[1]}`} title="Node-ID range of this bus: addressing (teach) assigns IDs up to the upper end, and the scan probes exactly this range — e.g. 1 – 32 (a single number means just that node)"
-            onCommit=${(v) => { const m = v.match(/^\s*(\d+)(?:\D+(\d+))?\s*$/); if (m) send('set_scan_range', { from: +m[1], to: +(m[2] ?? m[1]) }); }} style=${inputStyle} />
-        </label>
-        <label style="font-size:11px;color:var(--dim);font-weight:600;display:flex;flex-direction:column;gap:4px">SDO TIMEOUT (MS)<input value="500" style=${inputStyle} /></label>
-        <label title="This tool's own CANopen node-ID as bus master, typically 126 or 127 — kept out of the auto-addressing range" style="font-size:11px;color:var(--dim);font-weight:600;display:flex;flex-direction:column;gap:4px">OWN NODE-ID
-          <${SyncInput} value=${String(s.ownNodeId)} onCommit=${(v) => send('set_own_node_id', { node_id: v })} style=${inputStyle} />
-        </label>
-      </div>
-    </div>
-
-    <div style=${BOX}>
-      <div style="font-weight:600;font-size:13px">EDS files</div>
-      <div style="font-size:11px;color:var(--dim);font-weight:600">DEVICE PROFILES <span style="font-weight:400;color:var(--faint)">· active files are matched to devices on scan via Identity (0x1018)</span></div>
-      <input type="file" id="eds-file-input" accept=".eds,.dcf" style="display:none" onChange=${handleEdsFile} />
-      <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
-        ${s.eds.files.map((e) => {
-          const on = e.enabled;
-          const used = s.devices.filter((d) => d.eds === e.file).length;
-          const hasVariant = !!e.variant_index;
-          const conflict = (e.conflict || []).length > 0;
-          const conflictTitle = conflict
-            ? `Identity conflict — same identity as ${e.conflict.join(', ')}. The newest file wins when matching devices${e.conflictWin ? ': this one' : ' — this file is shadowed'}.`
-            : '';
-          return html`
+        <div style="display:flex;gap:24px">
           <div>
-          <div class="hv" onClick=${() => send('eds_toggle', { file: e.file })}
-            style="display:grid;grid-template-columns:13px 1fr 48px 76px 100px 60px 40px 18px 18px;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--bd2);background:${on ? 'var(--sel)' : 'transparent'};cursor:pointer">
-            ${Cb(on)}
-            <span style="font:11.5px ${MONO};color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.file}</span>
-            <span onClick=${(ev) => ev.stopPropagation()}>
-              <${SyncInput} value=${e.code || '?'} onCommit=${(v) => send('eds_code', { file: e.file, code: v })}
-                title="Shortcode used in setup filenames"
-                style="border:1px solid var(--inp);background:var(--panel);color:var(--acc);font:600 10.5px ${MONO};border-radius:4px;padding:3px 5px;width:100%;box-sizing:border-box;text-align:center;outline:none" />
-            </span>
-            <span style="font-size:11px;color:var(--dim)">${e.dev}</span>
-            <span title=${conflict ? conflictTitle : 'Identity match: vendor · product code'} style="font:10.5px ${MONO};color:${conflict ? 'var(--amb)' : 'var(--faint)'}">${e.ident}</span>
-            <span onClick=${(ev) => { ev.stopPropagation(); setOpenVariant(openVariant === e.file ? null : e.file); }}
-              title="Configure per-device variant identification object"
-              style="font:10.5px ${MONO};color:${hasVariant ? 'var(--acc)' : 'var(--faint)'};cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hasVariant ? `${e.variant_index}:${e.variant_sub || '00'}` : 'variant…'}</span>
-            <span style="font:10.5px ${MONO};color:${used ? 'var(--grn)' : 'var(--faint)'};text-align:right">${used ? used + ' dev' : ''}</span>
-            <span title=${conflictTitle} style="color:var(--amb);font-size:11px;text-align:center">${conflict ? '⚠' : ''}</span>
-            <span onClick=${(ev) => { ev.stopPropagation(); send('eds_remove', { file: e.file }); }}
-              title="Remove EDS file" class="hv" style="color:var(--faint);cursor:pointer;text-align:center">✕</span>
+            ${label('BITRATE')}
+            <div style="display:flex;gap:6px">
+              ${['125', '250', '500', '1000'].map((b) => {
+                const on = s.bitrate === b;
+                return html`<span onClick=${() => send('set_bitrate', { bitrate: b })}
+                  style="border:1px solid ${on ? 'var(--acc)' : 'var(--inp)'};background:${on ? 'var(--acc-soft)' : 'transparent'};color:${on ? 'var(--acc)' : 'var(--mid)'};font:600 11.5px ${MONO};padding:5px 12px;border-radius:6px;cursor:pointer">${b === '1000' ? '1 M' : b + ' k'}</span>`;
+              })}
+            </div>
           </div>
-          ${openVariant === e.file && html`<${VariantEditor} e=${e} onClose=${() => setOpenVariant(null)} />`}
-          </div>`;
-        })}
-        <div class="hv" onClick=${() => document.getElementById('eds-file-input').click()}
-          style="padding:8px 11px;color:var(--acc);font-weight:600;font-size:11.5px;cursor:pointer">+ Add EDS file…</div>
+          ${s.adapter !== 'demo' && html`
+          <div title="Which channel of this adapter to open — empty uses the backend's default. Takes effect on the next connect.">
+            ${label('CHANNEL')}
+            <div style="display:flex;gap:6px;align-items:center">
+              <${SyncInput} value=${s.channel || ''} placeholder="default"
+                onCommit=${(v) => send('set_channel', { channel: v })}
+                style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:64px;outline:none;text-align:center" />
+              <span class="hv" onClick=${() => send('detect_channels')} title="ask the driver what is attached"
+                style="${btn.ghost}font-size:11px;padding:5px 11px;border-radius:6px;cursor:pointer;white-space:nowrap">Detect</span>
+            </div>
+            ${(s.channelList.adapter === s.adapter ? s.channelList.rows : []).map((c) => html`
+              <div class="hv" onClick=${() => send('set_channel', { channel: c.value })}
+                title="use this channel"
+                style="margin-top:4px;padding:3px 7px;border-radius:5px;cursor:pointer;font:10.5px ${MONO};color:${s.channel === c.value ? 'var(--acc)' : 'var(--faint)'}">
+                ${c.label}
+              </div>`)}
+          </div>`}
+          <div title="Cyclic SYNC frames (COB 0x080) — devices with synchronous TPDOs only transmit while a SYNC producer runs">
+            ${label('SYNC PRODUCER')}
+            <div style="display:flex;gap:8px;align-items:center">
+              ${toggle(s.sync.run, s.sync.run ? 'On' : 'Off', () => send('sync_toggle'),
+                `The bench is ${s.sync.run ? 'sending' : 'not sending'} SYNC — click to turn it ${s.sync.run ? 'off' : 'on'}`)}
+              <span style="font-size:11px;color:var(--dim)">every</span>
+              <${SyncInput} value=${String(s.sync.ms)} onCommit=${(v) => send('set_sync_ms', { ms: v })}
+                style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:5px 8px;font:11.5px ${MONO};width:52px;outline:none;text-align:right" />
+              <span style="font-size:11px;color:var(--dim)">ms</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <label style="font-size:11px;color:var(--dim);font-weight:600;display:flex;flex-direction:column;gap:4px">ADDRESS RANGE (NODE-ID)
+            <${SyncInput} value=${`${s.scanRange[0]} – ${s.scanRange[1]}`} title="Node-ID range of this bus: addressing (teach) assigns IDs up to the upper end, and the scan probes exactly this range — e.g. 1 – 32 (a single number means just that node)"
+              onCommit=${(v) => { const m = v.match(/^\s*(\d+)(?:\D+(\d+))?\s*$/); if (m) send('set_scan_range', { from: +m[1], to: +(m[2] ?? m[1]) }); }} style=${inputStyle} />
+          </label>
+          <label style="font-size:11px;color:var(--dim);font-weight:600;display:flex;flex-direction:column;gap:4px">SDO TIMEOUT (MS)<input value="500" style=${inputStyle} /></label>
+          <label title="This tool's own CANopen node-ID as bus master, typically 126 or 127 — kept out of the auto-addressing range" style="font-size:11px;color:var(--dim);font-weight:600;display:flex;flex-direction:column;gap:4px">OWN NODE-ID
+            <${SyncInput} value=${String(s.ownNodeId)} onCommit=${(v) => send('set_own_node_id', { node_id: v })} style=${inputStyle} />
+          </label>
+        </div>
       </div>
-    </div>
 
-    <${PsuBox} psu=${s.psu} />
+      <${PsuBox} psu=${s.psu} />
 
-    <div style=${BOX}>
-      <div style="display:flex;align-items:center;gap:10px;min-width:0">
-        <span style="font-weight:600;font-size:13px;flex:none">Extensions</span>
-        ${(s.ext?.plugins || []).length
-          ? html`<span style="flex:none;font:600 10px ${MONO};background:var(--grn-soft);color:var(--grn);padding:2px 8px;border-radius:9px">${s.ext.plugins.length} PLUGIN${s.ext.plugins.length > 1 ? 'S' : ''}</span>
-                 <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 11px ${MONO};color:var(--tx)">${s.ext.plugins.join(' · ')}</span>`
-          : html`<span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>`}
-      </div>
-      ${''/* the sentence on its own line rather than trailing the names: at
-            half the page's width it was the part that got ellipsed away, and
-            it is the part that says what a plugin actually does here */}
-      <div style="font-size:10.5px;color:var(--faint);line-height:1.5">
-        ${(s.ext?.plugins || []).length
-          ? 'Vendor packages loaded — their adapters, addressing procedures, EDS seeds and panels are active.'
-          : 'Vendor-specific features — addressing procedures & session identities, special adapters, SWDL protocols — ship as separately installed plugin packages.'}
-      </div>
-      ${!!s.ext?.installed?.length && html`
-        <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
-          ${s.ext.installed.map((pkg) => html`
-            <div style="display:flex;align-items:center;gap:10px;padding:6px 11px;border-bottom:1px solid var(--bd2);font-size:11.5px">
-              <span style="font:600 11px ${MONO};color:var(--tx)">${pkg.name}</span>
-              <span style="font:10.5px ${MONO};color:var(--faint)">v${pkg.version}</span>
-              <span style="margin-left:auto;color:var(--faint)">installed package</span>
-              <span class="hv" onClick=${() => send('plugin_remove', { pkg: pkg.name })} title="remove this package"
-                style="color:var(--faint);cursor:pointer">✕</span>
+      ${''/* Every addressing procedure is a flow file, the vendor's or the
+            core's. One of them (●) is what machine control falls back on
+            when a verification fails; any of them can address the bus now.
+            A flow with a `button:` header is pressed rather than chosen:
+            the words on its button are the file's. */}
+      <div style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-weight:600;font-size:13px">Addressing</span>
+          <span style="font-size:10.5px;color:var(--faint)">each procedure is a flow file · ● is the one machine control re-addresses with when a verification fails</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${[...(mc.flows || []).map((file) => ({ file, chosen: file === mc.teachFlow, act: () => send('mc_readdress', { file }), label: 'Run',
+                title: 'Addresses across the whole address range (Bus interface) and adopts the freshly addressed bus as the expected state' })),
+             ...(mc.procedures || []).map((proc) => ({ file: proc.file, act: () => send('mc_procedure', { file: proc.file }), label: proc.label,
+                title: `Runs the procedure in ${proc.file} once — no session is distributed and nothing is adopted` }))].map((row) => html`
+            <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--bd2);border-radius:7px;padding:6px 10px">
+              ${row.chosen === undefined
+                ? html`<span style="width:14px"></span>`
+                : html`<span class="hv" onClick=${() => send('mc_flow', { file: row.file })} title=${row.chosen ? 'Machine control re-addresses with this procedure' : 'Let machine control re-address with this procedure'}
+                    style="width:14px;cursor:pointer;font-size:13px;color:${row.chosen ? 'var(--acc)' : 'var(--faint)'}">${row.chosen ? '●' : '○'}</span>`}
+              <span style="flex:1;font-size:12px;color:var(--tx)">${mc.flowNames?.[row.file] || row.file}</span>
+              <span style="font:10.5px ${MONO};color:var(--faint)">${row.file}</span>
+              <span class="hv" onClick=${row.act} title=${row.title}
+                style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">${row.label}</span>
             </div>`)}
-        </div>`}
-      ${s.ext?.canInstall && html`
-        <div style="margin-top:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-                    border-top:1px solid var(--bd2);padding-top:9px">
-          <input type="file" id="plugin-file-input" accept=".whl" style="display:none" onChange=${handlePluginFile} />
-          <span class="hv" onClick=${() => document.getElementById('plugin-file-input').click()}
-            style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;flex:none">+ Install plugin…</span>
-          <span style="flex:1;min-width:180px;font-size:10.5px;color:var(--faint);line-height:1.5">A plugin package (.whl) — extracted and activated immediately, no restart. Plugins are executable code: only install packages from a source you trust.</span>
-        </div>`}
-    </div>
-
-    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-weight:600;font-size:13px">Machine control</span>
-        <span style="font-size:10.5px;color:var(--faint)">tool acts as CANopen master · checks the bus against the expected state</span>
-        ${toggle(mc.enabled, 'Machine Control', () => send('mc_toggle'),
-          `Machine Control is ${mc.enabled ? 'active — the bench acts as CANopen master. Click to hand that back' : 'inactive. Click to let the bench act as CANopen master'}`,
-          'margin-left:auto;')}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1.2fr 1.1fr;gap:14px">
-        <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12px">
-          <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Expected state</span><span style="font:600 11px ${MONO};color:${mc.ref ? 'var(--tx)' : 'var(--faint)'}">${mc.ref ? `${mc.ref.expected} device(s) · ${mc.ref.adopted || ''}` : 'not adopted yet'}</span></div>
-          <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Session-ID</span><span style="font:600 11px ${MONO};color:${mc.session ? 'var(--acc)' : 'var(--faint)'}" title=${mc.session ? '' : 'distributed by the next addressing run — needs an addressing provider (vendor plugin)'}>${mc.session || '—'}</span></div>
-          <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Devices</span><span style="font:600 11px ${MONO};color:${mc.last ? 'var(--tx)' : 'var(--faint)'}">${mc.last ? `${mc.found} / ${mc.expected} found` : '—'}</span></div>
-          <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Last check</span><span style="font:600 11px ${MONO};color:var(--faint)">${mc.last || '—'}</span></div>
-          <span class="hv" onClick=${() => send('mc_adopt')} title="Store the scanned devices, their EDS assignments and the session-ID as the expected state — stored in the workspace, verified by Scan & verify"
-            style="${btn.ghost}font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;text-align:center;margin-top:2px">⟲ Adopt current state as expected</span>
         </div>
-        <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+        ${mc.teach && html`
+        <div style="border:1px solid var(--acc-bd);background:var(--acc-soft);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:11.5px;color:var(--acc);font-weight:600">${mc.teach.name || 'Addressing'} ${mc.teach.step}/${mc.teach.of} — ${mc.teach.text}</div>
           <div style="display:flex;gap:8px">
-            <span class="hv-b" onClick=${() => send('mc_verify')} style="${btn.acc}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${mc.busy ? 'Scanning…' : '⌕ Scan & verify'}</span>
+            ${s.adapter === 'demo' && html`<span class="hv-b" onClick=${() => send('demo_press')} style="${btn.acc}font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Simulate button press</span>`}
+            <span class="hv" onClick=${() => send('mc_teach_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Abort</span>
           </div>
-          ${mc.last
-            ? html`<div style="font-size:11.5px;color:${mc.result === 'ok' ? 'var(--grn)' : 'var(--red)'};line-height:1.5">${mc.result === 'ok' ? '✓ Expected state valid — all devices found, EDS assignments match.' : '⚠ Mismatch — devices missing or wrong EDS assignment.'}</div>`
-            : html`<div style="font-size:11.5px;color:var(--faint);line-height:1.5">No verification yet — adopt an expected state, then Scan & verify.</div>`}
-          <div style="font-size:10.5px;color:var(--faint);line-height:1.5">Verification: a fresh scan must find every expected device with its assigned EDS. On mismatch the bus is re-addressed${mc.autoReaddr ? ' automatically' : ' after confirmation'}.</div>
-          ${mc.enabled && mc.ref && html`
-            <div style="font-size:11.5px;line-height:1.5;color:${mc.hbLost.length ? 'var(--red)' : 'var(--faint)'}">
-              ${mc.hbLost.length
-                ? `⚠ Heartbeat lost — node${mc.hbLost.length > 1 ? 's' : ''} ${mc.hbLost.map((n) => String(n).padStart(2, '0')).join(', ')}`
-                : `♥ Heartbeat monitoring — watching ${Object.keys(mc.ref.assignments || {}).length} device(s), timeout ${mc.hbTimeoutMs} ms`}
-            </div>`}
+        </div>`}
+        ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
+      </div>
+
+      <div style="background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-weight:600;font-size:13px">Machine control</span>
+          <span style="font-size:10.5px;color:var(--faint)">tool acts as CANopen master · checks the bus against the expected state</span>
+          ${toggle(mc.enabled, 'Machine Control', () => send('mc_toggle'),
+            `Machine Control is ${mc.enabled ? 'active — the bench acts as CANopen master. Click to hand that back' : 'inactive. Click to let the bench act as CANopen master'}`,
+            'margin-left:auto;')}
         </div>
-        <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:9px;font-size:12px;color:var(--mid)">
-          ${mcOpt('autoStart', 'Restore machine control state at startup', '(last on/off state is remembered · off = always start deactivated)')}
-          ${mcOpt('autoReaddr', 'Auto re-address when verification fails', '(default)')}
-          ${mcOpt('scanStart', 'Scan & verify on server start', '')}
-          <div style="display:flex;align-items:center;gap:8px" title="How long a monitored device may stay silent before Machine Control logs a heartbeat-lost alert">
-            <span style="font-size:11px;color:var(--dim)">Heartbeat timeout</span>
-            <${SyncInput} value=${String(mc.hbTimeoutMs)} onCommit=${(v) => send('mc_set_hb_timeout', { ms: v })}
-              style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 7px;font:11.5px ${MONO};width:64px;outline:none;text-align:right" />
-            <span style="font-size:11px;color:var(--dim)">ms</span>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px">
+          <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12px">
+            <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Expected state</span><span style="font:600 11px ${MONO};color:${mc.ref ? 'var(--tx)' : 'var(--faint)'}">${mc.ref ? `${mc.ref.expected} device(s) · ${mc.ref.adopted || ''}` : 'not adopted yet'}</span></div>
+            <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Session-ID</span><span style="font:600 11px ${MONO};color:${mc.session ? 'var(--acc)' : 'var(--faint)'}" title=${mc.session ? '' : 'distributed by the next addressing run — needs an addressing provider (vendor plugin)'}>${mc.session || '—'}</span></div>
+            <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Devices</span><span style="font:600 11px ${MONO};color:${mc.last ? 'var(--tx)' : 'var(--faint)'}">${mc.last ? `${mc.found} / ${mc.expected} found` : '—'}</span></div>
+            <div style="display:flex;justify-content:space-between;color:var(--mid)"><span>Last check</span><span style="font:600 11px ${MONO};color:var(--faint)">${mc.last || '—'}</span></div>
+            <span class="hv" onClick=${() => send('mc_adopt')} title="Store the scanned devices, their EDS assignments and the session-ID as the expected state — stored in the workspace, verified by Scan & verify"
+              style="${btn.ghost}font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;text-align:center;margin-top:2px">⟲ Adopt current state as expected</span>
+          </div>
+          <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;gap:8px">
+              <span class="hv-b" onClick=${() => send('mc_verify')} style="${btn.acc}font-size:11.5px;padding:6px 14px;border-radius:6px;cursor:pointer">${mc.busy ? 'Scanning…' : '⌕ Scan & verify'}</span>
+            </div>
+            ${mc.last
+              ? html`<div style="font-size:11.5px;color:${mc.result === 'ok' ? 'var(--grn)' : 'var(--red)'};line-height:1.5">${mc.result === 'ok' ? '✓ Expected state valid — all devices found, EDS assignments match.' : '⚠ Mismatch — devices missing or wrong EDS assignment.'}</div>`
+              : html`<div style="font-size:11.5px;color:var(--faint);line-height:1.5">No verification yet — adopt an expected state, then Scan & verify.</div>`}
+            <div style="font-size:10.5px;color:var(--faint);line-height:1.5">Verification: a fresh scan must find every expected device with its assigned EDS. On mismatch the bus is re-addressed${mc.autoReaddr ? ' automatically' : ' after confirmation'}.</div>
+            ${mc.enabled && mc.ref && html`
+              <div style="font-size:11.5px;line-height:1.5;color:${mc.hbLost.length ? 'var(--red)' : 'var(--faint)'}">
+                ${mc.hbLost.length
+                  ? `⚠ Heartbeat lost — node${mc.hbLost.length > 1 ? 's' : ''} ${mc.hbLost.map((n) => String(n).padStart(2, '0')).join(', ')}`
+                  : `♥ Heartbeat monitoring — watching ${Object.keys(mc.ref.assignments || {}).length} device(s), timeout ${mc.hbTimeoutMs} ms`}
+              </div>`}
+          </div>
+          <div style="border:1px solid var(--bd2);border-radius:7px;padding:10px 12px;grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px 14px;font-size:12px;color:var(--mid)">
+            ${mcOpt('autoStart', 'Restore machine control state at startup', '(last on/off state is remembered · off = always start deactivated)')}
+            ${mcOpt('autoReaddr', 'Auto re-address when verification fails', '(default)')}
+            ${mcOpt('scanStart', 'Scan & verify on server start', '')}
+            <div style="display:flex;align-items:center;gap:8px" title="How long a monitored device may stay silent before Machine Control logs a heartbeat-lost alert">
+              <span style="font-size:11px;color:var(--dim)">Heartbeat timeout</span>
+              <${SyncInput} value=${String(mc.hbTimeoutMs)} onCommit=${(v) => send('mc_set_hb_timeout', { ms: v })}
+                style="border:1px solid var(--inp);background:var(--panel);color:var(--tx);border-radius:5px;padding:4px 7px;font:11.5px ${MONO};width:64px;outline:none;text-align:right" />
+              <span style="font-size:11px;color:var(--dim)">ms</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
-
-    ${''/* Every addressing procedure is a flow file, the vendor's or the
-          core's. One of them (●) is what machine control falls back on
-          when a verification fails; any of them can address the bus now.
-          A flow with a `button:` header is pressed rather than chosen:
-          the words on its button are the file's. */}
-    <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-weight:600;font-size:13px">Addressing</span>
-        <span style="font-size:10.5px;color:var(--faint)">each procedure is a flow file · ● is the one machine control re-addresses with when a verification fails</span>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${[...(mc.flows || []).map((file) => ({ file, chosen: file === mc.teachFlow, act: () => send('mc_readdress', { file }), label: 'Run',
-              title: 'Addresses across the whole address range (Bus interface) and adopts the freshly addressed bus as the expected state' })),
-           ...(mc.procedures || []).map((proc) => ({ file: proc.file, act: () => send('mc_procedure', { file: proc.file }), label: proc.label,
-              title: `Runs the procedure in ${proc.file} once — no session is distributed and nothing is adopted` }))].map((row) => html`
-          <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--bd2);border-radius:7px;padding:6px 10px">
-            ${row.chosen === undefined
-              ? html`<span style="width:14px"></span>`
-              : html`<span class="hv" onClick=${() => send('mc_flow', { file: row.file })} title=${row.chosen ? 'Machine control re-addresses with this procedure' : 'Let machine control re-address with this procedure'}
-                  style="width:14px;cursor:pointer;font-size:13px;color:${row.chosen ? 'var(--acc)' : 'var(--faint)'}">${row.chosen ? '●' : '○'}</span>`}
-            <span style="flex:1;font-size:12px;color:var(--tx)">${mc.flowNames?.[row.file] || row.file}</span>
-            <span style="font:10.5px ${MONO};color:var(--faint)">${row.file}</span>
-            <span class="hv" onClick=${row.act} title=${row.title}
-              style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">${row.label}</span>
-          </div>`)}
-      </div>
-      ${mc.teach && html`
-      <div style="border:1px solid var(--acc-bd);background:var(--acc-soft);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
-        <div style="font-size:11.5px;color:var(--acc);font-weight:600">${mc.teach.name || 'Addressing'} ${mc.teach.step}/${mc.teach.of} — ${mc.teach.text}</div>
-        <div style="display:flex;gap:8px">
-          ${s.adapter === 'demo' && html`<span class="hv-b" onClick=${() => send('demo_press')} style="${btn.acc}font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Simulate button press</span>`}
-          <span class="hv" onClick=${() => send('mc_teach_abort')} style="border:1px solid var(--inp);color:var(--red);font-weight:600;font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">Abort</span>
+    <div style="flex:1 1 560px;min-width:0;display:flex;flex-direction:column;gap:14px">
+      <div style=${BOX}>
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <span style="font-weight:600;font-size:13px;flex:none">Extensions</span>
+          ${(s.ext?.plugins || []).length
+            ? html`<span style="flex:none;font:600 10px ${MONO};background:var(--grn-soft);color:var(--grn);padding:2px 8px;border-radius:9px">${s.ext.plugins.length} PLUGIN${s.ext.plugins.length > 1 ? 'S' : ''}</span>
+                   <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 11px ${MONO};color:var(--tx)">${s.ext.plugins.join(' · ')}</span>`
+            : html`<span style="flex:none;font:600 10px ${MONO};background:var(--chip);color:var(--faint);padding:2px 8px;border-radius:9px">NONE</span>`}
         </div>
-      </div>`}
-      ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
-    </div>
-
-    <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:8px">
-      <span style="font-weight:600;font-size:13px;margin-bottom:4px">Folders</span>
-      ${s.workspaces.data && folderRow({ label: 'DATA FOLDER', which: 'data', value: s.workspaces.dataNext,
-          locked: s.workspaces.dataFixed, why: 'Named by --data for this start (a second bench, Docker) — not changed here',
-          warn: s.workspaces.dataNext !== s.workspaces.data,
-          note: s.workspaces.dataFixed ? 'set by --data for this start'
-            : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — now ${s.workspaces.data}`
-            : 'the workspaces are its subfolders',
-          title: `Where the workspaces live, each a subfolder. Remembered per user in ${s.workspaces.settingsFile}, so the bench finds it wherever it is started from.` })}
-      ${s.workspaces.canSwitch && html`
-      <div style="display:flex;align-items:center;gap:8px"
-        title=${`A subfolder of the data folder (${s.workspaces.folder}) with its own db, EDS files, machine-control state, test config and captures. Switching disconnects the bus.`}>
-        ${rowLabel('WORKSPACE')}
-        <${OptionSelect} value=${s.workspace}
-          options=${s.workspaces.list.map((w) => [w, w])}
-          style=${`flex:3 1 0;min-width:120px;${inputStyle}`}
-          onPick=${(name, e) => {
-            // put the box back by hand, and at once: it names the workspace
-            // that is open until the switch has happened, and the memo returns
-            // the identical vnode while `value` is unchanged — a declined
-            // switch would leave the new name showing over the old workspace
-            e.target.value = s.workspace;
-            if (!name || name === s.workspace) return;
-            ask({ title: 'Switch workspace', ok: 'Switch',
-                  text: `Switch to workspace "${name}"? The bus will be disconnected.` })
-              .then((yes) => { if (yes) send('workspace_switch', { name }); });
-          }} />
-        <span class="hv" onClick=${() => ask({
-            title: 'New workspace', input: '', placeholder: 'name', ok: 'Create',
-            text: 'The bench switches to it at once — the bus will be disconnected.',
-            note: 'letters, digits, space and . _ - only',
-          }).then((name) => { if (name) send('workspace_create', { name }); })}
-          style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">＋ New…</span>
-        ${rowNote('own db, EDS, test config, captures')}
-      </div>`}
-      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-        <span style="font-size:10.5px;color:var(--faint);white-space:nowrap">in the workspace</span>
-        <span style="flex:1;border-top:1px solid var(--bd2)"></span>
-        <label onClick=${() => send('paths_custom', { on: !s.pathsCustom })}
-          title="Off, these are the workspace's own subfolders and cannot be changed by accident"
-          style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--mid);white-space:nowrap">${Cb(s.pathsCustom, 'flex:none;')}custom folders</label>
+        ${''/* the sentence on its own line rather than trailing the names: at
+              half the page's width it was the part that got ellipsed away, and
+              it is the part that says what a plugin actually does here */}
+        <div style="font-size:10.5px;color:var(--faint);line-height:1.5">
+          ${(s.ext?.plugins || []).length
+            ? 'Vendor packages loaded — their adapters, addressing procedures, EDS seeds and panels are active.'
+            : 'Vendor-specific features — addressing procedures & session identities, special adapters, SWDL protocols — ship as separately installed plugin packages.'}
+        </div>
+        ${!!s.ext?.installed?.length && html`
+          <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
+            ${s.ext.installed.map((pkg) => html`
+              <div style="display:flex;align-items:center;gap:10px;padding:6px 11px;border-bottom:1px solid var(--bd2);font-size:11.5px">
+                <span style="font:600 11px ${MONO};color:var(--tx)">${pkg.name}</span>
+                <span style="font:10.5px ${MONO};color:var(--faint)">v${pkg.version}</span>
+                <span style="margin-left:auto;color:var(--faint)">installed package</span>
+                <span class="hv" onClick=${() => send('plugin_remove', { pkg: pkg.name })} title="remove this package"
+                  style="color:var(--faint);cursor:pointer">✕</span>
+              </div>`)}
+          </div>`}
+        ${s.ext?.canInstall && html`
+          <div style="margin-top:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+                      border-top:1px solid var(--bd2);padding-top:9px">
+            <input type="file" id="plugin-file-input" accept=".whl" style="display:none" onChange=${handlePluginFile} />
+            <span class="hv" onClick=${() => document.getElementById('plugin-file-input').click()}
+              style="${btn.ghost}font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;flex:none">+ Install plugin…</span>
+            <span style="flex:1;min-width:180px;font-size:10.5px;color:var(--faint);line-height:1.5">A plugin package (.whl) — extracted and activated immediately, no restart. Plugins are executable code: only install packages from a source you trust.</span>
+          </div>`}
       </div>
-      ${folderRow({ label: 'TESTCASES', which: 'tc', value: s.paths.tc, locked: !s.pathsCustom, why: ownFolder, indent: true,
-          note: `${s.tests.fileCount} test case file${s.tests.fileCount === 1 ? '' : 's'}` })}
-      ${folderRow({ label: 'RESULTS', which: 'res', value: s.paths.res, locked: !s.pathsCustom, why: ownFolder, indent: true,
-          note: `${s.reportCount} report${s.reportCount === 1 ? '' : 's'}` })}
-      ${folderRow({ label: 'FIRMWARE', which: 'fw', value: s.paths.fw, locked: !s.pathsCustom, why: ownFolder, indent: true,
-          note: 'listed on the SWDL page',
-          title: 'The folder the SWDL page lists firmware files from — often the build output folder of the firmware project. What each file is comes from the extension that knows the format.' })}
-      ${folderRow({ label: 'EDS', which: 'eds', value: s.paths.eds, locked: !s.pathsCustom, why: ownFolder, indent: true,
-          note: `${s.eds.files.length} EDS file${s.eds.files.length === 1 ? '' : 's'}`,
-          title: 'The registered EDS files — with custom folders, e.g. a pool shared between workspaces' })}
-    </div>
 
+      <div style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+        <span style="font-weight:600;font-size:13px;margin-bottom:4px">Folders</span>
+        ${s.workspaces.data && folderRow({ label: 'DATA FOLDER', which: 'data', value: s.workspaces.dataNext,
+            locked: s.workspaces.dataFixed, why: 'Named by --data for this start (a second bench, Docker) — not changed here',
+            warn: s.workspaces.dataNext !== s.workspaces.data,
+            note: s.workspaces.dataFixed ? 'set by --data for this start'
+              : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — now ${s.workspaces.data}`
+              : 'the workspaces are its subfolders',
+            title: `Where the workspaces live, each a subfolder. Remembered per user in ${s.workspaces.settingsFile}, so the bench finds it wherever it is started from.` })}
+        ${s.workspaces.canSwitch && html`
+        <div style="display:flex;align-items:center;gap:8px"
+          title=${`A subfolder of the data folder (${s.workspaces.folder}) with its own db, EDS files, machine-control state, test config and captures. Switching disconnects the bus.`}>
+          ${rowLabel('WORKSPACE')}
+          <${OptionSelect} value=${s.workspace}
+            options=${s.workspaces.list.map((w) => [w, w])}
+            style=${`flex:3 1 0;min-width:120px;${inputStyle}`}
+            onPick=${(name, e) => {
+              // put the box back by hand, and at once: it names the workspace
+              // that is open until the switch has happened, and the memo returns
+              // the identical vnode while `value` is unchanged — a declined
+              // switch would leave the new name showing over the old workspace
+              e.target.value = s.workspace;
+              if (!name || name === s.workspace) return;
+              ask({ title: 'Switch workspace', ok: 'Switch',
+                    text: `Switch to workspace "${name}"? The bus will be disconnected.` })
+                .then((yes) => { if (yes) send('workspace_switch', { name }); });
+            }} />
+          <span class="hv" onClick=${() => ask({
+              title: 'New workspace', input: '', placeholder: 'name', ok: 'Create',
+              text: 'The bench switches to it at once — the bus will be disconnected.',
+              note: 'letters, digits, space and . _ - only',
+            }).then((name) => { if (name) send('workspace_create', { name }); })}
+            style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">＋ New…</span>
+          ${rowNote('own db, EDS, test config, captures')}
+        </div>`}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+          <span style="font-size:10.5px;color:var(--faint);white-space:nowrap">in the workspace</span>
+          <span style="flex:1;border-top:1px solid var(--bd2)"></span>
+          <label onClick=${() => send('paths_custom', { on: !s.pathsCustom })}
+            title="Off, these are the workspace's own subfolders and cannot be changed by accident"
+            style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--mid);white-space:nowrap">${Cb(s.pathsCustom, 'flex:none;')}custom folders</label>
+        </div>
+        ${folderRow({ label: 'TESTCASES', which: 'tc', value: s.paths.tc, locked: !s.pathsCustom, why: ownFolder, indent: true,
+            note: `${s.tests.fileCount} test case file${s.tests.fileCount === 1 ? '' : 's'}` })}
+        ${folderRow({ label: 'RESULTS', which: 'res', value: s.paths.res, locked: !s.pathsCustom, why: ownFolder, indent: true,
+            note: `${s.reportCount} report${s.reportCount === 1 ? '' : 's'}` })}
+        ${folderRow({ label: 'FIRMWARE', which: 'fw', value: s.paths.fw, locked: !s.pathsCustom, why: ownFolder, indent: true,
+            note: 'listed on the SWDL page',
+            title: 'The folder the SWDL page lists firmware files from — often the build output folder of the firmware project. What each file is comes from the extension that knows the format.' })}
+        ${folderRow({ label: 'EDS', which: 'eds', value: s.paths.eds, locked: !s.pathsCustom, why: ownFolder, indent: true,
+            note: `${s.eds.files.length} EDS file${s.eds.files.length === 1 ? '' : 's'}`,
+            title: 'The registered EDS files — with custom folders, e.g. a pool shared between workspaces' })}
+      </div>
+
+      <div style=${BOX}>
+        <div style="font-weight:600;font-size:13px">EDS files</div>
+        <div style="font-size:11px;color:var(--dim);font-weight:600">DEVICE PROFILES <span style="font-weight:400;color:var(--faint)">· active files are matched to devices on scan via Identity (0x1018)</span></div>
+        <input type="file" id="eds-file-input" accept=".eds,.dcf" style="display:none" onChange=${handleEdsFile} />
+        <div style="display:flex;flex-direction:column;border:1px solid var(--bd2);border-radius:7px;overflow:hidden">
+          ${s.eds.files.map((e) => {
+            const on = e.enabled;
+            const used = s.devices.filter((d) => d.eds === e.file).length;
+            const hasVariant = !!e.variant_index;
+            const conflict = (e.conflict || []).length > 0;
+            const conflictTitle = conflict
+              ? `Identity conflict — same identity as ${e.conflict.join(', ')}. The newest file wins when matching devices${e.conflictWin ? ': this one' : ' — this file is shadowed'}.`
+              : '';
+            return html`
+            <div>
+            <div class="hv" onClick=${() => send('eds_toggle', { file: e.file })}
+              style="display:grid;grid-template-columns:13px 1fr 48px 76px 100px 60px 40px 18px 18px;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--bd2);background:${on ? 'var(--sel)' : 'transparent'};cursor:pointer">
+              ${Cb(on)}
+              <span style="font:11.5px ${MONO};color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.file}</span>
+              <span onClick=${(ev) => ev.stopPropagation()}>
+                <${SyncInput} value=${e.code || '?'} onCommit=${(v) => send('eds_code', { file: e.file, code: v })}
+                  title="Shortcode used in setup filenames"
+                  style="border:1px solid var(--inp);background:var(--panel);color:var(--acc);font:600 10.5px ${MONO};border-radius:4px;padding:3px 5px;width:100%;box-sizing:border-box;text-align:center;outline:none" />
+              </span>
+              <span style="font-size:11px;color:var(--dim)">${e.dev}</span>
+              <span title=${conflict ? conflictTitle : 'Identity match: vendor · product code'} style="font:10.5px ${MONO};color:${conflict ? 'var(--amb)' : 'var(--faint)'}">${e.ident}</span>
+              <span onClick=${(ev) => { ev.stopPropagation(); setOpenVariant(openVariant === e.file ? null : e.file); }}
+                title="Configure per-device variant identification object"
+                style="font:10.5px ${MONO};color:${hasVariant ? 'var(--acc)' : 'var(--faint)'};cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hasVariant ? `${e.variant_index}:${e.variant_sub || '00'}` : 'variant…'}</span>
+              <span style="font:10.5px ${MONO};color:${used ? 'var(--grn)' : 'var(--faint)'};text-align:right">${used ? used + ' dev' : ''}</span>
+              <span title=${conflictTitle} style="color:var(--amb);font-size:11px;text-align:center">${conflict ? '⚠' : ''}</span>
+              <span onClick=${(ev) => { ev.stopPropagation(); send('eds_remove', { file: e.file }); }}
+                title="Remove EDS file" class="hv" style="color:var(--faint);cursor:pointer;text-align:center">✕</span>
+            </div>
+            ${openVariant === e.file && html`<${VariantEditor} e=${e} onClose=${() => setOpenVariant(null)} />`}
+            </div>`;
+          })}
+          <div class="hv" onClick=${() => document.getElementById('eds-file-input').click()}
+            style="padding:8px 11px;color:var(--acc);font-weight:600;font-size:11.5px;cursor:pointer">+ Add EDS file…</div>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 
