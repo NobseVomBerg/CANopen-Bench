@@ -975,12 +975,12 @@ function SetupPage({ s }) {
     <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:8px">
       <span style="font-weight:600;font-size:13px;margin-bottom:4px">Folders</span>
       ${s.workspaces.data && folderRow({ label: 'DATA FOLDER', which: 'data', value: s.workspaces.dataNext,
-          locked: s.workspaces.dataFixed, why: 'Set by CANOPEN_BENCH_DATA for this start (a start script, Docker) — change it there',
+          locked: s.workspaces.dataFixed, why: 'Named by --data for this start (a second bench, Docker) — not changed here',
           warn: s.workspaces.dataNext !== s.workspaces.data,
-          note: s.workspaces.dataFixed ? 'fixed by CANOPEN_BENCH_DATA'
+          note: s.workspaces.dataFixed ? 'set by --data for this start'
             : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — now ${s.workspaces.data}`
             : 'the workspaces are its subfolders',
-          title: 'Where the workspaces live, each a subfolder. Kept per user, so the bench finds it wherever it is started from.' })}
+          title: `Where the workspaces live, each a subfolder. Remembered per user in ${s.workspaces.settingsFile}, so the bench finds it wherever it is started from.` })}
       ${s.workspaces.canSwitch && html`
       <div style="display:flex;align-items:center;gap:8px"
         title=${`A subfolder of the data folder (${s.workspaces.folder}) with its own db, EDS files, machine-control state, test config and captures. Switching disconnects the bus.`}>

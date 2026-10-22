@@ -975,7 +975,7 @@ class SimSwdlStrategy(SwdlStrategy):
 class Bench:
     def __init__(self, db: Db, bus: BusInterface | None = None,
                  plugins: list[BenchPlugin] | None = None,
-                 workspaces_root: Path | None = None):
+                 workspaces_root: Path | None = None, data_fixed: bool = False):
         self.db = db
         # the EDS folder is one of the workspace's folders (see paths_custom),
         # settled here, before anything reads it: one chosen before that
@@ -993,7 +993,9 @@ class Bench:
         #: shown under Setup, so nobody has to guess where the files are
         self.workspace_folder = str(db.path.parent.resolve())
         #: the data folder this bench runs on, and the one the next start
-        #: will — chosen under Setup, kept per user (usersettings)
+        #: will — chosen under Setup, kept per user (usersettings); fixed
+        #: when --data named it for this start
+        self.data_fixed = data_fixed
         self.data_folder = str(workspaces_root.resolve()) if workspaces_root else ""
         chosen = usersettings.load().get("data") if workspaces_root else None
         self.data_folder_next = str(Path(chosen).resolve()) if chosen else self.data_folder
@@ -3095,8 +3097,8 @@ class Bench:
         and the one-bench-per-folder lock all hang off it."""
         if not self.workspaces_root:
             return
-        if usersettings.data_fixed():
-            self.log(f"CFG  data folder is set by {usersettings.ENV_DATA} — not changed", "emcy0")
+        if self.data_fixed:
+            self.log("CFG  data folder is set by --data for this start — not changed", "emcy0")
             return
         folder = str(Path(value).expanduser().resolve()) if value else self.data_folder
         try:
@@ -7840,7 +7842,8 @@ class Bench:
                            "canSwitch": bool(self.workspaces_root and self.on_workspace_switch),
                            "folder": self.workspace_folder,
                            "data": self.data_folder, "dataNext": self.data_folder_next,
-                           "dataFixed": usersettings.data_fixed()},
+                           "dataFixed": self.data_fixed,
+                           "settingsFile": str(usersettings.settings_file())},
             "busLoad": round(self.bus_load, 1),
             "errFrames": self.err_frames,
             "scanBusy": self.scan_busy,

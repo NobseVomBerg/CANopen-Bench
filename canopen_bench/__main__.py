@@ -123,10 +123,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="CANopen Bench web tool")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--data", default=None,
+                    help="this start's data folder, for this start only and not remembered: "
+                         "a second bench beside the everyday one, a mounted Docker volume. "
+                         "Normally it is chosen under Setup > Folders")
     ap.add_argument("--db", default=None,
                     help="expert override: explicit sqlite workspace db path. Normally "
                          "workspaces live as subfolders of the data folder (Setup > Folders, "
-                         "or $CANOPEN_BENCH_DATA) "
+                         "or --data) "
                          "and are selected on the Setup page. Skips the one-bench-per-data-"
                          "folder check, since there is no data folder to speak of")
     ap.add_argument("--takeover", action="store_true",
@@ -136,8 +140,9 @@ def main() -> None:
                          "supply's serial port, and no other program can hand that back")
     args = ap.parse_args()
 
-    if not (args.db or os.environ.get("CANOPEN_BENCH_DB")):
-        root = usersettings.data_root()
+    data = Path(args.data) if args.data else None
+    if not args.db:
+        root = data or usersettings.data_root()
         held_by = claim_data_folder(root)
         if held_by is not None and args.takeover:
             print(f"Stopping the bench on {root.resolve()} (process {held_by}) …")
@@ -152,14 +157,15 @@ def main() -> None:
                   f"plugged into this machine.\n"
                   f"Stop that one first, or start with --takeover to stop it from here.\n"
                   f"To run both, give this one a folder and a port of its own:\n"
-                  f"  CANOPEN_BENCH_DATA=<folder> canopen-bench --port <other port>",
+                  f"  canopen-bench --data <folder> --port <other port>",
                   file=sys.stderr)
             raise SystemExit(1)
         # said before anybody goes looking for a workspace in another one;
         # Setup names it too, and changes it (usersettings.data_root)
-        print(f"CANopen Bench data folder: {root.resolve()}", flush=True)
+        where = "--data, this start only" if data else f"remembered in {usersettings.settings_file()}"
+        print(f"CANopen Bench data folder: {root.resolve()} ({where})", flush=True)
 
-    uvicorn.run(create_app(args.db), host=args.host, port=args.port,
+    uvicorn.run(create_app(args.db, data=data), host=args.host, port=args.port,
                 timeout_graceful_shutdown=SHUTDOWN_S)
 
 

@@ -216,8 +216,8 @@ badge.
 ```
 canopen_bench/
 ├── app.py            Starlette: serves the frontend, POST /api/action, WS /ws;
-│                     multi-workspace mode — every subfolder of ./data (or
-│                     $CANOPEN_BENCH_DATA) is one workspace (db + eds/traces/
+│                     multi-workspace mode — every subfolder of the data
+│                     folder (Setup, or --data) is one workspace (db + eds/traces/
 │                     flows), switchable at runtime from the Setup page, the
 │                     choice persists in <root>/active-workspace. An explicit
 │                     --db path keeps the single-file behaviour.

@@ -13,11 +13,10 @@ from canopen_bench.db import Db
 
 @pytest.fixture()
 def elsewhere(tmp_path, monkeypatch):
-    """Started from a folder of its own, no CANOPEN_BENCH_DATA, a home of its own."""
+    """Started from a folder of its own, with a home of its own."""
     start = tmp_path / "started-here"
     start.mkdir()
     monkeypatch.chdir(start)
-    monkeypatch.delenv(usersettings.ENV_DATA, raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     return start
 
@@ -36,15 +35,23 @@ def test_without_one_it_is_in_the_home_folder(elsewhere, tmp_path):
     assert not (elsewhere / "data").exists(), "not next to wherever it was started"
 
 
-def test_the_environment_names_it_for_this_start_only(elsewhere, monkeypatch, tmp_path):
-    monkeypatch.setenv(usersettings.ENV_DATA, str(tmp_path / "scripted"))
-    assert usersettings.data_root() == tmp_path / "scripted"
-    assert usersettings.load() == {}, "a start script does not move the user's folder"
+def test_data_names_it_for_this_start_only(elsewhere, tmp_path):
+    """--data: a second bench beside the everyday one, a Docker volume. It
+    does not move the folder the user's other starts find."""
+    from starlette.testclient import TestClient
+
+    from canopen_bench.app import create_app
+    with TestClient(create_app(data=tmp_path / "second")) as client:
+        state = client.get("/api/state").json()
+    assert state["workspaces"]["data"] == str((tmp_path / "second").resolve())
+    assert state["workspaces"]["dataFixed"]
+    assert usersettings.load() == {}
 
 
-def _bench(tmp_path) -> Bench:
+def _bench(tmp_path, fixed: bool = False) -> Bench:
     root = tmp_path / "data"
-    return Bench(Db(root / "default" / "canopen-bench.db"), plugins=[], workspaces_root=root)
+    return Bench(Db(root / "default" / "canopen-bench.db"), plugins=[], workspaces_root=root,
+                 data_fixed=fixed)
 
 
 def test_setup_moves_it_from_the_next_start_on(elsewhere, tmp_path):
@@ -60,13 +67,12 @@ def test_setup_moves_it_from_the_next_start_on(elsewhere, tmp_path):
     assert usersettings.data_root() == (tmp_path / "shared").resolve()
 
 
-def test_setup_leaves_a_folder_the_environment_names_alone(elsewhere, monkeypatch, tmp_path):
-    monkeypatch.setenv(usersettings.ENV_DATA, str(tmp_path / "data"))
-    bench = _bench(tmp_path)
+def test_setup_leaves_a_folder_named_by_data_alone(elsewhere, tmp_path):
+    bench = _bench(tmp_path, fixed=True)
     assert bench.snapshot()["workspaces"]["dataFixed"]
     bench.dispatch("set_path", {"which": "data", "value": str(tmp_path / "shared")})
     assert usersettings.load() == {}
-    assert "set by CANOPEN_BENCH_DATA" in bench.logs[-1]["msg"]
+    assert "set by --data" in bench.logs[-1]["msg"]
 
 
 # -- the folders of a workspace ------------------------------------------------
@@ -141,3 +147,9 @@ def test_a_workspace_with_an_eds_pool_from_before_keeps_it(tmp_path):
     bench.dispatch("paths_custom", {"on": False})
     bench.dispatch("paths_custom", {"on": True})
     assert bench.db.eds_dir == tmp_path / "pool", "the pool is one of the stored choices now"
+
+
+def test_setup_says_which_file_remembers_it(elsewhere, tmp_path):
+    """A setting nobody can find is as bad as an environment variable: the
+    page names the file."""
+    assert _bench(tmp_path).snapshot()["workspaces"]["settingsFile"] == str(usersettings.settings_file())
