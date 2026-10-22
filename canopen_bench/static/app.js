@@ -715,13 +715,30 @@ function SetupPage({ s }) {
     reader.readAsDataURL(file);  // data: URL — base64 payload after the comma
     ev.target.value = '';
   };
+  // one folder: its name and what is in it on one line, the path under it.
+  // Locked, the field shows the folder without letting it be edited, and
+  // Browse says why it does nothing
+  const ownFolder = "The workspace's own subfolder — tick 'custom folders' to choose another";
+  const folderRow = ({ label, which, value, note, warn, locked, why, title }) => html`
+    <div style="display:flex;flex-direction:column;gap:3px" title=${title}>
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <span style="font-size:11px;color:var(--dim);font-weight:600;white-space:nowrap">${label}</span>
+        <span style="flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:${warn ? 'var(--amb)' : 'var(--faint)'}">${note}</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <${SyncInput} value=${value || ''} disabled=${locked} title=${locked ? why : ''}
+          onCommit=${(v) => send('set_path', { which, value: v })} style="flex:1;min-width:0;${inputStyle};${locked ? 'opacity:.65' : ''}" />
+        <span class=${locked ? '' : 'hv'} title=${locked ? why : ''} onClick=${() => { if (!locked) send('browse_open', { which }); }}
+          style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;white-space:nowrap;cursor:${locked ? 'not-allowed;opacity:.45' : 'pointer'}">Browse…</span>
+      </div>
+    </div>`;
   const mcOpt = (key, text, note) => html`
     <label onClick=${() => send('mc_opt', { key })} style="display:flex;align-items:center;gap:8px;cursor:pointer">
       ${Cb(mc[key], 'flex:none;')}${text} ${note && html`<span style="color:var(--faint)">${note}</span>`}
     </label>`;
 
   return html`
-  <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-content:start;min-height:0">
+  <div style="flex:1;overflow:auto;padding:16px 18px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-content:start;min-height:0">
     ${s.workspaces.canSwitch && html`
     <div style="grid-column:1 / -1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px 16px;display:flex;align-items:center;gap:12px">
       <span style="font-weight:600;font-size:13px">Workspace</span>
@@ -954,7 +971,7 @@ function SetupPage({ s }) {
           when a verification fails; any of them can address the bus now.
           A flow with a `button:` header is pressed rather than chosen:
           the words on its button are the file's. */}
-    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-weight:600;font-size:13px">Addressing</span>
         <span style="font-size:10.5px;color:var(--faint)">each procedure is a flow file · ● is the one machine control re-addresses with when a verification fails</span>
@@ -986,49 +1003,28 @@ function SetupPage({ s }) {
       ${!(s.ext?.addressing) && html`<div style="font-size:10.5px;color:var(--faint);line-height:1.4">Standard LSS only (untested on real hardware) — vendor procedures like button-teach and their session identities ship as plugin packages.</div>`}
     </div>
 
-    <div style="grid-column:1/-1;background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
-      <div style="font-weight:600;font-size:13px">Folders</div>
-      ${s.workspaces.data && html`
-      <div style="display:flex;flex-direction:column;gap:4px"
-        title="Where the workspaces live, each a subfolder. Kept per user, so the bench finds it wherever it is started from.">
-        <span style="font-size:11px;color:var(--dim);font-weight:600">DATA FOLDER</span>
-        <div style="display:flex;gap:6px">
-          <${SyncInput} value=${s.workspaces.dataNext} disabled=${s.workspaces.dataFixed}
-            onCommit=${(v) => send('set_path', { which: 'data', value: v })} style="flex:1;${inputStyle}" />
-          ${!s.workspaces.dataFixed && html`<span class="hv" onClick=${() => send('browse_open', { which: 'data' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>`}
-        </div>
-        <span style="font:10.5px ${MONO};color:${s.workspaces.dataNext !== s.workspaces.data ? 'var(--amb)' : 'var(--faint)'}">${
-          s.workspaces.dataFixed ? 'set by CANOPEN_BENCH_DATA for this start'
-          : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — this one runs on ${s.workspaces.data}`
-          : 'the workspaces are its subfolders'}</span>
-      </div>`}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <span style="font-size:11px;color:var(--dim);font-weight:600">TESTCASES FOLDER</span>
-          <div style="display:flex;gap:6px">
-            <${SyncInput} value=${s.paths.tc} onCommit=${(v) => send('set_path', { which: 'tc', value: v })} style="flex:1;${inputStyle}" />
-            <span class="hv" onClick=${() => send('browse_open', { which: 'tc' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>
-          </div>
-          <span style="font:10.5px ${MONO};color:var(--faint)">${s.tests.fileCount} test case file${s.tests.fileCount === 1 ? '' : 's'} discovered</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <span style="font-size:11px;color:var(--dim);font-weight:600">RESULTS FOLDER</span>
-          <div style="display:flex;gap:6px">
-            <${SyncInput} value=${s.paths.res} onCommit=${(v) => send('set_path', { which: 'res', value: v })} style="flex:1;${inputStyle}" />
-            <span class="hv" onClick=${() => send('browse_open', { which: 'res' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>
-          </div>
-          <span style="font:10.5px ${MONO};color:var(--faint)">${s.tests.reports.length} report${s.tests.reports.length === 1 ? '' : 's'}</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px"
-          title="The folder the SWDL page lists firmware files from — often the build output folder of the firmware project. What each file is comes from the extension that knows the format.">
-          <span style="font-size:11px;color:var(--dim);font-weight:600">FIRMWARE FOLDER</span>
-          <div style="display:flex;gap:6px">
-            <${SyncInput} value=${s.paths.fw || ''} onCommit=${(v) => send('set_path', { which: 'fw', value: v })} style="flex:1;${inputStyle}" />
-            <span class="hv" onClick=${() => send('browse_open', { which: 'fw' })} style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer">Browse…</span>
-          </div>
-          <span style="font:10.5px ${MONO};color:var(--faint)">listed on the SWDL page</span>
-        </div>
+    <div class="setup-half" style="${BOX}padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-weight:600;font-size:13px">Folders</span>
+        <span style="flex:1"></span>
+        <label onClick=${() => send('paths_custom', { on: !s.pathsCustom })}
+          title="Off, test cases, results and firmware are the workspace's own subfolders and cannot be changed by accident"
+          style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--mid)">${Cb(s.pathsCustom, 'flex:none;')}custom folders</label>
       </div>
+      ${s.workspaces.data && folderRow({ label: 'DATA FOLDER', which: 'data', value: s.workspaces.dataNext,
+          locked: s.workspaces.dataFixed, why: 'Set by CANOPEN_BENCH_DATA for this start (a start script, Docker) — change it there',
+          warn: s.workspaces.dataNext !== s.workspaces.data,
+          note: s.workspaces.dataFixed ? 'set by CANOPEN_BENCH_DATA for this start'
+            : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — now ${s.workspaces.data}`
+            : 'the workspaces are its subfolders',
+          title: 'Where the workspaces live, each a subfolder. Kept per user, so the bench finds it wherever it is started from.' })}
+      ${folderRow({ label: 'TESTCASES FOLDER', which: 'tc', value: s.paths.tc, locked: !s.pathsCustom, why: ownFolder,
+          note: `${s.tests.fileCount} test case file${s.tests.fileCount === 1 ? '' : 's'}` })}
+      ${folderRow({ label: 'RESULTS FOLDER', which: 'res', value: s.paths.res, locked: !s.pathsCustom, why: ownFolder,
+          note: `${s.reportCount} report${s.reportCount === 1 ? '' : 's'}` })}
+      ${folderRow({ label: 'FIRMWARE FOLDER', which: 'fw', value: s.paths.fw, locked: !s.pathsCustom, why: ownFolder,
+          note: 'listed on the SWDL page',
+          title: 'The folder the SWDL page lists firmware files from — often the build output folder of the firmware project. What each file is comes from the extension that knows the format.' })}
     </div>
 
   </div>`;

@@ -7,6 +7,7 @@ import time
 import pytest
 from starlette.testclient import TestClient
 
+from canopen_bench import __version__
 from canopen_bench.app import create_app
 
 
@@ -337,3 +338,16 @@ def _seed_trace_row(i: int) -> dict:
     return {"time": f"12:00:{i % 60:02d}.000000", "dir": "RX", "cob": "0x581", "len": "1",
             "data": "01", "dec": "SDO tx node 01", "flag": "", "cls": "SDO",
             "node": 1, "obj": "", "val": str(i)}
+
+
+def test_the_page_and_its_files_are_asked_for_again_after_an_update(tmp_path, monkeypatch):
+    """Without Cache-Control the browser guessed how long a file stays fresh,
+    and after an update kept the old stylesheet beside the new script."""
+    monkeypatch.setenv("CANOPEN_BENCH_DATA", str(tmp_path))
+    monkeypatch.delenv("CANOPEN_BENCH_DB", raising=False)
+    with TestClient(create_app()) as client:
+        for url in ("/", "/static/styles.css", "/static/app.js"):
+            assert client.get(url).headers["cache-control"] == "no-cache", url
+        page = client.get("/").text
+        assert f'/static/styles.css?v={__version__}"' in page, "a copy from before is not used"
+        assert f'/static/app.js?v={__version__}"' in page

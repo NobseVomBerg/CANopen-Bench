@@ -19,12 +19,12 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from . import usersettings
+from . import __version__, usersettings
 from .bus.interface import BusInterface
 from .core import Bench
 from .db import Db
@@ -32,6 +32,18 @@ from .plugin import BenchPlugin
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_WORKSPACE = "default"
+#: the page and its files are asked for again on every load, answered with a
+#: 304 while unchanged. Without it the browser guesses how long a file stays
+#: fresh — and after an update it kept the old stylesheet beside the new
+#: script, a page laid out for a version that was no longer running.
+REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class _RevalidatedFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.update(REVALIDATE)
+        return response
 
 
 def _active_workspace(root: Path) -> str:
@@ -156,8 +168,16 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         holder["bench"].shutdown()
         holder["bench"].db.close()
 
-    async def index(request: Request) -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+    # the version in the names of the page's files: a browser that holds a
+    # copy from before an update asks for them as new files, rather than
+    # trusting its guess about the old ones (REVALIDATE only reaches it once
+    # it asks again)
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    for name in ("styles.css", "app.js"):
+        page = page.replace(f'/static/{name}"', f'/static/{name}?v={__version__}"')
+
+    async def index(request: Request) -> HTMLResponse:
+        return HTMLResponse(page, headers=REVALIDATE)
 
     async def state(request: Request) -> JSONResponse:
         return JSONResponse(holder["bench"].snapshot())
@@ -261,7 +281,7 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         Route("/api/trace/export/candump", export_candump),
         Route("/api/report/{name}", report),
         WebSocketRoute("/ws", ws),
-        Mount("/static", StaticFiles(directory=STATIC), name="static"),
+        Mount("/static", _RevalidatedFiles(directory=STATIC), name="static"),
     ])
     app.state.bench = holder["bench"]
     app.state.ws_clients = clients   # for tests; the app itself closes over it
