@@ -118,3 +118,26 @@ def test_the_reports_are_counted_in_the_folder_not_in_this_start(tmp_path):
     assert bench.snapshot()["reportCount"] == 2
     (results / "20261022_090000__summary.json").write_text("{}", encoding="utf-8")
     assert bench.snapshot()["reportCount"] == 3
+
+
+def test_the_eds_folder_is_one_of_them(tmp_path):
+    """Off, it is the workspace's own like the other three; a pool chosen
+    for it comes back with custom folders on."""
+    bench = _ws_bench(tmp_path)
+    own = tmp_path / "ws" / "eds"
+    bench.dispatch("set_path", {"which": "eds", "value": str(tmp_path / "pool")})
+    assert bench.paths_custom and bench.db.eds_dir == tmp_path / "pool"
+    bench.dispatch("paths_custom", {"on": False})
+    assert bench.db.eds_dir == own and bench.snapshot()["paths"]["eds"] == str(own)
+    bench.dispatch("paths_custom", {"on": True})
+    assert bench.db.eds_dir == tmp_path / "pool"
+
+
+def test_a_workspace_with_an_eds_pool_from_before_keeps_it(tmp_path):
+    db = Db(tmp_path / "ws" / "canopen-bench.db")
+    db.set_eds_dir(str(tmp_path / "pool"))
+    bench = Bench(db, plugins=[])
+    assert bench.paths_custom and bench.db.eds_dir == tmp_path / "pool"
+    bench.dispatch("paths_custom", {"on": False})
+    bench.dispatch("paths_custom", {"on": True})
+    assert bench.db.eds_dir == tmp_path / "pool", "the pool is one of the stored choices now"

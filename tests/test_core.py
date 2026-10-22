@@ -3231,6 +3231,7 @@ def test_object_catalog_follows_folder_switch(bench, tmp_path):
 
 
 def test_browse_open_eds_starts_at_the_configured_folder(bench):
+    bench.dispatch("paths_custom", {"on": True})      # locked to the workspace's own otherwise
     bench.dispatch("browse_open", {"which": "eds"})
     assert bench.browse is not None
     assert bench.browse["which"] == "eds"
