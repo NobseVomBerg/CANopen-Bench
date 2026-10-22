@@ -1,19 +1,18 @@
 """Starlette application: serves the frontend, one command endpoint, one state WebSocket.
 
 Workspaces: without an explicit db path the app runs in multi-workspace
-mode — every subfolder of the data root (``./data`` or
-``$CANOPEN_BENCH_DATA``, e.g. a mounted Docker volume) is one workspace
-holding its own db, EDS files, traces and flows. The active workspace is
-remembered in ``<root>/active-workspace`` and can be switched from the
-Setup page at runtime; switching swaps the whole Bench instance. An
-explicit ``--db``/``$CANOPEN_BENCH_DB`` path keeps the old single-file
-behaviour (tests, embedding, experts).
+mode — every subfolder of the data folder (chosen under Setup, see
+usersettings; or ``--data`` for one start, e.g. a mounted Docker volume) is
+one workspace holding its own db, EDS files, traces and flows. The active
+workspace is remembered in ``<root>/active-workspace`` and can be switched
+from the Setup page at runtime; switching swaps the whole Bench instance.
+An explicit ``--db`` path keeps the old single-file behaviour (tests,
+embedding, experts).
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -55,13 +54,13 @@ def _active_workspace(root: Path) -> str:
 
 
 def create_app(db_path: str | None = None, bus: BusInterface | None = None,
-               plugins: list[BenchPlugin] | None = None) -> Starlette:
-    explicit = db_path or os.environ.get("CANOPEN_BENCH_DB")
-    if explicit:
+               plugins: list[BenchPlugin] | None = None, data: Path | None = None) -> Starlette:
+    """``data``: this start's data folder (``--data``), not the remembered one."""
+    if db_path:
         root: Path | None = None
-        path = Path(explicit)
+        path = Path(db_path)
     else:
-        root = usersettings.data_root()
+        root = Path(data) if data else usersettings.data_root()
         path = root / _active_workspace(root) / "canopen-bench.db"
 
     clients: set[WebSocket] = set()
@@ -105,7 +104,8 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
                 bench.log(f"APP  state not pushed — {type(exc).__name__}: {exc}", "emcy0")
 
     def _build_bench(db: Db) -> Bench:
-        bench = Bench(db, bus=bus, plugins=plugins, workspaces_root=root)
+        bench = Bench(db, bus=bus, plugins=plugins, workspaces_root=root,
+                      data_fixed=data is not None)
         bench.set_notifier(safe_broadcast)
         if root is not None:
             bench.on_workspace_switch = lambda name: asyncio.ensure_future(_switch(name))

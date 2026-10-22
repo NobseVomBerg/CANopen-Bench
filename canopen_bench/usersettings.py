@@ -12,21 +12,14 @@ import os
 import sys
 from pathlib import Path
 
-#: Names the data folder outright, for this process only (start scripts, a
-#: second bench beside the everyday one); Setup cannot change it then.
-ENV_DATA = "CANOPEN_BENCH_DATA"
-
-
-def data_fixed() -> bool:
-    """Whether CANOPEN_BENCH_DATA names the data folder for this process."""
-    return bool(os.environ.get(ENV_DATA))
+#: The settings file; None is the user's own. Tests point it elsewhere.
+SETTINGS_FILE: Path | None = None
 
 
 def settings_file() -> Path:
-    """Per user, outside every data folder. CANOPEN_BENCH_SETTINGS names
-    another file (tests, a bench that must not share the user's)."""
-    if explicit := os.environ.get("CANOPEN_BENCH_SETTINGS"):
-        return Path(explicit)
+    """Per user, outside every data folder."""
+    if SETTINGS_FILE is not None:
+        return SETTINGS_FILE
     if sys.platform == "win32" and os.environ.get("APPDATA"):
         return Path(os.environ["APPDATA"]) / "CANopen-Bench" / "settings.json"
     base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
@@ -49,12 +42,11 @@ def save(**changes) -> None:
 
 
 def data_root() -> Path:
-    """The data folder: CANOPEN_BENCH_DATA, else the one chosen under Setup,
-    else ./data where there is one (how every bench so far found its own),
-    else CANopen-Bench in the home folder. What it came to is remembered,
-    so the next start finds the same folder wherever it is started from."""
-    if env := os.environ.get(ENV_DATA):
-        return Path(env)
+    """The data folder: the one chosen under Setup, else ./data where there
+    is one (how every bench so far found its own), else CANopen-Bench in the
+    home folder. What it came to is remembered, so the next start finds the
+    same folder wherever it is started from. (``--data`` names one for a
+    single start instead, and is not remembered: see __main__.)"""
     if chosen := load().get("data"):
         return Path(chosen)
     here = Path("data")
