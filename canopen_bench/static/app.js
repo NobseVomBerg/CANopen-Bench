@@ -722,12 +722,12 @@ function SetupPage({ s }) {
   const rowLabel = (text, indent) => html`
     <span style="width:${indent ? 98 : 110}px;flex:none;font-size:11px;color:var(--dim);font-weight:600">${text}</span>`;
   const rowNote = (note, warn) => html`
-    <span title=${note} style="flex:0 1 200px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:${warn ? 'var(--amb)' : 'var(--faint)'}">${note}</span>`;
+    <span title=${note} style="flex:2 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px ${MONO};color:${warn ? 'var(--amb)' : 'var(--faint)'}">${note}</span>`;
   const folderRow = ({ label, which, value, note, warn, locked, why, title, indent }) => html`
     <div style="display:flex;align-items:center;gap:8px;${indent ? 'padding-left:12px;' : ''}" title=${title}>
       ${rowLabel(label, indent)}
       <${SyncInput} value=${value || ''} disabled=${locked} title=${locked ? why : ''}
-        onCommit=${(v) => send('set_path', { which, value: v })} style="flex:1;min-width:0;${inputStyle};${locked ? 'opacity:.65' : ''}" />
+        onCommit=${(v) => send('set_path', { which, value: v })} style="flex:3 1 0;min-width:120px;${inputStyle};${locked ? 'opacity:.65' : ''}" />
       <span class=${locked ? '' : 'hv'} title=${locked ? why : ''} onClick=${() => { if (!locked) send('browse_open', { which }); }}
         style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;white-space:nowrap;cursor:${locked ? 'not-allowed;opacity:.45' : 'pointer'}">Browse…</span>
       ${rowNote(note, warn)}
@@ -977,16 +977,17 @@ function SetupPage({ s }) {
       ${s.workspaces.data && folderRow({ label: 'DATA FOLDER', which: 'data', value: s.workspaces.dataNext,
           locked: s.workspaces.dataFixed, why: 'Set by CANOPEN_BENCH_DATA for this start (a start script, Docker) — change it there',
           warn: s.workspaces.dataNext !== s.workspaces.data,
-          note: s.workspaces.dataFixed ? 'set by CANOPEN_BENCH_DATA for this start'
+          note: s.workspaces.dataFixed ? 'fixed by CANOPEN_BENCH_DATA'
             : s.workspaces.dataNext !== s.workspaces.data ? `from the next start on — now ${s.workspaces.data}`
             : 'the workspaces are its subfolders',
           title: 'Where the workspaces live, each a subfolder. Kept per user, so the bench finds it wherever it is started from.' })}
       ${s.workspaces.canSwitch && html`
-      <div style="display:flex;align-items:center;gap:8px" title=${`A subfolder of the data folder: ${s.workspaces.folder}`}>
+      <div style="display:flex;align-items:center;gap:8px"
+        title=${`A subfolder of the data folder (${s.workspaces.folder}) with its own db, EDS files, machine-control state, test config and captures. Switching disconnects the bus.`}>
         ${rowLabel('WORKSPACE')}
         <${OptionSelect} value=${s.workspace}
           options=${s.workspaces.list.map((w) => [w, w])}
-          style=${`flex:1;min-width:0;${inputStyle}`}
+          style=${`flex:3 1 0;min-width:120px;${inputStyle}`}
           onPick=${(name, e) => {
             // put the box back by hand, and at once: it names the workspace
             // that is open until the switch has happened, and the memo returns
@@ -1004,7 +1005,7 @@ function SetupPage({ s }) {
             note: 'letters, digits, space and . _ - only',
           }).then((name) => { if (name) send('workspace_create', { name }); })}
           style="${btn.ghost}font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap">＋ New…</span>
-        ${rowNote('its own db, EDS files, machine-control state, test config and captures · switching disconnects the bus')}
+        ${rowNote('own db, EDS, test config, captures')}
       </div>`}
       <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
         <span style="font-size:10.5px;color:var(--faint);white-space:nowrap">in the workspace</span>
