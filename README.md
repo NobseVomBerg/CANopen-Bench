@@ -6,20 +6,21 @@ driven by the devices' EDS files. Python backend (Starlette +
 canopen/python-can), no-build frontend (Preact/HTM), one self-contained
 workspace folder per bench.
 
-![Live CAN trace (dark mode): SDO transfers decoded against the EDS, heartbeats, state log](docs/img/trace.png)
+![Live CAN trace (dark mode): SDO transfers decoded against the EDS, heartbeats, state log](https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/trace.png)
 
 ## Try it — no hardware needed
 
 ```bash
-pip install .
+pip install canopen-bench
 canopen-bench                  # → http://127.0.0.1:8000
 ```
 
-No virtualenv needed to just run it, and no `-e` — that installs the
-package for editing, which is what `## Development` below is for.
+No virtualenv needed to just run it. From a clone, `pip install .`
+installs the same thing from the checkout — without `-e`, which installs
+the package for editing, and that is what `## Development` below is for.
 
 `canopen-bench` is a shortcut the install writes; the module runs just as
-well by itself, from the repository root:
+well by itself, and from a clone's root it runs that checkout:
 
 ```bash
 python -m canopen_bench                       # same thing, same options
@@ -45,7 +46,7 @@ the workspace on first run). SDO reads/writes are answered from the EDS
 object dictionary — including realistic aborts on out-of-range writes —
 and every access shows up in the Trace like real bus traffic.
 
-![Setup page: bus interface, EDS registry with identity matching, machine control](docs/img/setup.png)
+![Setup page: bus interface, EDS registry with identity matching, machine control](https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/setup.png)
 
 ## Features
 
@@ -150,7 +151,7 @@ state log names any this Python lacks, with the pip command that adds
 them. Guide with hook table and a minimal example:
 `docs/extending.md`; API: `canopen_bench/plugin.py`. A complete worked
 example ships in this repo under
-[`plugins/cob-cpcusb/`](plugins/cob-cpcusb/) — python-can driver plus
+[`plugins/cob-cpcusb/`](https://github.com/NobseVomBerg/CANopen-Bench/tree/main/plugins/cob-cpcusb) — python-can driver plus
 adapter card, its own tests, MIT. It is a separate distribution, not part
 of the `canopen-bench` package: install it only if you have that
 adapter.
@@ -191,7 +192,7 @@ independently — vendor plugins proprietary, `cob-cpcusb` MIT.
 Bundled and depended-on third-party components, and the trademark note
 (CANopen® and CiA® belong to CAN in Automation e.V.; this is not a
 CiA-certified or CiA-affiliated tool), are listed in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+[`THIRD-PARTY-NOTICES.md`](https://github.com/NobseVomBerg/CANopen-Bench/blob/main/THIRD-PARTY-NOTICES.md).
 
 Created by NobseVomBerg · [unsix.de](https://unsix.de) ·
 [GitHub](https://github.com/NobseVomBerg/CANopen-Bench)
