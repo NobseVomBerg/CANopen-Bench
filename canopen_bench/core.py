@@ -571,7 +571,10 @@ def _step_text(key: str, val) -> str:
     if key == "lss_assign":
         return f"LSS assign 1..{val['count']}"
     if key == "lss_fastscan":
-        return f"LSS fastscan, node-IDs {val.get('first', 1)}..{val.get('last', 127)}"
+        return (f"LSS fastscan, node-IDs {val.get('first', 1)}..{val.get('last', 127)}"
+                + (f", expect {val['expect']} device(s)" if "expect" in val else ""))
+    if key == "expect_no_frame":
+        return f"expect no frame {val['cob']} for {val['timeout']:g}s"
     if key in tclib._ARITH:
         return f"{key} {val['to']}, {val['value']}"
     if key == "loop":
@@ -6118,7 +6121,9 @@ class Bench:
                     _resolve(n, regs, builtins) if n is not None else node)
             else:
                 cmd, target = val, node
-            await asyncio.to_thread(bus.nmt, cmd, target)
+            # node-ID 0 is how CiA 301 itself writes "all" — and asked for
+            # a node 0, python-canopen raises instead of sending anything
+            await asyncio.to_thread(bus.nmt, cmd, target or None)
             return "ok", ""
         if key == "can_send":
             cob = _resolve(val["cob"], regs, builtins)
@@ -6161,6 +6166,9 @@ class Bench:
             done = "; ".join(dev.text() for dev in found)
             if failed:
                 return "fail", f"lss_fastscan: {failed}" + (f" — assigned before: {done}" if done else "")
+            if "expect" in val and len(found) != (want := _resolve(val["expect"], regs, builtins)):
+                return "fail", (f"lss_fastscan assigned {len(found)} device(s), expected {want}"
+                                + (f": {done}" if done else ""))
             return "ok", done or "no unconfigured device answered"
         if key in ("sdo_read", "sdo_write") and "node" in val:
             # a case may talk to more than the one device it is about — a
@@ -6375,6 +6383,30 @@ class Bench:
             if on_timeout:
                 return "jump", on_timeout
             return "fail", f"wait_for heartbeat {target} — timeout after {timeout:g}s"
+        if key == "expect_no_frame":
+            # Silence on one COB-ID for `timeout`, counted from the step's
+            # start and not FRAME_LOOKBACK_S before it like wait_for: the
+            # frame just before is what the previous step was about — the
+            # last heartbeat before an AddrControl 02 silenced the device —
+            # and would fail the step on a device that did nothing wrong.
+            cob = _resolve(val["cob"], regs, builtins)
+            timeout = float(val["timeout"])
+            loop = asyncio.get_running_loop()
+            self._drain_frames()    # so what came before is stamped before
+            started = loop.time()
+            while True:
+                if should_stop():
+                    return "error", "aborted"
+                if not self.connected:
+                    return "error", "connection lost"
+                self._drain_frames()
+                waited = loop.time() - started
+                if seen := self._traced_seen({cob}, waited):
+                    return "fail", (f"expect no frame 0x{cob:03X} for {timeout:g}s"
+                                    f" — saw 0x{cob:03X} {seen[cob]} after {waited:.2f}s")
+                if waited >= timeout:
+                    return "ok", ""
+                await asyncio.sleep(min(0.01, timeout - waited))
         if key == "scan":
             while self.scan_busy:  # one the page started: wait for it, not a second one
                 if should_stop():

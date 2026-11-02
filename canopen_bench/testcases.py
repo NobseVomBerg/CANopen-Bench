@@ -294,9 +294,9 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if not isinstance(val, dict):
             return "lss_fastscan: needs a mapping, e.g. {vendor: \"0x4D2\", first: 1, last: 32}"
         if unknown := set(val) - {"vendor", "product", "revision", "serial", "first", "last",
-                                  "timeout", "bootup", "into"} - _NOTE:
+                                  "timeout", "bootup", "into", "expect"} - _NOTE:
             return f"lss_fastscan: unknown field(s) {sorted(unknown)}"
-        for name in ("vendor", "product", "revision", "serial", "first", "last"):
+        for name in ("vendor", "product", "revision", "serial", "first", "last", "expect"):
             if name in val and not _is_value(val[name]):
                 return f"lss_fastscan: invalid {name} {val[name]!r}"
         for name in ("timeout", "bootup"):
@@ -364,6 +364,18 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
             return "wait_for: missing timeout"
         if val.get("heartbeat") not in _HB_STATES:
             return f"wait_for: heartbeat must be one of {sorted(_HB_STATES)}"
+        return None
+    if key == "expect_no_frame":
+        # silence on one COB-ID: a heartbeat that has to stop, a device
+        # that must not answer. Not writable as a wait_for that times out
+        # into a pass — that one looks back before the step, see core.
+        if not isinstance(val, dict) or set(val) - _NOTE != {"cob", "timeout"}:
+            return "expect_no_frame: needs {cob, timeout}"
+        if not _is_value(val["cob"]):
+            return f"expect_no_frame: invalid cob {val['cob']!r}"
+        if isinstance(val["timeout"], bool) or not isinstance(val["timeout"], (int, float)) \
+                or val["timeout"] <= 0:
+            return "expect_no_frame: timeout must be a duration in seconds"
         return None
     if key in _STEP_FIELDS:
         required, optional = _STEP_FIELDS[key]
