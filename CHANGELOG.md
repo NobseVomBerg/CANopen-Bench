@@ -4,8 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **There are no tagged releases.** `main` is the current state and the
-version to use — install from the repository, not from a release
-artifact. The version in `pyproject.toml` moves once per merge into
+version to use. PyPI carries states of `main` published from it by hand
+(`pip install canopen-bench`), each under the version it had there, so
+a PyPI version and a `main` version name the same state. The version in
+`pyproject.toml` moves once per merge into
 `main` that changes the tool itself, so it always identifies one specific
 state of the tool; the rules are in
 [`CONTRIBUTING.md`](CONTRIBUTING.md#versioning).
@@ -170,3 +172,6 @@ development; the version counts from here.
   — CANopen® and CiA® belong to CAN in Automation e.V., this is an
   independent project and not a CiA conformance test tool
 - `Dockerfile` for the container workflow the README describes
+- Published on PyPI as `canopen-bench` from 1.0.170: `publish.yml`, run
+  by hand, builds `main` and uploads it through Trusted Publishing, with
+  no token stored anywhere
