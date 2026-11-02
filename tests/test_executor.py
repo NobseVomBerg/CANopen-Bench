@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -2652,3 +2653,79 @@ def test_an_unchanged_variant_is_not_logged_at_every_run(stale_variant_bench):
     run_selected(bench, {"0201"})
     assert bench.results["0201"] == "PASS"
     assert not any("read again" in r["msg"] for r in bench.logs)
+
+
+# -- expect_no_frame: silence on one COB-ID, counted from the step on -----------
+
+QUIET_TC = """\
+id: "0402"
+name: "no heartbeat on 0x70B"
+steps:
+  - wait: 0.15
+  - expect_no_frame: {cob: "0x70B", timeout: 0.4}
+"""
+
+
+def _heartbeat(bench: Bench) -> None:
+    bench.bus.queue_raw(0x70B, b"\x05")
+
+
+def _after(send, seconds: float):
+    """`_once`, but `seconds` into the case — inside a step, not before it."""
+    fired: list[bool] = []
+
+    def hook(bench: Bench) -> None:
+        if not fired and bench._sequence_started_at \
+                and time.monotonic() - bench._sequence_started_at > seconds:
+            fired.append(True)
+            send(bench)
+    return hook
+
+
+def test_no_frame_passes_on_a_silent_cob_id(tc_bench):
+    _add_tc(tc_bench, "TC0402_quiet.yaml", QUIET_TC)
+    run_selected(tc_bench, {"0402"})
+    assert tc_bench.results == {"0402": "PASS"}
+
+
+def test_no_frame_does_not_look_back_before_its_step(tc_bench):
+    """The last heartbeat before AddrControl 02 silenced the device is what
+    the step before was about. wait_for's look-back would see it and fail
+    the step on a device that went quiet exactly when it should."""
+    _add_tc(tc_bench, "TC0402_quiet.yaml", QUIET_TC)
+    run_selected(tc_bench, {"0402"}, during=_once(_heartbeat))     # during the wait
+    assert tc_bench.results == {"0402": "PASS"}
+
+
+def test_no_frame_fails_on_one_inside_its_window_and_names_it(tc_bench):
+    _add_tc(tc_bench, "TC0402_quiet.yaml", QUIET_TC)
+    run_selected(tc_bench, {"0402"}, during=_after(_heartbeat, 0.3))
+    assert tc_bench.results == {"0402": "FAIL"}
+    said = " ".join(ln["msg"] for ln in tc_bench.logs)
+    assert "saw 0x70B 05" in said, said
+
+
+@pytest.mark.parametrize("val, error", [
+    ({"cob": "0x701", "timeout": 2.5}, None),
+    ({"cob": "R14", "timeout": 1, "note": "kein Heartbeat"}, None),
+    ({"cob": "0x701"}, "needs {cob, timeout}"),
+    ({"cob": "0x701", "timeout": 1, "data": "05"}, "needs {cob, timeout}"),
+    ({"cob": "0x701", "timeout": 0}, "timeout must be a duration"),
+    ({"cob": [1], "timeout": 1}, "invalid cob"),
+])
+def test_no_frame_is_checked_when_the_file_loads(val, error):
+    got = tclib._check_step({"expect_no_frame": val})
+    assert (got is None) if error is None else (error in got), got
+
+
+
+def test_nmt_to_node_0_goes_to_all(tc_bench, monkeypatch):
+    """Node-ID 0 is how CiA 301 writes "all", and how a case may write it.
+    Handed on as a node, python-canopen raised instead of sending."""
+    sent: list = []
+    monkeypatch.setattr(tc_bench.bus, "nmt", lambda cmd, node=None: sent.append((cmd, node)))
+    _add_tc(tc_bench, "TC0403_nmt_all.yaml",
+            'id: "0403"\nname: "reset all"\nsteps:\n  - nmt: {cmd: resetcomm, node: 0}\n')
+    run_selected(tc_bench, {"0403"})
+    assert tc_bench.results == {"0403": "PASS"}
+    assert sent == [("resetcomm", None)]
