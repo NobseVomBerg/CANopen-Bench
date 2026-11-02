@@ -62,6 +62,12 @@ There are no tagged releases: `main` is the current state. The version in
 report answerable — so it moves **once per merge into `main`, and only
 when the tool's own code changed.**
 
+PyPI gets a state of `main` only when someone runs *Publish to PyPI*
+(`.github/workflows/publish.yml`) by hand, after the `pypi` environment's
+reviewer approves. PyPI takes each version once, so a merge that left the
+version alone (docs, tests, CI) has nothing to publish — including the
+README PyPI shows, which only moves with the next version.
+
 Once per merge, not per commit: a branch lands as a single state on
 `main` no matter how many commits it took to get there. Bump it in the
 branch, before merging.

@@ -1,0 +1,54 @@
+name: Publish to PyPI
+
+# By hand only (Actions > Publish to PyPI > Run workflow): main is the
+# release (CONTRIBUTING.md, "Versioning"), and not every merge needs to reach
+# PyPI. The upload carries the version pyproject.toml has; PyPI takes each
+# version once, so running it twice on the same state fails rather than
+# replacing anything.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Run workflow offers every branch; only main is a state anyone can look up.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      # --strict fails on a README PyPI would render badly, before anything
+      # is uploaded
+      - name: Build and check
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted Publishing: PyPI accepts the upload because it comes from this
+    # workflow in this environment, as registered under the project's
+    # publishers on pypi.org. No token is stored anywhere. The environment's
+    # required reviewer is the last look before a version is final.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/canopen-bench
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
