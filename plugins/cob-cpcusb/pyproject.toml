@@ -4,14 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cob-cpcusb"
-version = "1.1.1"
-description = "CPC-USB/ARM7 support for canopen-bench: a pyusb/WinUSB python-can backend plus its adapter card"
+version = "1.1.2"
+description = "CPC-USB/ARM7 CAN adapter support: a pyusb/WinUSB python-can backend (interface \"cpcusb\") plus its adapter card for canopen-bench"
+readme = "README.md"
 # MIT, matching the canopen-bench core. This package was GPL-2.0-only while
 # one function was carried over from the mainline Linux ems_usb.c driver;
 # that function has been reimplemented against PROTOCOL.md, leaving only
 # protocol facts in common. See PROTOCOL.md, "Provenance and licensing".
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{name = "NobseVomBerg"}]
+keywords = ["python-can", "can", "can-bus", "cpc-usb", "cpcusb", "usb", "canopen-bench"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
 requires-python = ">=3.10"
 dependencies = [
     "python-can>=4.4",
@@ -23,6 +37,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/NobseVomBerg/CANopen-Bench/tree/main/plugins/cob-cpcusb"
+Protocol = "https://github.com/NobseVomBerg/CANopen-Bench/blob/main/plugins/cob-cpcusb/PROTOCOL.md"
+Issues = "https://github.com/NobseVomBerg/CANopen-Bench/issues"
 
 # python-can's own plugin discovery: makes interface="cpcusb" available to
 # any python-can user, including canopen-bench's CanopenBus.

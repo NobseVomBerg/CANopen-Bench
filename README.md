@@ -153,8 +153,8 @@ them. Guide with hook table and a minimal example:
 example ships in this repo under
 [`plugins/cob-cpcusb/`](https://github.com/NobseVomBerg/CANopen-Bench/tree/main/plugins/cob-cpcusb) — python-can driver plus
 adapter card, its own tests, MIT. It is a separate distribution, not part
-of the `canopen-bench` package: install it only if you have that
-adapter.
+of the `canopen-bench` package: install it (`pip install cob-cpcusb`)
+only if you have that adapter.
 
 ## Documentation
 
