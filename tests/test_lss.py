@@ -153,6 +153,8 @@ def test_a_late_answer_does_not_count_for_the_next_question(bench, monkeypatch):
     ({"timeout": 0}, "timeout must be a duration"),
     ({"bootup": "1s"}, "bootup must be a duration"),
     ({"first": [1]}, "invalid first"),
+    ({"expect": 3}, None),
+    ({"expect": "three"}, "invalid expect"),
     ("0x4D2", "needs a mapping"),
 ])
 def test_the_step_is_checked_when_the_file_loads(val, error):
@@ -164,7 +166,7 @@ FASTSCAN_TC = """\
 id: "0301"
 name: "lss_fastscan hands out node-IDs"
 steps:
-  - lss_fastscan: {first: 4, last: 9, timeout: 0.002, into: R1}
+  - lss_fastscan: {first: 4, last: 9, timeout: 0.002, into: R1, expect: 3}
   - jump_eq: {a: R1, b: 3, to: ok}
   - fail: "wrong count"
   - label: ok
@@ -185,6 +187,21 @@ def test_the_step_counts_and_logs_what_it_assigned(bench, bus, tmp_path):
     assert bus.device_nodes() == [4, 5, 6]
     assert [ln["msg"].split(":")[0] for ln in bench.logs if ln["msg"].startswith("LSS")] \
         == ["LSS  node 4", "LSS  node 5", "LSS  node 6"]
+
+
+def test_another_count_than_expected_fails(bench, tmp_path, monkeypatch):
+    """`expect`: one line in a case says how many devices the scan has to
+    find, where it took a register, a jump and a fail before."""
+    monkeypatch.setattr(lsslib, "assign", lambda *a, **kw: [])    # nobody answered
+    folder = tmp_path / "tcs"
+    folder.mkdir()
+    (folder / "TC0302_fastscan.yaml").write_text(
+        'id: "0302"\nname: "three expected"\nsteps:\n  - lss_fastscan: {expect: 3}\n')
+    bench.dispatch("set_path", {"which": "tc", "value": str(folder)})
+    bench.dispatch("dev_toggle", {"node": 1})
+    run_selected(bench, {"0302"})
+    assert bench.results == {"0302": "FAIL"}
+    assert any("assigned 0 device(s), expected 3" in ln["msg"] for ln in bench.logs)
 
 
 # -- reading it back -------------------------------------------------------------
