@@ -106,13 +106,15 @@ and every access shows up in the Trace like real bus traffic.
 
 ## Screenshots
 
-The first two are from a real bench with a vendor plugin installed —
-device name, display and two handler names pixelated. The rest is demo
-mode, as `pip install canopen-bench` gives it. Some of what the first two
-show is the plugin's, not the core's: the runtime profiler is a
-statistics block it adds, the display card in the sidebar is its device
-panel, and frame names beyond CANopen are its trace decoders
-(`docs/extending.md` has the hooks).
+Stats, profiler and SWDL are from a real bench with a vendor plugin
+installed — device, product and a few handler names replaced with
+generic ones, the display pixelated. Tests and Objects are demo mode, as `pip install
+canopen-bench` gives it. Some of what the real bench shows is the
+plugin's, not the core's: the runtime profiler is a statistics block it
+adds, the display card in the sidebar is its device panel, frame names
+beyond CANopen are its trace decoders, and the firmware format and
+download protocol are its SWDL strategy (`docs/extending.md` has the
+hooks).
 
 <table>
   <tr>
@@ -148,12 +150,19 @@ panel, and frame names beyond CANopen are its trace decoders
     </td>
   </tr>
   <tr>
-    <td colspan="2" align="center">
+    <td width="50%">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/panel-dark.png">
-        <img width="50%" alt="Object panel: the same objects grouped with names and units" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/panel.png">
+        <img width="100%" alt="Object panel: the same objects grouped with names and units" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/panel.png">
       </picture>
       <br><sub>Objects › Panel: the same objects grouped by a panel file (<code>docs/panel-format.md</code>)</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/swdl-dark.png">
+        <img width="100%" alt="Software download: one firmware file to three devices in parallel" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/swdl.png">
+      </picture>
+      <br><sub>SWDL (plugin): one firmware file to three devices in parallel</sub>
     </td>
   </tr>
 </table>
