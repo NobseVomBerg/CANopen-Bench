@@ -598,10 +598,10 @@ def _step_text(key: str, val) -> str:
         # mask 0 compares nothing, which is how "any EMCY at all" is
         # written — saying "expect EMCY 0x00" for that would be a lie
         if "mask" in val and _as_int(val["mask"]) == 0:
-            return "expect any EMCY"
+            return "expect any EMCY" + _emcy_from(val)
         return _emcy_wanted(val).replace("expect_emcy ", "expect EMCY ")
     if key == "expect_no_emcy":
-        return ("expect no EMCY" if not (val.keys() & {"code", "mec", "reg"})
+        return ("expect no EMCY" + _emcy_from(val) if not (val.keys() & {"code", "mec", "reg"})
                 else _emcy_wanted(val).replace("expect_emcy ", "expect no EMCY "))
     if key == "emcy_clear":
         return "clear EMCY list"
@@ -728,7 +728,17 @@ def _emcy_wanted(val: dict) -> str:
                      + (f" (mask {_hexstr(val['mec_mask'])})" if "mec_mask" in val else ""))
     if "reg" in val:
         parts.append(f"reg {_hexstr(val['reg'])}")
-    return "expect_emcy " + (", ".join(parts) if parts else "any")
+    return "expect_emcy " + (", ".join(parts) if parts else "any") + _emcy_from(val)
+
+
+def _emcy_from(val: dict) -> str:
+    """Whose EMCY the step is about. With several devices on the bus the
+    line has to say it: "expect EMCY mec 0x0071" passing on a neighbour's
+    looks exactly like passing on the DUT's. No node is any device's, and
+    the line keeps saying that by saying nothing, as it always has."""
+    if "node" not in val:
+        return ""
+    return " from the DUT" if val["node"] == "$node" else f" from node {val['node']}"
 
 
 def _out_of_range(value: int, lo: object, hi: object) -> bool:
@@ -6301,7 +6311,7 @@ class Bench:
             hits = [e for e in self._emcy_window() if match(e)]
             if not hits:
                 return "ok", ""
-            return "fail", ("expected no EMCY, saw "
+            return "fail", (f"expected no EMCY{_emcy_from(val)}, saw "
                             + ", ".join(_emcy_str(e) for e in hits[-3:]))
         if key == "wait_for":
             timeout = float(val["timeout"])
