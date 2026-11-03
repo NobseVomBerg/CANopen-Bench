@@ -2729,3 +2729,46 @@ def test_nmt_to_node_0_goes_to_all(tc_bench, monkeypatch):
     run_selected(tc_bench, {"0403"})
     assert tc_bench.results == {"0403": "PASS"}
     assert sent == [("resetcomm", None)]
+
+
+# -- whose EMCY: the DUT's, one node's, or any device's -------------------------
+
+NO_EMCY_FROM_DUT_TC = """\
+id: "0404"
+name: "the DUT reported nothing"
+steps:
+  - wait: 0.1
+  - expect_no_emcy: {node: $node}
+"""
+
+
+def test_a_neighbours_emcy_does_not_count_for_the_dut(tc_bench):
+    _add_tc(tc_bench, "TC0404_no_emcy_dut.yaml", NO_EMCY_FROM_DUT_TC)
+    run_selected(tc_bench, {"0404"}, during=_once(_emcy, node=2, code=0x1234))
+    assert tc_bench.results == {"0404": "PASS"}
+
+
+def test_the_duts_own_emcy_fails_it_and_the_line_says_whose(tc_bench):
+    _add_tc(tc_bench, "TC0404_no_emcy_dut.yaml", NO_EMCY_FROM_DUT_TC)
+    run_selected(tc_bench, {"0404"}, during=_once(_emcy, node=1, code=0x1234))
+    assert tc_bench.results == {"0404": "FAIL"}
+    said = " ".join(ln["msg"] for ln in tc_bench.logs)
+    assert "expected no EMCY from the DUT, saw 0x1234" in said, said
+
+
+@pytest.mark.parametrize("key, val, text", [
+    ("expect_emcy", {"mec": "0x71", "node": "$node"}, "from the DUT"),
+    ("expect_emcy", {"mec": "0x71", "node": 2}, "from node 2"),
+    ("expect_emcy", {"code": "0x00", "mask": "0x00", "node": 1}, "expect any EMCY from node 1"),
+    ("expect_no_emcy", {"node": "$node"}, "expect no EMCY from the DUT"),
+    ("expect_no_emcy", {"mec": "0x71", "node": 3}, "from node 3"),
+])
+def test_an_emcy_line_names_whose_emcy_it_is_about(key, val, text):
+    """With three devices on the bus, "expect EMCY mec 0x0071" passing on a
+    neighbour's reads exactly like passing on the DUT's."""
+    assert _step_text(key, val).endswith(text), _step_text(key, val)
+
+
+def test_an_emcy_line_without_a_node_reads_as_it_always_did():
+    assert _step_text("expect_no_emcy", {}) == "expect no EMCY"
+    assert "from" not in _step_text("expect_emcy", {"mec": "0x71"})
