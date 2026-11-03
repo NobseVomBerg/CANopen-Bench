@@ -659,7 +659,7 @@ def test_a_case_that_was_not_re_run_does_not_hold_the_variant_red():
         _case_doc(id="4857", name="Yarn breakage", verdict="FAIL",
                   started="2026-07-26T08:00:00")]}
     newest = {"started": "2026-07-28T08:00:00", "cases": [
-        _case_doc(id="4602", name="Power off", verdict="PASS",
+        _case_doc(id="0070", name="Power off", verdict="PASS",
                   started="2026-07-28T08:00:00")]}
     (group,) = collect_overview([older, newest])
     assert group.verdict == "PASS"

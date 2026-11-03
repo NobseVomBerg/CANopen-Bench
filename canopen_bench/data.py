@@ -17,30 +17,29 @@ SEED_EDS_FILES: list[dict] = []
 TESTS = [
     ("0000", "Test the Tests", "—", "0.4 s"),
     ("0001", "PSU ON with 57V on Channel 2", "PSU", "0.8 s"),
-    ("1000", "Read Eeprom values via CANopen objects", "—", "3.2 s"),
-    ("4433", "Serial number readout", "—", "1.1 s"),
-    ("4455", "Process parameter local control", "—", "2.6 s"),
-    ("4526", "Error handling basics", "PSU", "4.0 s"),
-    ("4559", "LED test", "—", "1.9 s"),
-    ("4598", "Notification: enter/leave setup menu", "—", "2.2 s"),
-    ("4602", "Aux power off handling, under-voltage", "PSU", "8.4 s"),
-    ("4613", "Menu — go through parameters menu", "—", "6.1 s"),
-    ("4622", "Obj 2040h product identification", "—", "0.7 s"),
-    ("4671", "RPDO1 transfer", "—", "1.3 s"),
-    ("4672", "RPDO2 transfer", "—", "1.4 s"),
-    ("4709", "Switching between operating states", "PSU", "12.2 s"),
-    ("4790", "Error handling — HW errors not clickable-away", "—", "5.5 s"),
-    ("4828", "Test automation, math functions", "—", "0.3 s"),
+    ("0010", "Read Eeprom values via CANopen objects", "—", "3.2 s"),
+    ("0020", "Serial number readout", "—", "1.1 s"),
+    ("0030", "Process parameter local control", "—", "2.6 s"),
+    ("0040", "Error handling basics", "PSU", "4.0 s"),
+    ("0050", "LED test", "—", "1.9 s"),
+    ("0060", "Notification: enter/leave setup menu", "—", "2.2 s"),
+    ("0070", "Aux power off handling, under-voltage", "PSU", "8.4 s"),
+    ("0080", "Menu — go through parameters menu", "—", "6.1 s"),
+    ("0090", "RPDO1 transfer", "—", "1.3 s"),
+    ("0100", "RPDO2 transfer", "—", "1.4 s"),
+    ("0110", "Switching between operating states", "PSU", "12.2 s"),
+    ("0120", "Error handling — HW errors not clickable-away", "—", "5.5 s"),
+    ("0130", "Test automation, math functions", "—", "0.3 s"),
 ]
 # Result of the previous run (seed data)
 LAST_RESULTS = {
-    "0000": "PASS", "0001": "PASS", "1000": "PASS", "4433": "PASS", "4455": "FAIL",
-    "4526": "PASS", "4559": "PASS", "4602": "PASS", "4613": "PASS", "4622": "PASS",
-    "4671": "PASS", "4709": "FAIL", "4790": "PASS", "4828": "PASS",
+    "0000": "PASS", "0001": "PASS", "0010": "PASS", "0020": "PASS", "0030": "FAIL",
+    "0040": "PASS", "0050": "PASS", "0070": "PASS", "0080": "PASS",
+    "0090": "PASS", "0110": "FAIL", "0120": "PASS", "0130": "PASS",
 }
 # Tests that deterministically fail in the simulated test runner (_run_step)
-FAILING_TESTS = {"4455", "4709"}
-DEFAULT_TEST_SEL = ["0001", "1000", "4433", "4602", "4613", "4622"]
+FAILING_TESTS = {"0030", "0110"}
+DEFAULT_TEST_SEL = ["0001", "0010", "0020", "0070", "0080"]
 
 SEED_REPORTS = [
     {"name": "run_0714_1132.html", "score": "28/28", "ok": True},
