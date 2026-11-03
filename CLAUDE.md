@@ -8,8 +8,8 @@ about how Claude should work in this repo.
 ## Git workflow
 
 **Never commit directly to `main`.** The repository is public; `main` is
-what anyone cloning it gets, and there is no release to fall back to —
-`main` *is* the release. Branch, push the branch, let CI go green, then
+what anyone cloning it gets, and there is no release branch to fall back
+to — `main` *is* the current state; tags only mark what went to PyPI. Branch, push the branch, let CI go green, then
 merge.
 
 ```bash
