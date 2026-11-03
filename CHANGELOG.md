@@ -3,10 +3,12 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**There are no tagged releases.** `main` is the current state and the
-version to use. PyPI carries states of `main` published from it by hand
-(`pip install canopen-bench`), each under the version it had there, so
-a PyPI version and a `main` version name the same state. The version in
+**`main` is the current state** and the version to use. PyPI carries
+states of `main` published from it by hand (`pip install canopen-bench`),
+each under the version it had there, so a PyPI version and a `main`
+version name the same state. Each of those is tagged (`v1.0.171`) and has
+a [GitHub Release](https://github.com/NobseVomBerg/CANopen-Bench/releases)
+listing the merges since the previous one. The version in
 `pyproject.toml` moves once per merge into
 `main` that changes the tool itself, so it always identifies one specific
 state of the tool; the rules are in
@@ -174,7 +176,8 @@ development; the version counts from here.
 - `Dockerfile` for the container workflow the README describes
 - Published on PyPI as `canopen-bench` from 1.0.170: `publish.yml`, run
   by hand, builds `main` and uploads it through Trusted Publishing, with
-  no token stored anywhere
+  no token stored anywhere. Each upload is tagged and gets a GitHub
+  Release, back to 1.0.170
 - CPC-USB/ARM7 support comes with the install from 1.0.171:
   `canopen-bench` depends on `cob-cpcusb` (on PyPI from 1.1.2), which
   in turn no longer depends on the bench and brings libusb on Windows
