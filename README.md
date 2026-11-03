@@ -95,6 +95,68 @@ and every access shows up in the Trace like real bus traffic.
   save/load, and autosave — every recorded frame written to a capture
   file as it arrives, kept for two weeks, for the endurance runs that are
   longer than the ring is deep.
+- **Web API** — the browser is only a client: every button is a
+  `POST /api/action {action, params}`, and `GET /api/state` returns what
+  the pages show as JSON. A script, or an AI agent with nothing but curl,
+  drives the bench the same way — scan, read objects, start a run, go
+  through the trace — which automates what no test case covers: a quick
+  investigation, a check across many devices, a report put together on
+  the spot. The actions are the `act_*` methods in `canopen_bench/core.py`.
+  No authentication, so the port stays on a trusted network.
+
+## Screenshots
+
+The first two are from a real bench with a vendor plugin installed —
+device name, display and two handler names pixelated. The rest is demo
+mode, as `pip install canopen-bench` gives it. Some of what the first two
+show is the plugin's, not the core's: the runtime profiler is a
+statistics block it adds, the display card in the sidebar is its device
+panel, and frame names beyond CANopen are its trace decoders
+(`docs/extending.md` has the hooks).
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/stats-dark.png">
+        <img width="100%" alt="Trace statistics: bus load, frames by class and by COB-ID" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/stats.png">
+      </picture>
+      <br><sub>Trace › Stats: bus load, frames by class and by COB-ID</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/profiler-dark.png">
+        <img width="100%" alt="Runtime profiler: ISR, task and section load reported by the device" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/profiler.png">
+      </picture>
+      <br><sub>Runtime profiler (plugin): ISR, task and section load as the device reports it</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/tests-dark.png">
+        <img width="100%" alt="System tests: a run in progress with one failed case" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/tests.png">
+      </picture>
+      <br><sub>Tests: a run in progress, one case failed so far</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/objects-dark.png">
+        <img width="100%" alt="Object table from the EDS with read values and favorites" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/objects.png">
+      </picture>
+      <br><sub>Objects: the EDS as a table, values read, favorites on the right</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/panel-dark.png">
+        <img width="50%" alt="Object panel: the same objects grouped with names and units" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/panel.png">
+      </picture>
+      <br><sub>Objects › Panel: the same objects grouped by a panel file (<code>docs/panel-format.md</code>)</sub>
+    </td>
+  </tr>
+</table>
 
 ## Hardware
 
