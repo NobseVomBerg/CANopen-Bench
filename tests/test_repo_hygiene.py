@@ -129,7 +129,7 @@ def test_the_shape_check_covers_how_headers_are_written(sample):
 
 # -- the version identifies one state of the tool ---------------------------
 #
-# `main` is the release (there are no tags), so the version in
+# `main` is the current state (tags mark only what went to PyPI), so the version in
 # pyproject.toml is the only thing that says *which* main a bug report is
 # about. CONTRIBUTING requires it to move once per merge that changes the
 # tool. Two people working in parallel break that without either of them

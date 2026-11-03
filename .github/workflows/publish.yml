@@ -1,7 +1,7 @@
 name: Publish to PyPI
 
-# By hand only (Actions > Publish to PyPI > Run workflow): main is the
-# release (CONTRIBUTING.md, "Versioning"), and not every merge needs to reach
+# By hand only (Actions > Publish to PyPI > Run workflow): main is the current
+# state (CONTRIBUTING.md, "Versioning"), and not every merge needs to reach
 # PyPI. The upload carries the version the package's pyproject.toml has; PyPI
 # takes each version once, so running it twice on the same state fails rather
 # than replacing anything.
@@ -22,6 +22,9 @@ jobs:
     # Run workflow offers every branch; only main is a state anyone can look up.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+      tag: ${{ steps.build.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -32,17 +35,21 @@ jobs:
       # --strict fails on a README PyPI would render badly, before anything
       # is uploaded
       - name: Build and check
+        id: build
         env:
           PACKAGE: ${{ inputs.package }}
         run: |
           case "$PACKAGE" in
-            canopen-bench) src=. ;;
-            cob-cpcusb)    src=plugins/cob-cpcusb ;;
+            canopen-bench) src=. ; prefix=v ;;
+            cob-cpcusb)    src=plugins/cob-cpcusb ; prefix=cob-cpcusb-v ;;
             *) echo "unknown package: $PACKAGE"; exit 1 ;;
           esac
           python -m pip install build twine
           python -m build "$src" --outdir dist
           python -m twine check --strict dist/*
+          version=$(python -c "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['project']['version'])" "$src/pyproject.toml")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$prefix$version" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -68,3 +75,48 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # A tag on the commit the upload was built from, and a GitHub Release for
+  # whoever watches the repository: the merges since the package's previous
+  # tag, plus the files that went to PyPI. Its own job, so the upload never
+  # holds write access to the repository. The plugin's releases are never
+  # marked latest; the repository page shows the bench's.
+  release:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          case "$PACKAGE" in
+            canopen-bench) paths=". :!plugins" ; latest=true ;;
+            cob-cpcusb)    paths="plugins/cob-cpcusb" ; latest=false ;;
+          esac
+          prev=$(git describe --tags --abbrev=0 --match "${TAG%"$VERSION"}[0-9]*" 2>/dev/null || true)
+          {
+            echo "\`pip install $PACKAGE==$VERSION\` · [PyPI](https://pypi.org/project/$PACKAGE/$VERSION/)"
+            if [ -n "$prev" ]; then
+              echo
+              echo "Merged since $prev:"
+              echo
+              git log --first-parent --merges --format='- %s' "$prev..HEAD" -- $paths \
+                | sed -E "s/^- Merge branch '[^']*': /- /"
+            fi
+          } > notes.md
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
+            --title "$PACKAGE $VERSION" --notes-file notes.md --latest=$latest
