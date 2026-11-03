@@ -30,6 +30,9 @@ requires-python = ">=3.10"
 dependencies = [
     "python-can>=4.4",
     "pyusb>=1.2",
+    # Windows has no libusb of its own, and pyusb needs one even with the
+    # device bound to WinUSB; this wheel brings the DLL
+    "libusb-package>=1.0.26; sys_platform == 'win32'",
 ]
 # No canopen-bench here: the driver half (bus.py) is plain python-can and
 # works standalone. The adapter card (plugin.py) is only ever loaded by the

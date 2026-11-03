@@ -49,10 +49,13 @@ bus = can.Bus(interface="cpcusb", bitrate=250_000)
 ```
 
 The adapter card shows up in canopen-bench (1.x) once both are installed;
-pip does not bring the bench along. On Windows, the device must be bound
-to WinUSB before pyusb/libusb can open it — a one-time
+pip does not bring the bench along.
+
+pyusb needs libusb. On Windows it comes with the install
+(`libusb-package`), and the device must be bound to WinUSB once — a
 [Zadig](https://zadig.akeo.ie/) step (select the CPC-USB/ARM7 device,
-driver = WinUSB).
+driver = WinUSB). On Linux and macOS it is the system's libusb-1.0
+(`apt install libusb-1.0-0`, `brew install libusb`).
 
 ## What's in here
 
