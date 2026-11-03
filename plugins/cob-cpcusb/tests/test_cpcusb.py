@@ -229,3 +229,14 @@ def test_cpcusb_plugin_is_registered():
     eps = metadata.entry_points(group="can.interface")
     names = {ep.name for ep in eps}
     assert "cpcusb" in names
+
+
+def test_driver_imports_without_the_bench():
+    # python-can loads interface="cpcusb" through cob_cpcusb/__init__.py,
+    # and the package does not depend on canopen-bench
+    import subprocess
+    import sys
+
+    code = "import sys, cob_cpcusb.bus; print('canopen_bench' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"
