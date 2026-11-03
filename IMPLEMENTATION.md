@@ -16,7 +16,8 @@ browser):
 
 - **Setup** — workspace bar (create/switch workspaces, each a subfolder
   of the data root), bus interface (IXXAT / PCAN / Vector / Demo mode;
-  vendor adapters such as the CPC-USB arrive via plugin packages) + bitrate
+  vendor adapters such as the CPC-USB arrive via plugin packages; the
+  CPC-USB's comes with the install) + bitrate
   (applied to a running connection immediately) + address range (node-ID)
   + own node-ID — the one range that governs this bus: the scan probes
   exactly it, and an operator teach addresses up to its top node-id —,
@@ -317,8 +318,8 @@ configuration. The concept and full hook reference are in
 plugins are proprietary, while [`plugins/cob-cpcusb/`](plugins/cob-cpcusb/)
 — the one that lives in this repo — is MIT like the core. Sharing a
 repository does not merge the distributions: it is built, versioned,
-installed and licensed on its own, and `pip install canopen-bench` does
-not bring it along. Check a package's own `LICENSE` before redistributing
+installed and licensed on its own. `pip install canopen-bench` brings
+it along as a dependency, which the core never imports. Check a package's own `LICENSE` before redistributing
 an environment that contains it; a copyleft plugin would put obligations
 on the whole environment that the core alone does not.
 

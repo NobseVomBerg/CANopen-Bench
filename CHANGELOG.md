@@ -175,3 +175,6 @@ development; the version counts from here.
 - Published on PyPI as `canopen-bench` from 1.0.170: `publish.yml`, run
   by hand, builds `main` and uploads it through Trusted Publishing, with
   no token stored anywhere
+- CPC-USB/ARM7 support comes with the install from 1.0.171:
+  `canopen-bench` depends on `cob-cpcusb` (on PyPI from 1.1.2), which
+  in turn no longer depends on the bench and brings libusb on Windows

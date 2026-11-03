@@ -35,6 +35,9 @@ Demo mode simulates devices from real EDS files — the bundled one is
 `canopen_bench/seed/DemoDevice.eds` — so the whole flow (scan, object
 browser, trace, test runs) works without an adapter.
 
+The install brings `cob-cpcusb` from PyPI as a dependency. To work on
+it, install the checkout's over it: `pip install -e ./plugins/cob-cpcusb`.
+
 ## Before you push
 
 ```bash
@@ -47,9 +50,9 @@ Both must be clean. CI runs the suite on Python 3.10 through 3.14 —
 recent standard-library additions. Worth a local run on the oldest
 version before pushing anything that touches imports. If you touch the plugin API
 (`canopen_bench/plugin.py`), check it against the real plugin package in
-[`plugins/cob-cpcusb/`](plugins/cob-cpcusb/) — CI installs it and
-runs its tests, and also re-runs the core suite with it installed to
-prove the core still works plugin-free.
+[`plugins/cob-cpcusb/`](plugins/cob-cpcusb/) — CI runs the core suite
+without it first, to prove the core still works plugin-free, then
+installs this checkout's, runs its tests and the core suite again.
 
 New behavior needs a test next to it in `tests/`. The suite runs entirely
 against the demo bus; look at `tests/conftest.py` for the fixtures

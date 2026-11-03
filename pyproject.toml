@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopen-bench"
-version = "1.0.170"
-description = "CANopen Bench — web-based test bench and machine control for CANopen devices: scan, SDO access from EDS files, YAML test cases, firmware download, live CAN trace (IXXAT, PCAN, Vector, demo mode without hardware; vendor devices via plugins)"
+version = "1.0.171"
+description = "CANopen Bench — web-based test bench and machine control for CANopen devices: scan, SDO access from EDS files, YAML test cases, firmware download, live CAN trace (IXXAT, PCAN, Vector, CPC-USB, demo mode without hardware; vendor devices via plugins)"
 readme = "README.md"
 license = "MIT"
 # THIRD-PARTY-NOTICES.md carries the attribution required by the bundled
@@ -15,7 +15,7 @@ license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 authors = [{name = "NobseVomBerg"}]
 keywords = ["canopen", "can", "can-bus", "cia301", "eds", "test-bench", "test-automation",
             "machine-control", "sdo", "pdo", "nmt", "lss", "firmware-update", "python-can",
-            "ixxat", "pcan", "vector"]
+            "ixxat", "pcan", "vector", "cpc-usb"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Web Environment",
@@ -55,6 +55,10 @@ dependencies = [
     "packaging>=23",
     # test-case files (TestCases folder) are YAML, see docs/ablaeufe/testfall-format.md
     "pyyaml>=6",
+    # the CPC-USB/ARM7 adapter, like IXXAT/PCAN/Vector through python-can:
+    # driver plus adapter card, a plugin package that comes with the install.
+    # The core does not import it; CI runs the core suite without it.
+    "cob-cpcusb>=1.1.2,<2",
 ]
 
 [project.optional-dependencies]

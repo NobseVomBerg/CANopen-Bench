@@ -32,7 +32,7 @@ Two reasons to prefer it. It runs *this* directory rather than whatever
 copy or a second virtualenv is around. And it needs only the
 dependencies, not the package itself: `pip install starlette uvicorn
 websockets canopen python-can pyyaml` (the `dependencies` list in
-`pyproject.toml`) and a clone is enough — worth knowing on a bench
+`pyproject.toml`, plus `cob-cpcusb` for a CPC-USB adapter) and a clone is enough — worth knowing on a bench
 machine where you would rather not install anything.
 
 Note the underscore: the distribution is `canopen-bench`, the module is
@@ -97,8 +97,9 @@ has been exercised, not what is warranted.
 | IXXAT USB-to-CAN | VCI4 (Windows) | in regular use on the author's bench |
 | PCAN-USB | PCANBasic | wired up, never run — no such adapter here |
 | Vector VN1600 (VN1610/VN1630) | XL driver (Windows) | run against a VN1630 |
+| CPC-USB/ARM7 | `cob-cpcusb` over pyusb/libusb (Windows: WinUSB via Zadig) | comes with the install; tested against a simulated USB device |
 | Demo mode | — | no hardware, EDS-driven simulation |
-| other adapters (e.g. CPC-USB) | via plugin packages | separate install |
+| other adapters | via plugin packages | separate install |
 
 Everything above demo mode goes through python-can's own backends, so
 adapter support tracks python-can. The Vector entry exists because plain
@@ -152,9 +153,9 @@ them. Guide with hook table and a minimal example:
 `docs/extending.md`; API: `canopen_bench/plugin.py`. A complete worked
 example ships in this repo under
 [`plugins/cob-cpcusb/`](https://github.com/NobseVomBerg/CANopen-Bench/tree/main/plugins/cob-cpcusb) — python-can driver plus
-adapter card, its own tests, MIT. It is a separate distribution, not part
-of the `canopen-bench` package: install it (`pip install cob-cpcusb`)
-only if you have that adapter.
+adapter card, its own tests, MIT. It is a separate distribution that
+`pip install canopen-bench` brings along; on its own
+(`pip install cob-cpcusb`) it is a python-can backend for anyone.
 
 ## Documentation
 

@@ -80,6 +80,9 @@ repository contains them, and distributing that image distributes them:
 | [websockets](https://github.com/python-websockets/websockets) | BSD-3-Clause |
 | [PyYAML](https://github.com/yaml/pyyaml) | MIT |
 | [packaging](https://github.com/pypa/packaging) | Apache-2.0 OR BSD-2-Clause |
+| [cob-cpcusb](plugins/cob-cpcusb/) | MIT |
+| [pyusb](https://github.com/pyusb/pyusb) | BSD-3-Clause |
+| [libusb-package](https://github.com/pyocd/libusb-package) (Windows only) | Apache-2.0; the libusb DLL it carries is LGPL-2.1-or-later |
 
 **python-can is LGPL-3.0.** CANopen Bench imports it as an unmodified
 library and neither copies nor modifies its source, so the LGPL's
@@ -95,7 +98,7 @@ reinstalled.
 Plugins are separate distributions with their own licensing; installing
 one does not change the license of this package. The public
 [`cob-cpcusb`](plugins/cob-cpcusb/)
-is MIT. Check each plugin's own `LICENSE` before redistributing an
+is MIT and comes with the bench as a dependency (listed above). Check each plugin's own `LICENSE` before redistributing an
 environment that contains it — a copyleft or proprietary plugin puts its
 own obligations on that environment.
 
