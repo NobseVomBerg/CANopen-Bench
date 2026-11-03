@@ -359,3 +359,6 @@ worked example of a plugin package — python-can driver plus adapter
 card, entry points, tests — see
 [`plugins/cob-cpcusb/`](../plugins/cob-cpcusb/) (MIT) in this
 repository.
+Its driver also works without the bench: the package imports the
+adapter card only through the entry point, so it can leave
+`canopen-bench` out of its dependencies.

@@ -41,7 +41,15 @@ pip install cob-cpcusb
 pip install -e ./plugins/cob-cpcusb     # or editable, from a clone's root
 ```
 
-Requires `canopen-bench>=1,<2`, which pip brings along. On Windows, the device must be bound
+The driver needs only python-can and pyusb:
+
+```python
+import can
+bus = can.Bus(interface="cpcusb", bitrate=250_000)
+```
+
+The adapter card shows up in canopen-bench (1.x) once both are installed;
+pip does not bring the bench along. On Windows, the device must be bound
 to WinUSB before pyusb/libusb can open it — a one-time
 [Zadig](https://zadig.akeo.ie/) step (select the CPC-USB/ARM7 device,
 driver = WinUSB).
