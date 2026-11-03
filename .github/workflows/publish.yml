@@ -2,11 +2,20 @@ name: Publish to PyPI
 
 # By hand only (Actions > Publish to PyPI > Run workflow): main is the
 # release (CONTRIBUTING.md, "Versioning"), and not every merge needs to reach
-# PyPI. The upload carries the version pyproject.toml has; PyPI takes each
-# version once, so running it twice on the same state fails rather than
-# replacing anything.
+# PyPI. The upload carries the version the package's pyproject.toml has; PyPI
+# takes each version once, so running it twice on the same state fails rather
+# than replacing anything.
 on:
   workflow_dispatch:
+    inputs:
+      # Both distributions in this repository publish through this one
+      # workflow and environment, each registered as a publisher on its own
+      # PyPI project.
+      package:
+        description: Which package to publish
+        type: choice
+        options: [canopen-bench, cob-cpcusb]
+        default: canopen-bench
 
 jobs:
   build:
@@ -23,9 +32,16 @@ jobs:
       # --strict fails on a README PyPI would render badly, before anything
       # is uploaded
       - name: Build and check
+        env:
+          PACKAGE: ${{ inputs.package }}
         run: |
+          case "$PACKAGE" in
+            canopen-bench) src=. ;;
+            cob-cpcusb)    src=plugins/cob-cpcusb ;;
+            *) echo "unknown package: $PACKAGE"; exit 1 ;;
+          esac
           python -m pip install build twine
-          python -m build
+          python -m build "$src" --outdir dist
           python -m twine check --strict dist/*
 
       - uses: actions/upload-artifact@v7
@@ -42,7 +58,7 @@ jobs:
     # required reviewer is the last look before a version is final.
     environment:
       name: pypi
-      url: https://pypi.org/p/canopen-bench
+      url: https://pypi.org/p/${{ inputs.package }}
     permissions:
       id-token: write
     steps:
