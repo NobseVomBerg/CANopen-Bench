@@ -872,7 +872,7 @@ def _hex_bytes(text: object) -> bytes | None:
 def _duplicate_ids(catalog: list) -> dict[str, list[str]]:
     """Ids that more than one file in the folder claims.
 
-    The catalog is keyed by case id, so two files claiming 4602 means one
+    The catalog is keyed by case id, so two files claiming 0070 means one
     of them is simply not in it — and until now nothing said so: the
     folder held 85 files, the list showed 81, and the four that went
     missing were whichever the directory order dropped. The id cannot
@@ -1323,7 +1323,8 @@ class Bench:
         self._autosave_warn = ""    # why it is not writing right now ("" = it is)
         self._autosave_retry_at = 0.0  # monotonic: no attempt before this
         self._refresh_trace_saved()
-        self.raw_rows: list[dict] = db.get("raw_sdo", [{"i": "0x2040", "s": "01", "l": "4", "v": "0x00260001"}])
+        # first row: the device type, which every CANopen device has
+        self.raw_rows: list[dict] = db.get("raw_sdo", [{"i": "0x1000", "s": "00", "l": "4", "v": ""}])
         self._cyc_seq = 0  # id source for raw rows (cyclic scheduler key)
         for r in self.raw_rows:  # rows saved before typed rows / per-row nodes existed
             r.setdefault("type", "sdo")
@@ -7956,7 +7957,11 @@ class Bench:
                 "grades": sorted({tc.grade for tc in self.testcases.values() if tc.grade}),
                 "variants": sorted({v for tc in self.testcases.values()
                                     for v in tc.variants}),
-                "lastRes": data.LAST_RESULTS if not self.testcases and demo else {},
+                # the demo's "previous run" lasts until a run starts here,
+                # which clears the column as a run on real test cases does
+                "lastRes": data.LAST_RESULTS
+                           if not self.testcases and demo and not (self.running or self.results)
+                           else {},
                 "runProg": self.run_prog,
                 "manual": self.manual_prompt,
                 "sel": sorted(self.test_sel),

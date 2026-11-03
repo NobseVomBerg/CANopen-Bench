@@ -701,7 +701,7 @@ def test_a_verify_that_outlasts_drive_verify_fails_on_that(connected_bench, monk
 
 
 def test_suites_save_load_delete(bench):
-    bench.test_sel = {"0001", "1000"}
+    bench.test_sel = {"0001", "0010"}
     bench.repeat_case = 2
     bench.stop_on_err = False
     bench.dispatch("suite_save", {"name": "Regression"})
@@ -709,7 +709,7 @@ def test_suites_save_load_delete(bench):
     bench.repeat_case = 1
     bench.stop_on_err = True
     bench.dispatch("suite_load", {"name": "Regression"})
-    assert bench.test_sel == {"0001", "1000"}
+    assert bench.test_sel == {"0001", "0010"}
     assert bench.repeat_case == 2 and bench.stop_on_err is False
     assert bench.active_suite == "Regression"
     again = Bench(Db(bench.db.path))  # persisted
@@ -720,22 +720,34 @@ def test_suites_save_load_delete(bench):
 
 
 def test_run_stops_on_error(bench):
-    bench.test_sel = {"0000", "4455", "4622"}  # 4455 fails deterministically
+    bench.test_sel = {"0000", "0030", "0050"}  # 0030 fails deterministically
     bench.stop_on_err = True
     bench.dispatch("run_start", {})
     run_to_completion(bench)
-    assert bench.results["4455"] == "FAIL"
-    assert "4622" not in bench.results  # aborted before reaching it
+    assert bench.results["0030"] == "FAIL"
+    assert "0050" not in bench.results  # aborted before reaching it
     assert bench.reports[0]["score"] == "1/2"
 
 
 def test_run_continues_without_stop_on_error(bench):
-    bench.test_sel = {"0000", "4455", "4622"}
+    bench.test_sel = {"0000", "0030", "0050"}
     bench.stop_on_err = False
     bench.dispatch("run_start", {})
     run_to_completion(bench)
-    assert bench.results == {"0000": "PASS", "4455": "FAIL", "4622": "PASS"}
+    assert bench.results == {"0000": "PASS", "0030": "FAIL", "0050": "PASS"}
     assert bench.reports[0]["score"] == "2/3"
+
+
+def test_demo_run_clears_the_previous_results(bench):
+    # a run on real test cases starts with an empty Result column; the
+    # demo's seeded previous run must not stand beside the new one
+    assert bench.snapshot()["tests"]["lastRes"] != {}
+    bench.test_sel = {"0000", "0030"}
+    bench.dispatch("run_start", {})
+    assert bench.snapshot()["tests"]["lastRes"] == {}
+    run_to_completion(bench)
+    assert bench.snapshot()["tests"]["lastRes"] == {}
+    assert bench.snapshot()["tests"]["results"] == {"0000": "PASS", "0030": "FAIL"}
 
 
 def test_repeat_counts_expand_run_order(bench):

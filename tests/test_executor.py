@@ -1362,14 +1362,14 @@ def test_a_real_testcases_folder_starts_with_nothing_selected(tmp_path):
     them against the hardware on the bench."""
     tc_dir = tmp_path / "tcs"
     tc_dir.mkdir()
-    for tid in ("1000", "4433", "4602"):        # three of the demo defaults
+    for tid in ("0010", "0020", "0070"):        # three of the demo defaults
         (tc_dir / f"TC{tid}_real.yaml").write_text(
             f'id: "{tid}"\nname: "Real case"\nsteps:\n  - log: "x"\n')
     first = Bench(Db(tmp_path / "t.db"))
     first.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
 
     reopened = Bench(Db(tmp_path / "t.db"))     # the folder is remembered
-    assert set(reopened.testcases) == {"1000", "4433", "4602"}
+    assert set(reopened.testcases) == {"0010", "0020", "0070"}
     assert reopened.test_sel == set()
 
 
@@ -1914,7 +1914,7 @@ steps:
 
 
 def test_a_loop_may_count_what_the_case_worked_out(tc_bench):
-    """A case does not always know the count when it is written: 4613 asks
+    """A case does not always know the count when it is written: one asks
     the device which variant it is and then loops over as many parameters
     as that variant has. The body writes to that register while the loop
     is turning, which must not move it — the executor took the number when

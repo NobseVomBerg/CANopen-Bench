@@ -2,7 +2,7 @@
 # supply, expect UV flag") als vollständige Sequenz. Die 0x21xx-Objekte sind
 # PLATZHALTER — die realen Indizes kommen aus dem EDS des DUT und werden
 # beim ersten Hardware-Test eingetragen. Format: docs/ablaeufe/testfall-format.md
-id: "4602"
+id: "0070"
 name: "Aux power off handling, under-voltage"
 tools: [PSU]
 est: "8.4 s"

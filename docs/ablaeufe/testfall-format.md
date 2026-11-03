@@ -22,7 +22,7 @@ Ausführungssemantik (Verdikte, Executor, Abbruch): siehe
 ## Kopf
 
 ```yaml
-id: "4602"                  # Pflicht; Katalog-ID, eindeutig im Ordner (s.u.)
+id: "0070"                  # Pflicht; Katalog-ID, eindeutig im Ordner (s.u.)
 name: "Aux power off handling, under-voltage"   # Pflicht; Anzeige
 desc: "Prüft, dass ..."     # optional; ein Satz für den Report-Kopf
 grade: automated            # optional; automated | semi | manual | production
