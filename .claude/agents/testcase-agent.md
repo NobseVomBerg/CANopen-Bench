@@ -19,13 +19,13 @@ Full format spec (authoritative, read it before writing):
 10 000-step loop guard): `docs/ablaeufe/A-04-testlauf.md`; the teach flow:
 `docs/ablaeufe/A-05-adressierung-teach.md`. Real examples:
 `examples/testcases/TC0000_test_the_tests.yaml`,
-`examples/testcases/TC4602_aux_power_off.yaml`,
+`examples/testcases/TC0070_aux_power_off.yaml`,
 `canopen_bench/flows/lss_standard.yaml`.
 
 ## Header
 
 ```yaml
-id: "4602"          # required, unique in the folder, must match filename TC<id>_
+id: "0070"          # required, unique in the folder, must match filename TC<id>_
 name: "..."         # required, display name
 tools: [PSU]        # optional, [] = none — extra equipment for the catalog's tool filter
 est: "8.4 s"        # optional, display-only expected duration

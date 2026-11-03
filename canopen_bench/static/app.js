@@ -1706,7 +1706,7 @@ function TestsPage({ s, ui, setUi }) {
   if (t.running && runningId) runLog.push({ line: runningId + ' running…', fg: 'var(--acc)' });
   const anyFail = Object.values(t.results).includes('FAIL');
   // runIdx counts cases *finished*, so during the first case it is 0 —
-  // "0 / 4" next to "Running 1000" reads as if nothing had started. While
+  // "0 / 4" next to "Running 0010" reads as if nothing had started. While
   // a run is on, the counter names the case being worked on instead. The
   // bar folds in that case's own step progress: a case with a hundred
   // steps otherwise leaves the bar parked for minutes, which is what a
