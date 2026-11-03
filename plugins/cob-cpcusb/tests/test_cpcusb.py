@@ -223,9 +223,29 @@ def test_cpcusb_bus_raises_when_device_not_found(monkeypatch):
         CpcUsbBus(channel="cpcusb")
 
 
+def test_cpcusb_bus_says_when_libusb_is_missing(monkeypatch):
+    def no_backend(**kw):
+        raise usb.core.NoBackendError("No backend available")
+
+    monkeypatch.setattr(usb.core, "find", no_backend)
+    with pytest.raises(can.exceptions.CanInitializationError, match="libusb"):
+        CpcUsbBus(channel="cpcusb")
+
+
 def test_cpcusb_plugin_is_registered():
     import importlib.metadata as metadata
 
     eps = metadata.entry_points(group="can.interface")
     names = {ep.name for ep in eps}
     assert "cpcusb" in names
+
+
+def test_driver_imports_without_the_bench():
+    # python-can loads interface="cpcusb" through cob_cpcusb/__init__.py,
+    # and the package does not depend on canopen-bench
+    import subprocess
+    import sys
+
+    code = "import sys, cob_cpcusb.bus; print('canopen_bench' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

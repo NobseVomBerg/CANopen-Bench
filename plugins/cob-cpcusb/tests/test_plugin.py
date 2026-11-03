@@ -4,7 +4,7 @@ Mirrors the style of cob-memiro's own test_memiro_plugin.py.
 """
 from __future__ import annotations
 
-from cob_cpcusb import CpcUsbPlugin
+from cob_cpcusb.plugin import CpcUsbPlugin
 
 from canopen_bench.core import Bench
 from canopen_bench.db import Db

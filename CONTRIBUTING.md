@@ -63,8 +63,8 @@ report answerable — so it moves **once per merge into `main`, and only
 when the tool's own code changed.**
 
 PyPI gets a state of `main` only when someone runs *Publish to PyPI*
-(`.github/workflows/publish.yml`) by hand, after the `pypi` environment's
-reviewer approves. PyPI takes each version once, so a merge that left the
+(`.github/workflows/publish.yml`) by hand, picking `canopen-bench` or
+`cob-cpcusb`, after the `pypi` environment's reviewer approves. PyPI takes each version once, so a merge that left the
 version alone (docs, tests, CI) has nothing to publish — including the
 README PyPI shows, which only moves with the next version.
 
