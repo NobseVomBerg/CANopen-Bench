@@ -6,7 +6,10 @@ driven by the devices' EDS files. Python backend (Starlette +
 canopen/python-can), no-build frontend (Preact/HTM), one self-contained
 workspace folder per bench.
 
-![Live CAN trace (dark mode): SDO transfers decoded against the EDS, heartbeats, state log](https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/trace.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/trace-dark.png">
+  <img alt="Live CAN trace: SDO transfers decoded against the EDS, heartbeats, state log" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/trace.png">
+</picture>
 
 ## Try it — no hardware needed
 
@@ -46,7 +49,10 @@ the workspace on first run). SDO reads/writes are answered from the EDS
 object dictionary — including realistic aborts on out-of-range writes —
 and every access shows up in the Trace like real bus traffic.
 
-![Setup page: bus interface, EDS registry with identity matching, machine control](https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/setup.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/setup-dark.png">
+  <img alt="Setup page: bus interface, EDS registry with identity matching, machine control" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/setup.png">
+</picture>
 
 ## Features
 
