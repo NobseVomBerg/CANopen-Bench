@@ -223,6 +223,15 @@ def test_cpcusb_bus_raises_when_device_not_found(monkeypatch):
         CpcUsbBus(channel="cpcusb")
 
 
+def test_cpcusb_bus_says_when_libusb_is_missing(monkeypatch):
+    def no_backend(**kw):
+        raise usb.core.NoBackendError("No backend available")
+
+    monkeypatch.setattr(usb.core, "find", no_backend)
+    with pytest.raises(can.exceptions.CanInitializationError, match="libusb"):
+        CpcUsbBus(channel="cpcusb")
+
+
 def test_cpcusb_plugin_is_registered():
     import importlib.metadata as metadata
 

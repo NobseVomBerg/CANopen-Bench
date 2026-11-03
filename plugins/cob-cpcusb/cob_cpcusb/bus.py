@@ -23,6 +23,17 @@ from . import protocol as p
 logger = logging.getLogger(__name__)
 
 
+def _libusb_backend():
+    """libusb from the libusb-package wheel where it is installed (the
+    Windows dependency), else None, which leaves pyusb to its own search:
+    the system's libusb on Linux and macOS."""
+    try:
+        import libusb_package
+    except ImportError:
+        return None
+    return libusb_package.get_libusb1_backend()
+
+
 class CpcUsbBus(can.BusABC):
     """One instance per attached CPC-USB/ARM7 adapter.
 
@@ -51,7 +62,13 @@ class CpcUsbBus(can.BusABC):
         if address is not None:
             find_kwargs["address"] = address
 
-        dev = usb.core.find(**find_kwargs)
+        try:
+            dev = usb.core.find(backend=_libusb_backend(), **find_kwargs)
+        except usb.core.NoBackendError as exc:
+            raise CanInitializationError(
+                "pyusb finds no libusb. On Windows: pip install libusb-package; "
+                "elsewhere install the system's libusb-1.0."
+            ) from exc
         if dev is None:
             raise CanInitializationError(
                 "No CPC-USB/ARM7 found (USB vendor 0x12D6 / product 0x0444). "
