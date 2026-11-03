@@ -50,11 +50,15 @@ jobs:
       - name: Lint
         run: python -m ruff check .
 
-      # Deliberately before the plugin is installed: the core is supposed to
-      # work plugin-free, and this run is the evidence.
+      # The install brought cob-cpcusb from PyPI as a dependency. Out it goes:
+      # the core is supposed to work plugin-free, and this run is the evidence.
+      - name: Remove the plugin package
+        run: python -m pip uninstall -y cob-cpcusb
+
       - name: Core tests
         run: python -m pytest tests/ --cov=canopen_bench -q
 
+      # this checkout's, not the PyPI release the install brought
       - name: Install plugin package
         run: python -m pip install -e ./plugins/cob-cpcusb
 

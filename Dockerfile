@@ -3,6 +3,10 @@
 #   docker run --device=/dev/bus/usb -v canopen-bench:/data -p 8000:8000 canopen-bench
 FROM python:3.12-slim
 
+# libusb for the CPC-USB driver (cob-cpcusb, a dependency); the slim image
+# has none
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \n    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 # LICENSE + THIRD-PARTY-NOTICES.md are declared as license-files in
 # pyproject.toml — they must be present at build time so the attribution
