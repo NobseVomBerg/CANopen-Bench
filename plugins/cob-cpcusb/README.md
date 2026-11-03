@@ -7,9 +7,9 @@ a `canopen_bench.plugins` adapter card for the bench specifically.
 
 **This is a separate distribution.** It shares the canopen-bench
 repository but not its package: own `pyproject.toml`, own version, own
-tests, installed on its own. `pip install canopen-bench` does not bring
-it — install it only if you have this adapter. It is here as the worked
-reference for what a plugin package looks like.
+tests. `pip install canopen-bench` brings it along as a dependency; on
+its own it is a python-can backend that needs no bench. It is also the
+worked reference for what a plugin package looks like.
 
 ## Protocol
 
