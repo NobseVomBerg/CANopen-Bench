@@ -1,5 +1,10 @@
 # CANopen Bench
 
+[![CI](https://github.com/NobseVomBerg/CANopen-Bench/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/NobseVomBerg/CANopen-Bench/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/canopen-bench)](https://pypi.org/project/canopen-bench/)
+[![Python](https://img.shields.io/pypi/pyversions/canopen-bench)](https://pypi.org/project/canopen-bench/)
+[![License](https://img.shields.io/github/license/NobseVomBerg/CANopen-Bench)](https://github.com/NobseVomBerg/CANopen-Bench/blob/main/LICENSE)
+
 Web tool to test and control CANopen devices on a hardware bench — scan,
 object access, system tests, firmware download and a live CAN trace,
 driven by the devices' EDS files. Python backend (Starlette +
