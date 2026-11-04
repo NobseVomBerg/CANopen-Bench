@@ -3,10 +3,11 @@
 Adapter-agnostic: which python-can backend actually moves the bytes is
 selected purely by the ``interface`` string passed to ``connect()`` — the
 built-in ``virtual`` bus (used in tests, no hardware) or any python-can
-interface (``ixxat``, ``pcan``, or one registered by a separately installed
-driver package such as ``cob-cpcusb``). This class contains no
-adapter-specific logic at all; bench plugins extend the adapter-key mapping
-via the ``extra_backends`` constructor argument.
+interface (``ixxat``, ``pcan``, ``socketcan``, or one registered by a
+separately installed driver package such as ``cob-cpcusb``). This class
+contains no adapter-specific logic beyond asking a SocketCAN interface for
+its bitrate before opening it (``socketcan.py``); bench plugins extend the
+adapter-key mapping via the ``extra_backends`` constructor argument.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import can
 import canopen
 
 from .interface import NO_SERIAL, BusInterface, FoundDevice, Frame, SdoResult, pace_frames
+from .socketcan import link_problem
 
 # app adapter key (canopen_bench.data.ADAPTERS) -> python-can interface name,
 # default channel, and any further keyword arguments that backend needs
@@ -33,6 +35,8 @@ _ADAPTER_BACKENDS: dict[str, tuple[str, str | int | None, dict]] = {
     # Config, which need not exist on a machine carrying only the free XL
     # driver — and that free driver is the whole point of supporting these.
     "vector": ("vector", 0, {"app_name": None}),
+    # whatever the Linux kernel drives as a network interface (bus/socketcan.py)
+    "socketcan": ("socketcan", "can0", {}),
 }
 
 
@@ -362,14 +366,20 @@ class CanopenBus(BusInterface):
             self.disconnect()
 
         interface, default_channel, extra = self._backends[adapter]
-        network = canopen.Network()
-        self._install_listeners(network)
         kwargs: dict = {"interface": interface, "bitrate": bitrate * 1000, **extra}
         if default_channel is not None:
             kwargs["channel"] = default_channel
         # after the default, so a chosen device identity replaces it whole
         # (serial + port, rather than a position in the driver's list)
         kwargs |= _channel_kwargs(channel, default_channel)
+        # SocketCAN takes its bitrate from the OS and python-can drops ours
+        # silently — a mismatch would open fine and hear nothing
+        problem = (link_problem(str(kwargs.get("channel", "")), bitrate)
+                   if interface == "socketcan" else "")
+        if problem:
+            raise ConnectionError(problem)
+        network = canopen.Network()
+        self._install_listeners(network)
         network.connect(**kwargs)
 
         self.network = network

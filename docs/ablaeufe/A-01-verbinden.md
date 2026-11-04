@@ -12,7 +12,7 @@ SDO/NMT und Trace möglich — das Tool startet grundsätzlich offline.
   `BUS  reconnect failed — …` und Trennen) und `Bench.shutdown`
   (`core.py`, Trennen bei Server-Stopp). Ein Adapterwechsel trennt
   stattdessen automatisch (kein Auto-Reconnect).
-- Adapterwahl (`cpc` / `ixxat` / `pcan` / `demo`) und Bitrate kommen aus dem
+- Adapterwahl (`cpc` / `ixxat` / `pcan` / `vector` / `socketcan` / `demo`) und Bitrate kommen aus dem
   Setup-Zustand; `demo` geht am Hardware-Pfad vorbei zum `EdsDemoBus`
   (`Bench.bus`-Property, `core.py`).
 
@@ -23,9 +23,13 @@ SDO/NMT und Trace möglich — das Tool startet grundsätzlich offline.
   ist „Demo mode" der Weg (ein separater Simulator existiert nicht mehr).
 - IXXAT: Windows-PC, **VCI4-Treiber installiert**, Adapter am USB, Kanal
   nicht von einem anderen Programm (canAnalyser o. ä.) belegt.
+- SocketCAN: Linux (Karte nur dort sichtbar, auch im Container mit
+  `--network host`), Interface auf dem Host mit Bitrate hochgefahren:
+  `sudo ip link set can0 up type can bitrate 500000`. Die Bitrate setzt
+  das Betriebssystem, nicht python-can.
 - Bitrate passend zum Bus konfiguriert (Standard 500 kbit/s). Achtung:
   eine falsche Bitrate fällt beim Verbinden **nicht** auf — siehe
-  Fehlerpfade.
+  Fehlerpfade. Ausnahme SocketCAN: dort wird sie geprüft (Schritt 2a).
 
 ## Akteure
 
@@ -38,12 +42,21 @@ UI → `Bench.act_connect_toggle` → `CanopenBus.connect`
 1. **[Ist]** `act_connect_toggle` setzt `connected = True` und ruft
    `bus.connect(adapter, bitrate)`.
 2. **[Ist]** `CanopenBus.connect` mappt den Adapter-Key auf das
-   python-can-Backend: eingebaut sind `ixxat → ("ixxat", 0)` und
-   `pcan → ("pcan", "PCAN_USBBUS1")` (`_ADAPTER_BACKENDS`,
+   python-can-Backend: eingebaut sind `ixxat → ("ixxat", 0)`,
+   `pcan → ("pcan", "PCAN_USBBUS1")`, `vector → ("vector", 0)` und
+   `socketcan → ("socketcan", "can0")` (`_ADAPTER_BACKENDS`,
    `canopen_bus.py`); Plugin-Adapter steuern ihr Mapping über
    `BenchPlugin.adapter_backends()` bei (z. B. `cpc → ("cpcusb", None)`
    aus dem Paket `cob-cpcusb`, das Karte und Treiber gemeinsam
    trägt). Besteht bereits eine Verbindung, wird sie zuerst getrennt.
+2a. **[umgesetzt]** Nur SocketCAN: python-can übergeht die Bitrate dort
+   stillschweigend, also fragt `link_problem` (`bus/socketcan.py`) vorher
+   `ip -details -json link show <kanal>`. Fehlt das Interface, ist es
+   down, bus-off oder läuft es mit anderer Bitrate, bricht `connect` mit
+   `ConnectionError` ab — Log `BUS  connect failed — <Grund> — on the
+   host: sudo ip link set …`, der passende `ip`-Befehl steht drin. Selbst
+   gesetzt wird nichts (bräuchte root). vcan hat keine Bitrate, dort nur
+   die Frage „up?". Ohne `ip` (oder zu alt für `-json`) keine Prüfung.
 3. **[Ist]** `canopen.Network()` wird erzeugt, der `_TraceListener`
    **vor** `connect()` registriert (sonst verpasst der Notifier-Thread ihn),
    dann `network.connect(interface=…, channel=…, bitrate=bitrate·1000)`
@@ -133,7 +146,7 @@ als HTTP 500). Jetzt:
 | 1 | VCI4-Treiber fehlt | python-can wirft beim Backend-Laden (`CanInterfaceNotImplementedError`/ImportError) | **[umgesetzt]** Fehler wird gefangen, Log `BUS  connect failed — <Fehlertext>` (`emcy0`), Zustand bleibt getrennt |
 | 2 | Adapter nicht gesteckt | VCI-Fehler „device not found" beim Öffnen | wie 1 (gleicher Fangpfad) |
 | 3 | Kanal belegt (anderes Tool) | VCI-Fehler beim Öffnen des Kanals | wie 1 (gleicher Fangpfad) |
-| 4 | Falsche Bitrate | **Verbinden gelingt fehlerfrei.** Probleme erst beim ersten Sendeversuch: kein ACK → TX-Error-Counter steigt → Controller error-passive/bus-off | Erkennung gehört in den Scan (A-02, Fehlerpfad 1), nicht ins Verbinden |
+| 4 | Falsche Bitrate | **Verbinden gelingt fehlerfrei.** Probleme erst beim ersten Sendeversuch: kein ACK → TX-Error-Counter steigt → Controller error-passive/bus-off | Erkennung gehört in den Scan (A-02, Fehlerpfad 1), nicht ins Verbinden — außer bei SocketCAN, wo das Betriebssystem die Bitrate kennt: **[umgesetzt]** Abbruch beim Verbinden (Schritt 2a) |
 | 5 | Adapter im laufenden Betrieb abgezogen | `bus.recv()` im Notifier-RX-Thread wirft (IXXAT: `VCIError … disconnected communication port`); danach würfe jede Bus-Operation dieselbe Exception | **[umgesetzt]** Fehler wird gefangen und löst den Auto-Disconnect aus — siehe „Ablauf: Verbindungsverlust"; Log `BUS  connection lost — <Fehlertext> — auto-disconnected` (`emcy0`) |
 
 **Befund F-3 — BEHOBEN:** `act_connect_toggle` setzte `connected = True`,
