@@ -181,3 +181,6 @@ development; the version counts from here.
 - CPC-USB/ARM7 support comes with the install from 1.0.171:
   `canopen-bench` depends on `cob-cpcusb` (on PyPI from 1.1.2), which
   in turn no longer depends on the bench and brings libusb on Windows
+- A container image with every PyPI upload of the bench:
+  `ghcr.io/nobsevomberg/canopen-bench`, for amd64 and arm64, built by
+  `publish.yml`. CI builds and starts the `Dockerfile` on every push

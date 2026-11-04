@@ -12,6 +12,6 @@ canopen-bench.db
 tests/
 docs/
 .github/
-# separate distribution, not part of the image — install it in the container
-# yourself if you pass a CPC-USB through
+# separate distribution: the image gets cob-cpcusb from PyPI, as the
+# dependency pip install . resolves, not from this checkout
 plugins/

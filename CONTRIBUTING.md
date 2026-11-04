@@ -70,7 +70,8 @@ PyPI gets a state of `main` only when someone runs *Publish to PyPI*
 `cob-cpcusb`, after the `pypi` environment's reviewer approves. After the
 upload it tags the commit (`v1.0.171`, `cob-cpcusb-v1.1.2`) and creates a
 GitHub Release with the merges since that package's previous tag and the
-uploaded files. PyPI takes each version once, so a merge that left the
+uploaded files. For `canopen-bench` it also pushes the container image
+(`ghcr.io/nobsevomberg/canopen-bench`, the version and `latest`). PyPI takes each version once, so a merge that left the
 version alone (docs, tests, CI) has nothing to publish — including the
 README PyPI shows, which only moves with the next version.
 
