@@ -210,14 +210,32 @@ looking for the old copy. A file of one's own goes in under another name.
 ## Docker
 
 ```bash
-docker build -t canopen-bench .
-docker run -p 8000:8000 -v canopen-bench:/data canopen-bench
+docker run -p 8000:8000 -v canopen-bench:/data ghcr.io/nobsevomberg/canopen-bench
 ```
 
+Every version that goes to PyPI is also an image on GHCR (`:latest`, and
+the version, e.g. `:1.0.173`), for amd64 and arm64 — a Raspberry Pi on
+the bench included. `docker build -t canopen-bench .` builds the same
+from a clone.
+
 All workspaces live on the `/data` volume. Demo mode works out of the
-box; USB CAN adapters need the device passed through
-(`--device=/dev/bus/usb`). The tool has no authentication — keep the
-port on a trusted network (see `SECURITY.md`).
+box. Of the adapters, a container reaches only those whose driver it
+carries:
+
+- **CPC-USB** on a Linux host: `--device=/dev/bus/usb` hands the USB bus
+  in, libusb is in the image. Linux has a kernel driver of its own for
+  this adapter, `ems_usb`, and while it is loaded it holds the device:
+  `sudo modprobe -r ems_usb` frees it until the next replug, a line
+  `blacklist ems_usb` in `/etc/modprobe.d/` for good. Not yet tried in a
+  container.
+- **IXXAT, PCAN, Vector**: their drivers are not in the image — IXXAT's
+  and Vector's exist only for Windows. Install the bench natively there
+  (`pip install canopen-bench`).
+- **Docker Desktop** on Windows or macOS cannot hand a USB device to a
+  container; there too, install with pip.
+
+The tool has no authentication — keep the port on a trusted network (see
+`SECURITY.md`).
 
 ## Extending
 

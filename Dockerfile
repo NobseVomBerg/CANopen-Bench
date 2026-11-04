@@ -1,11 +1,15 @@
-# Demo mode and TCP-attached adapters work out of the box. USB CAN
-# adapters additionally need the device passed through, e.g.
+# Demo mode works out of the box. A CPC-USB on a Linux host needs the USB
+# bus passed through, e.g.
 #   docker run --device=/dev/bus/usb -v canopen-bench:/data -p 8000:8000 canopen-bench
+# Which adapters a container can reach at all: README, "Docker".
+# publish.yml builds this into ghcr.io/nobsevomberg/canopen-bench with every
+# PyPI upload; CI builds and starts it on every push.
 FROM python:3.12-slim
 
 # libusb for the CPC-USB driver (cob-cpcusb, a dependency); the slim image
 # has none
-RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \n    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 # LICENSE + THIRD-PARTY-NOTICES.md are declared as license-files in
