@@ -70,6 +70,37 @@ jobs:
       - name: Plugin tests
         run: python -m pytest plugins/cob-cpcusb/tests -q
 
+  # SocketCAN against the kernel's virtual CAN: vcan0 up for a scan and SDO
+  # transfers through python-can's real socketcan backend, vcan1 left down
+  # for the refusal. The matrix above skips those tests, having no vcan.
+  # Should a runner image lose the module, this warns and they skip here
+  # too, each saying why (-rs).
+  socketcan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Virtual CAN interfaces
+        run: |
+          sudo modprobe vcan 2>/dev/null || {
+            sudo apt-get update -q && sudo apt-get install -yq "linux-modules-extra-$(uname -r)" \
+              && sudo modprobe vcan; } || {
+            echo "::warning::no vcan module for kernel $(uname -r): the vcan tests skip"; exit 0; }
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set up vcan0
+          sudo ip link add dev vcan1 type vcan
+          ip -details link show type vcan
+
+      - name: SocketCAN tests
+        run: python -m pytest tests/test_socketcan.py -v -rs
+
   # The Dockerfile once sat on main for days with a line that could not
   # build, because nothing here ever built it. Built and started on every push now,
   # the way publish.yml will build it for GHCR (one platform: a second one
@@ -86,6 +117,10 @@ jobs:
       # for it rather than trusting the apt line
       - name: libusb is there
         run: docker run --rm canopen-bench python -c "import usb.backend.libusb1 as b; assert b.get_backend(), 'no libusb'"
+
+      # SocketCAN without ip: no channel list, no bitrate check
+      - name: ip is there
+        run: docker run --rm canopen-bench ip -details -json link show lo
 
       - name: Starts and answers with this version
         run: |
