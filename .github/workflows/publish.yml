@@ -4,7 +4,8 @@ name: Publish to PyPI
 # state (CONTRIBUTING.md, "Versioning"), and not every merge needs to reach
 # PyPI. The upload carries the version the package's pyproject.toml has; PyPI
 # takes each version once, so running it twice on the same state fails rather
-# than replacing anything.
+# than replacing anything. For canopen-bench the same state also goes to
+# GHCR as a container image (the image job at the end).
 on:
   workflow_dispatch:
     inputs:
@@ -120,3 +121,49 @@ jobs:
           } > notes.md
           gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
             --title "$PACKAGE $VERSION" --notes-file notes.md --latest=$latest
+
+  # The container image of the same state: ghcr.io/nobsevomberg/canopen-bench,
+  # tagged with the version and latest, for amd64 and arm64 (a Raspberry Pi
+  # is a common computer on a bench). A job here rather than a workflow on
+  # "release published": a release this workflow creates with GITHUB_TOKEN
+  # starts no other workflow. GHCR needs no account of its own, the token
+  # pushes as the repository. A new package starts out private: Package
+  # settings > Change visibility > Public, once, after its first push.
+  image:
+    needs: [build, publish]
+    if: inputs.package == 'canopen-bench'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # arm64 is built under emulation on the amd64 runner
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # labels too: org.opencontainers.image.source is what links the
+      # package to this repository on GitHub
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/nobsevomberg/canopen-bench
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.build.outputs.version }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
