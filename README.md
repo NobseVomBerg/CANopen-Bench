@@ -180,6 +180,7 @@ has been exercised, not what is warranted.
 | PCAN-USB | PCANBasic | wired up, never run — no such adapter here |
 | Vector VN1600 (VN1610/VN1630) | XL driver (Windows) | run against a VN1630 |
 | CPC-USB/ARM7 | `cob-cpcusb` over pyusb/libusb (Windows: WinUSB via Zadig) | comes with the install; tested against a simulated USB device |
+| SocketCAN (Linux): PCAN-USB, Kvaser, candleLight/CANable, CPC-USB, … | the kernel's own (`peak_usb`, `kvaser_usb`, `gs_usb`, `ems_usb`) | run against a virtual `vcan` interface in CI, never against a device |
 | Demo mode | — | no hardware, EDS-driven simulation |
 | other adapters | via plugin packages | separate install |
 
@@ -190,6 +191,22 @@ CANoe/CANalyzer licences are for their applications, not for talking to
 the hardware — and a lot of that hardware outlives the software budget
 it was bought with. Bring-up checklists live in
 `docs/ablaeufe/A-01-verbinden.md` and `A-02-scan.md`.
+
+**SocketCAN** covers, in one card, every adapter whose Linux kernel driver
+turns it into a network interface (`can0`); the card is shown on Linux
+only. The operating system owns the bitrate there, not the bench, so it is
+set on the host, by root:
+
+```bash
+sudo ip link set can0 up type can bitrate 500000
+```
+
+On connect the bench reads the interface's bitrate back and refuses one
+that differs from the one picked on the Setup page, or an interface that
+is down or missing, with the `ip` line that fixes it — it does not set
+anything itself. `can0` queues only 10 frames by default; a burst (a
+firmware download) fills that at once, and the bench waits it out, but
+`sudo ip link set can0 txqueuelen 1000` gives it room.
 
 ## Workspaces
 
@@ -219,17 +236,29 @@ the bench included. `docker build -t canopen-bench .` builds the same
 from a clone.
 
 All workspaces live on the `/data` volume. Demo mode works out of the
-box. Of the adapters, a container reaches only those whose driver it
-carries:
+box. Of the adapters, a container reaches those whose driver it carries,
+and those the host's kernel drives:
 
-- **CPC-USB** on a Linux host: `--device=/dev/bus/usb` hands the USB bus
-  in, libusb is in the image. Linux has a kernel driver of its own for
-  this adapter, `ems_usb`, and while it is loaded it holds the device:
-  `sudo modprobe -r ems_usb` frees it until the next replug, a line
-  `blacklist ems_usb` in `/etc/modprobe.d/` for good. Not yet tried in a
-  container.
-- **IXXAT, PCAN, Vector**: their drivers are not in the image — IXXAT's
-  and Vector's exist only for Windows. Install the bench natively there
+- **SocketCAN** on a Linux host: bring `can0` up on the host, with its
+  bitrate (see Hardware), and start the container in the host's network
+  so it sees that interface — the port is then the host's own, no `-p`:
+
+  ```bash
+  docker run --network host -v canopen-bench:/data ghcr.io/nobsevomberg/canopen-bench
+  ```
+
+  That reaches a PCAN-USB, Kvaser, candleLight/CANable or CPC-USB without
+  a driver in the image. Not yet tried with a device.
+- **CPC-USB** on a Linux host: either through SocketCAN, above, with the
+  kernel's `ems_usb` left loaded — or `--device=/dev/bus/usb` hands the
+  USB bus in for the bench's own driver, libusb is in the image. For that
+  one `ems_usb` has to let go of the device: `sudo modprobe -r ems_usb`
+  frees it until the next replug, a line `blacklist ems_usb` in
+  `/etc/modprobe.d/` for good. Neither way tried in a container yet.
+- **PCAN**: PCANBasic is not in the image, but on a Linux host the
+  kernel's `peak_usb` makes the adapter `can0` — use SocketCAN.
+- **IXXAT, Vector**: their drivers are not in the image and exist only
+  for Windows. Install the bench natively there
   (`pip install canopen-bench`).
 - **Docker Desktop** on Windows or macOS cannot hand a USB device to a
   container; there too, install with pip.

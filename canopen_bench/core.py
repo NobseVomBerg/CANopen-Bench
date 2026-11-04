@@ -1043,7 +1043,7 @@ class Bench:
         self.symbols_dir = db.path.parent / "symbols"
         self.symbols: SymbolTables = self._load_symbols()
         self.adapter_cards = ([c for p in self.plugins for c in p.adapters()]
-                              + list(data.ADAPTERS))
+                              + data.adapters_for(sys.platform))
         extra_backends = {key: backend for p in self.plugins
                           for key, backend in p.adapter_backends().items()}
         # firmware entries a plugin lists without a file of their own —

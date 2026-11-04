@@ -1,14 +1,17 @@
 # Demo mode works out of the box. A CPC-USB on a Linux host needs the USB
 # bus passed through, e.g.
 #   docker run --device=/dev/bus/usb -v canopen-bench:/data -p 8000:8000 canopen-bench
+# SocketCAN (can0, brought up with its bitrate on the host) needs the host's
+# network instead: docker run --network host -v canopen-bench:/data canopen-bench
 # Which adapters a container can reach at all: README, "Docker".
 # publish.yml builds this into ghcr.io/nobsevomberg/canopen-bench with every
 # PyPI upload; CI builds and starts it on every push.
 FROM python:3.12-slim
 
-# libusb for the CPC-USB driver (cob-cpcusb, a dependency); the slim image
-# has none
-RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \
+# libusb for the CPC-USB driver (cob-cpcusb, a dependency); iproute2 for
+# SocketCAN — python-can lists the interfaces with `ip`, and the bench asks
+# it for their bitrate. The slim image has neither.
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

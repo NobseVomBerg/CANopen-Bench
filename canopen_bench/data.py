@@ -162,9 +162,21 @@ ADAPTERS = [
     {"key": "vector", "label": "Vector VN1600", "sub": "Vector · VN1630 tested",
      "conn": "Vector connected", "foot": "Vector VN1600", "iface": "VECTOR",
      "driver": "driver: XL driver via python-can", "full": "Vector VN1610/VN1630"},
+    # Every adapter the Linux kernel drives as a network interface: PCAN-USB,
+    # Kvaser, candleLight/CANable, CPC-USB (bus/socketcan.py). Run against
+    # vcan only, never a device — hence "untested". Linux only ("os").
+    {"key": "socketcan", "label": "SocketCAN", "sub": "Linux · untested on hardware",
+     "conn": "SocketCAN connected", "foot": "SocketCAN", "iface": "SOCKETCAN",
+     "driver": "driver: kernel via python-can", "full": "SocketCAN", "os": "linux"},
     {"key": "demo", "label": "Demo mode", "sub": "virtual DUTs from EDS",
      "conn": "Demo connected", "foot": "Demo mode", "iface": "DEMO",
      # keep this as short as the other driver lines — the adapter cards are
      # equal-width columns and clip what doesn't fit (see SetupPage in app.js)
      "driver": "no hardware · no driver", "full": "Demo mode"},
 ]
+
+
+def adapters_for(platform: str) -> list[dict]:
+    """The built-in cards this operating system (``sys.platform``) can use:
+    a card with an ``"os"`` is shown only there."""
+    return [a for a in ADAPTERS if platform.startswith(a.get("os", ""))]
