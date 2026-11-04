@@ -74,7 +74,7 @@ and every access shows up in the Trace like real bus traffic.
 - **Tests** — declarative YAML test cases
   (`docs/ablaeufe/testfall-format.md`, examples in
   `examples/testcases/`) executed for real against the selected device.
-  A run leaves HTML behind: one file per case, one summary, and a JSON
+  A run leaves HTML reports behind: one file per case, one summary, and a JSON
   sibling. From those, "Overview by variant" folds the last so many days
   into one collapsible section per hardware variant — runs, successes
   and last verdict per case — which is how you tell one broken variant
@@ -137,9 +137,9 @@ hooks).
     <td width="50%">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/tests-dark.png">
-        <img width="100%" alt="System tests: a run in progress with one failed case" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/tests.png">
+        <img width="100%" alt="System tests: a run in progress with one failed case, HTML reports of earlier runs on the right" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/tests.png">
       </picture>
-      <br><sub>Tests: a run in progress, one case failed so far</sub>
+      <br><sub>Tests: a run in progress, one case failed so far; on the right the HTML reports of earlier runs</sub>
     </td>
     <td width="50%">
       <picture>
