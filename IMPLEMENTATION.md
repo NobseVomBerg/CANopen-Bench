@@ -15,13 +15,12 @@ Five pages, light + dark theme (toggle in the header, persisted per
 browser):
 
 - **Setup** — workspace bar (create/switch workspaces, each a subfolder
-  of the data root), bus interface (IXXAT / PCAN / Vector / SocketCAN
-  on Linux / Demo mode;
-  vendor adapters such as the CPC-USB arrive via plugin packages; the
-  CPC-USB's comes with the install) + bitrate
-  (applied to a running connection immediately) + address range (node-ID)
-  + own node-ID — the one range that governs this bus: the scan probes
-  exactly it, and an operator teach addresses up to its top node-id —,
+  of the data root), bus interface (IXXAT / PCAN / Vector / SocketCAN on
+  Linux / Demo mode; vendor adapters such as the CPC-USB arrive via plugin
+  packages; the CPC-USB's comes with the install) + bitrate (applied to a
+  running connection immediately) + address range (node-ID) + own
+  node-ID — the one range that governs this bus: the scan probes exactly
+  it, and an operator teach addresses up to its top node-id —,
   EDS file management (upload real .eds files — stored in the
   workspace's configurable EDS folder, parsed for device name +
   identity —, delete, checkbox multi-active, editable DUT shortcodes,
