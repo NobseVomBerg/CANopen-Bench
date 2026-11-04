@@ -184,3 +184,11 @@ development; the version counts from here.
 - A container image with every PyPI upload of the bench:
   `ghcr.io/nobsevomberg/canopen-bench`, for amd64 and arm64, built by
   `publish.yml`. CI builds and starts the `Dockerfile` on every push
+- A SocketCAN adapter card, on Linux: one card for every adapter the
+  kernel drives as a network interface — PCAN-USB, Kvaser,
+  candleLight/CANable, CPC-USB — through python-can's `socketcan`
+  backend, in a container too (`--network host`). The OS owns the
+  bitrate there and python-can ignores the one it is handed, so connect
+  reads the interface's back and refuses a mismatch, a down or a missing
+  interface, with the `ip` line that fixes it. Run against `vcan` in CI,
+  never against a device; the image carries `iproute2` for it

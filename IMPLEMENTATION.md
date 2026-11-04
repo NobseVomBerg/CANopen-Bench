@@ -15,12 +15,12 @@ Five pages, light + dark theme (toggle in the header, persisted per
 browser):
 
 - **Setup** — workspace bar (create/switch workspaces, each a subfolder
-  of the data root), bus interface (IXXAT / PCAN / Vector / Demo mode;
-  vendor adapters such as the CPC-USB arrive via plugin packages; the
-  CPC-USB's comes with the install) + bitrate
-  (applied to a running connection immediately) + address range (node-ID)
-  + own node-ID — the one range that governs this bus: the scan probes
-  exactly it, and an operator teach addresses up to its top node-id —,
+  of the data root), bus interface (IXXAT / PCAN / Vector / SocketCAN on
+  Linux / Demo mode; vendor adapters such as the CPC-USB arrive via plugin
+  packages; the CPC-USB's comes with the install) + bitrate (applied to a
+  running connection immediately) + address range (node-ID) + own
+  node-ID — the one range that governs this bus: the scan probes exactly
+  it, and an operator teach addresses up to its top node-id —,
   EDS file management (upload real .eds files — stored in the
   workspace's configurable EDS folder, parsed for device name +
   identity —, delete, checkbox multi-active, editable DUT shortcodes,
@@ -265,12 +265,17 @@ the adapter selected on the Setup page:
   DUT and does not count as a seeded workspace. Manual SDO/PDO/NMT rows
   never needed an EDS at all — they address a node directly.
 
-- **IXXAT / PCAN / Vector — plus plugin adapters like CPC-USB** →
+- **IXXAT / PCAN / Vector / SocketCAN — plus plugin adapters like CPC-USB** →
   `CanopenBus` (`bus/canopen_bus.py`), real protocol via
   canopen/python-can. IXXAT needs the VCI4 driver (Windows); Vector
   (VN1600 family) needs only the free XL driver, not a CANoe/CANalyzer
   licence, and is addressed by hardware channel index (`app_name=None`)
-  so no application entry in Vector's Hardware Config is required. A vendor adapter arrives as one
+  so no application entry in Vector's Hardware Config is required.
+  SocketCAN (Linux, card filtered by `data.adapters_for`) opens `can0`
+  or whichever interface is picked; its bitrate belongs to the OS, so
+  `bus/socketcan.py` asks `ip -details -json link show` before opening
+  and `connect` raises with the fixing `ip` line on a mismatch, a down
+  or a missing interface. A vendor adapter arrives as one
   separately installed package registering two entry points: a
   python-can driver (`can.interface`) plus a bench plugin contributing
   the adapter card and key mapping (`canopen_bench.plugins`) — e.g.
