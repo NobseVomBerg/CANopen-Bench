@@ -1,6 +1,6 @@
 """Step executor: real YAML test cases running against the demo bus.
 
-The demo DUTs come from the seed EDS written by conftest (0x2040:01 =
+The demo DUTs come from the seed EDS written by conftest (0x2020:01 =
 0x00260001, 0x2050 = 0x00), so expectations here exercise real SDO reads
 through the BusInterface — no simulated verdicts involved.
 """
@@ -28,7 +28,7 @@ name: "identity readable"
 steps:
   - nmt: start
   - wait_for: {heartbeat: operational, timeout: 2.0}
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0x260001"}
   - sdo_read: {index: "0x2050", sub: "0x00", mask: "0x04", expect: "0x00"}
 """
 
@@ -220,7 +220,7 @@ DATA_PATH_TC = """\
 id: "0007"
 name: "register data path through real SDO"
 steps:
-  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - sdo_read: {index: "0x2020", sub: "0x01", into: R3}
   - sdo_write: {index: "0x2000", sub: "0x00", value: R3, size: 4}
   - sdo_read: {index: "0x2000", sub: "0x00", expect: "0x260001"}
 """
@@ -596,7 +596,7 @@ SDO_WRITE_EXPECT_ABORT_MATCH_TC = """\
 id: "0015"
 name: "sdo_write expected abort matches"
 steps:
-  - sdo_write: {index: "0x2040", sub: "0x01", value: "0x01", expect_abort: "0x06010002"}
+  - sdo_write: {index: "0x2020", sub: "0x01", value: "0x01", expect_abort: "0x06010002"}
 """
 
 SDO_WRITE_EXPECT_ABORT_BUT_WROTE_OK_TC = """\
@@ -610,12 +610,12 @@ SDO_WRITE_EXPECT_ABORT_WRONG_CODE_TC = """\
 id: "0017"
 name: "sdo_write expected abort but got a different code"
 steps:
-  - sdo_write: {index: "0x2040", sub: "0x01", value: "0x01", expect_abort: "0x06020000"}
+  - sdo_write: {index: "0x2020", sub: "0x01", value: "0x01", expect_abort: "0x06020000"}
 """
 
 
 def test_sdo_write_expected_abort_matches_is_pass(tc_bench):
-    # 0x2040:01 is read-only per the seed EDS, so the write aborts with
+    # 0x2020:01 is read-only per the seed EDS, so the write aborts with
     # 0x06010002 — exactly the expected code.
     _add_tc(tc_bench, "TC0015_sdo_write_expect_abort.yaml", SDO_WRITE_EXPECT_ABORT_MATCH_TC)
     run_selected(tc_bench, {"0015"})
@@ -632,7 +632,7 @@ def test_sdo_write_expected_abort_but_write_succeeds_is_fail(tc_bench):
 
 
 def test_sdo_write_expected_abort_wrong_code_is_fail(tc_bench):
-    # 0x2040:01 aborts with 0x06010002 (read-only), not the 0x06020000 expected.
+    # 0x2020:01 aborts with 0x06010002 (read-only), not the 0x06020000 expected.
     _add_tc(tc_bench, "TC0017_sdo_write_expect_abort_wrong_code.yaml",
             SDO_WRITE_EXPECT_ABORT_WRONG_CODE_TC)
     run_selected(tc_bench, {"0017"})
@@ -643,7 +643,7 @@ SDO_WRITE_PLAIN_ABORT_TC = """\
 id: "0018"
 name: "sdo_write without expect_abort still fails unconditionally on abort"
 steps:
-  - sdo_write: {index: "0x2040", sub: "0x01", value: "0x01"}
+  - sdo_write: {index: "0x2020", sub: "0x01", value: "0x01"}
 """
 
 
@@ -665,8 +665,8 @@ MULTI_NODE_TC = """\
 id: "0010"
 name: "a second device on the bus"
 steps:
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
-  - sdo_read: {index: "0x2040", sub: "0x01", node: 2, into: R5}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x2020", sub: "0x01", node: 2, into: R5}
   - jump_ne: {a: R5, b: 0, to: other_answered}
   - fail: "node 2 answered nothing"
   - label: other_answered
@@ -711,7 +711,7 @@ steps:
 
 def test_a_step_can_target_another_node(tc_bench):
     """The case is about one DUT, but the bus has more devices on it — a
-    second feeder consuming yarn, a gateway. Without a per-step node such a
+    second drive, a gateway. Without a per-step node such a
     case cannot be written down at all."""
     _add_tc(tc_bench, "TC0010_multi.yaml", MULTI_NODE_TC)
     run_selected(tc_bench, {"0010"})
@@ -861,7 +861,7 @@ tools: [PSU]
 steps:
   - psu: {ch: 2, volt: 26}
   - psu: {output: on}
-  - sdo_read: {index: "0x2040", sub: "0x01"}
+  - sdo_read: {index: "0x2020", sub: "0x01"}
   - psu: {ch: 2, volt: 57.5, curr: 2}
   - psu: {output: off}
 """
@@ -939,7 +939,7 @@ steps:
   - mov: {to: R1, value: "0x26"}
   - mul: {to: R1, value: "0x10000"}
   - add: {to: R1, value: 1}
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: R1}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: R1}
 """
 
 EXPECT_FROM_REGISTER_FAIL_TC = """\
@@ -949,7 +949,7 @@ steps:
   - mov: {to: R1, value: "0x26"}
   - mul: {to: R1, value: "0x10000"}
   - add: {to: R1, value: 2}
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: R1}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: R1}
 """
 
 MASK_FROM_REGISTER_TC = """\
@@ -957,7 +957,7 @@ id: "0022"
 name: "mask resolves from a register too"
 steps:
   - mov: {to: R2, value: "0xFF"}
-  - sdo_read: {index: "0x2040", sub: "0x01", mask: R2, expect: "0x01"}
+  - sdo_read: {index: "0x2020", sub: "0x01", mask: R2, expect: "0x01"}
 """
 
 EXPECT_R0_SELF_COMPARE_TC = """\
@@ -965,20 +965,20 @@ id: "0023"
 name: "expect R0 compares against what the device answers, not against itself"
 steps:
   - mov: {to: R0, value: "0x99"}
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: R0}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: R0}
 """
 
 LITERAL_EXPECT_REGRESSION_TC = """\
 id: "0024"
 name: "plain literal expect and non-numeric literal expect are unaffected"
 steps:
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0x260001"}
   - sdo_read: {index: "0x1008", sub: "0x00", expect: "DUT_ALPHA"}
 """
 
 
 def test_sdo_read_expect_resolves_from_a_computed_register(tc_bench):
-    # R1 is computed to exactly 0x00260001 — the value 0x2040:01 actually
+    # R1 is computed to exactly 0x00260001 — the value 0x2020:01 actually
     # holds — so this only PASSes if `expect: R1` was resolved to that
     # number before the comparison, not left as the literal string "R1".
     _add_tc(tc_bench, "TC0020_expect_register.yaml", EXPECT_FROM_REGISTER_PASS_TC)
@@ -1000,7 +1000,7 @@ def test_sdo_read_expect_from_register_fails_on_wrong_arithmetic(tc_bench):
 
 
 def test_sdo_read_mask_resolves_from_a_register(tc_bench):
-    # 0x2040:01 is 0x00260001, so "expect 0x01" only holds under a mask
+    # 0x2020:01 is 0x00260001, so "expect 0x01" only holds under a mask
     # that keeps the low byte. An unresolved "0xFF" would leave the mask
     # None and compare the whole word, which does not match — so this
     # PASSes only if the register really became 0xFF.
@@ -1119,9 +1119,9 @@ def test_a_variant_matches_however_the_two_sides_spell_the_number(tmp_path):
     spell the value byte for byte.
     """
     # no value map: the device already answers a usable number, which is
-    # the shape cob-memiro and anything like it ships
+    # the shape a vendor plugin ships
     row = {"file": "variant_dev.eds", "dev": "VARIANT_DEV", "ident": "0x4D2·0x1150",
-           "code": "VAR", "enabled": True, "variant": {"index": "0x2040", "sub": "01"}}
+           "code": "VAR", "enabled": True, "variant": {"index": "0x2020", "sub": "01"}}
     bench = Bench(Db(tmp_path / "v.db"), plugins=[_VariantSeedPlugin(row)])
     write_seed_eds_files(bench)
     tc_dir = tmp_path / "tcs"
@@ -1521,7 +1521,7 @@ id: "0020"
 name: "what a write puts in the report"
 steps:
   - sdo_write: {index: "0x2000", sub: "0x00", value: "0x00000001", note: "a literal"}
-  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - sdo_read: {index: "0x2020", sub: "0x01", into: R3}
   - sdo_write: {index: "0x2000", sub: "0x00", value: R3, size: 4, note: "a register"}
 """
 
@@ -1648,7 +1648,7 @@ steps:
   - jump_eq: {a: R1, b: 12, to: ok}
   - fail: "0b1100 is not twelve"
   - label: ok
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0b00000000001001100000000000000001"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0b00000000001001100000000000000001"}
 """
 
 
@@ -1665,11 +1665,11 @@ def test_a_binary_literal_is_read_as_binary(tc_bench):
 
 def test_a_bit_level_expectation_is_not_a_nibble_one(tc_bench):
     """A "#" in a hex filter is four bits at once, so a single-bit check
-    cannot be written that way — 0x2040:01 is 0x00260001, and asserting
+    cannot be written that way — 0x2020:01 is 0x00260001, and asserting
     bit 0 alone has to leave the other three bits of that nibble free."""
     _add_tc(tc_bench, "TC0023_bit.yaml",
             'id: "0023"\nname: x\nsteps:\n'
-            '  - sdo_read: {index: "0x2040", sub: "0x01", '
+            '  - sdo_read: {index: "0x2020", sub: "0x01", '
             'expect: "0x00000001", mask: "0x00000001"}\n')
     run_selected(tc_bench, {"0023"})
     assert tc_bench.results == {"0023": "PASS"}
@@ -1720,7 +1720,7 @@ id: "0024"
 name: "the register state, written down"
 steps:
   - mov: {to: R1, value: 12}
-  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - sdo_read: {index: "0x2020", sub: "0x01", into: R3}
   - dump_registers: {note: "state before the write"}
 """
 
@@ -1762,9 +1762,9 @@ BASE_TC = """\
 id: "0025"
 name: "the answer in the base it was asked in"
 steps:
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: 2490369, note: "decimal"}
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001", note: "hex"}
-  - sdo_read: {index: "0x2040", sub: "0x01", note: "no expectation"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: 2490369, note: "decimal"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0x260001", note: "hex"}
+  - sdo_read: {index: "0x2020", sub: "0x01", note: "no expectation"}
 """
 
 

@@ -1,6 +1,6 @@
 """CpcUsbPlugin — the adapter-card half of CPC-USB/ARM7 support: entry-point
 discovery, and the card/backend mapping landing where the core consumes it.
-Mirrors the style of cob-memiro's own test_memiro_plugin.py.
+Mirrors the style of the vendor plugins' own tests.
 """
 from __future__ import annotations
 

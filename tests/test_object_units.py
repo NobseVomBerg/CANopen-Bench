@@ -56,7 +56,7 @@ DefaultValue=0
 
 #: no unit and no scale on 0x2007:01 — the plugin says what it means
 PANEL = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Tension
