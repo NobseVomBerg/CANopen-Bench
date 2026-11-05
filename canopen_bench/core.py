@@ -165,6 +165,10 @@ TRACE_CLASSES = ("NMT", "SDO", "PDO", "EMCY", "HB")
 NMT_LABEL = {"start": "start", "preop": "pre-op", "stop": "stop", "reset": "reset node"}
 NMT_STATE = {"start": "Operational", "preop": "Pre-Operational", "stop": "Stopped",
              "reset": "Pre-Operational"}
+# what a device reports in its heartbeat (0x700+node, one byte, as the trace writes it), in
+# the labels above; a boot-up is the step from initialisation into Pre-Operational (CiA 301)
+HB_STATE = {"00": "Pre-Operational", "04": "Stopped", "05": "Operational",
+            "7F": "Pre-Operational"}
 
 
 def now_str() -> str:
@@ -1681,10 +1685,8 @@ class Bench:
             self._observe_stats(row)
             if row["cls"] == "HB" and row["node"] is not None:
                 self._hb_seen[row["node"]] = time.monotonic()
-                # a boot-up: the heartbeat's COB-ID, one byte 00 — the device
-                # has just started, whatever made it
-                if row["dir"] == "RX" and row["data"].replace(" ", "") == "00":
-                    self._forget_dev_cmds(row["node"], "the device restarted")
+                if row["dir"] == "RX":
+                    self._follow_heartbeat(row["node"], row["data"].replace(" ", ""))
             key = (row["cls"], row["node"])
             self._trace_counts[key] = self._trace_counts.get(key, 0) + 1
         self.trace += rows
@@ -1698,6 +1700,29 @@ class Bench:
             for old in self.trace[:cut]:
                 self._trace_counts[(old["cls"], old["node"])] -= 1
             del self.trace[:cut]
+
+    def _follow_heartbeat(self, node: int, data: str) -> None:
+        """The device list shows the NMT state the device itself reports.
+
+        A scan and the bench's own NMT commands used to be the only things
+        that set it, so a device that started itself into Operational after
+        a power cycle stayed "Pre-Operational" in the list until the next
+        scan. Every device sends this once a second, so it costs one lookup
+        and a push only when the state really changed.
+        """
+        if data == "00":
+            # a boot-up: the heartbeat's COB-ID, one byte 00 — the device has
+            # just started, whatever made it
+            self._forget_dev_cmds(node, "the device restarted")
+        state = HB_STATE.get(data)
+        if state is None:
+            return
+        for dev in self.devices:
+            if dev["node"] == node:
+                if dev["nmt"] != state:
+                    dev["nmt"] = state
+                    self._changed()
+                return
 
     async def _tick_once(self) -> None:
         dirty = False

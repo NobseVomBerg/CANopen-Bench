@@ -23,7 +23,7 @@ NO_SERIAL = "?"
 class FoundDevice:
     node: int
     name: str
-    nmt: str
+    nmt: str  # the device list's label: "Operational", "Pre-Operational", "Stopped"
     fw: str
     sn: str
     identity: str  # "vendor·product" signature from object 0x1018
