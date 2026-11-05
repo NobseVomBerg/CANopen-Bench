@@ -1123,6 +1123,61 @@ def test_switching_devices_does_not_carry_values_over(connected_bench):
     assert "0x2040:01" not in bench.obj_vals
 
 
+def test_a_late_answer_goes_to_the_device_that_gave_it(connected_bench):
+    """A read that finishes after a device switch — a box read off the
+    event loop, a display re-read a second later — belongs to the device
+    it asked. Remembered under whichever was selected by then, it showed
+    one device's display on the other, and brought it back on every
+    switch after that."""
+    bench = connected_bench
+    sn = {d["node"]: d["sn"] for d in bench.devices}
+    assert sn[1] != sn[2]
+    bench.dispatch("dev_toggle", {"node": 2})            # switched before the answer
+    bench.remember("0x2040:01", "0x00001111", 1)         # node 1's answer
+    assert "0x2040:01" not in bench.obj_vals, "not on node 2's page"
+    assert "0x2040:01" not in bench.db.last_values(sn[2])
+    assert bench.db.last_values(sn[1])["0x2040:01"] == "0x00001111"
+    bench.remember("0x2040:01", "0x00002222", 2)         # the shown device's own
+    assert bench.obj_vals["0x2040:01"] == "0x00002222"
+
+
+def test_a_box_read_outlasting_a_switch_keeps_to_its_device(connected_bench, monkeypatch):
+    bench = connected_bench
+    sn = {d["node"]: d["sn"] for d in bench.devices}
+    bench.dispatch("dev_toggle", {"node": 1})
+    orig = bench.bus.sdo_read
+
+    def read_then_switch(node, idx, sub):
+        res = orig(node, idx, sub)
+        for d in bench.devices:              # the operator picks node 2 meanwhile
+            d["sel"] = d["node"] == 2
+        return res
+    monkeypatch.setattr(bench.bus, "sdo_read", read_then_switch)
+    asyncio.run(bench._panel_read_async([("0x2040", "01")]))
+    assert "0x2040:01" in bench.db.last_values(sn[1])
+    assert "0x2040:01" not in bench.db.last_values(sn[2])
+
+
+def test_a_write_goes_to_every_selected_device(connected_bench, monkeypatch):
+    """Like a firmware download: every selected device gets the value, and
+    one that cannot take it answers with an abort without holding back the
+    others. It used to reach the first one only."""
+    from canopen_bench.bus.interface import SdoResult
+    bench = connected_bench
+    for node in (1, 2, 3):
+        bench.dispatch("dev_toggle", {"node": node})
+    orig = bench.bus.sdo_write
+    monkeypatch.setattr(bench.bus, "sdo_write", lambda node, i, s, v: (
+        SdoResult(ok=False, abort="0x06010002") if node == 2 else orig(node, i, s, v)))
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x42"})
+    bench.dispatch("obj_write", {"idx": "0x2000", "sub": "00"})
+    for node in (1, 3):
+        assert bench.bus.sdo_read(node, "0x2000", "00").value == "0x00000042"
+    said = [ln["msg"] for ln in bench.logs if "write 0x2000:00" in ln["msg"]]
+    assert [m.endswith(f"(node {n})") for n, m in zip((1, 2, 3), said)] == [True] * 3, said
+    assert "abort 0x06010002" in said[1]
+
+
 def test_deselecting_everything_empties_the_table(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
