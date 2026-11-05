@@ -4674,7 +4674,7 @@ def _bench_with_supply(tmp_path) -> Bench:
     from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
     bench = Bench(Db(tmp_path / "psu.db"))
     bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
-    assert bench._psu_connect("COM6")
+    assert bench._psu_connect("COM99")
     return bench
 
 

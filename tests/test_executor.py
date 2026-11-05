@@ -873,7 +873,7 @@ def test_a_case_can_drive_the_power_supply(tc_bench):
     from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
     port = FakeSupplyPort()
     tc_bench._psu_opener = lambda device, baud, timeout: port
-    assert tc_bench._psu_connect("COM6")
+    assert tc_bench._psu_connect("COM99")
     _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
     run_selected(tc_bench, {"0017"})
     assert tc_bench.results == {"0017": "PASS"}
@@ -896,7 +896,7 @@ def test_what_a_case_sets_arrives_in_the_supply_box(tc_bench):
     """
     from conftest import FakeSupplyPort  # noqa: PLC0415  (test-only helper)
     tc_bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
-    assert tc_bench._psu_connect("COM6")
+    assert tc_bench._psu_connect("COM99")
     before = tc_bench.snapshot()["psu"]
     assert before["channels"][1]["volt"] == 57.0 and before["output"] is True
 
@@ -2540,7 +2540,7 @@ def test_a_supply_that_answers_brings_those_cases_back(tc_bench):
     tc_bench._psu_opener = lambda device, baud, timeout: FakeSupplyPort()
     _add_tc(tc_bench, "TC0017_psu.yaml", PSU_TC)
 
-    assert tc_bench._psu_connect("COM6")
+    assert tc_bench._psu_connect("COM99")
     assert tc_bench.tool_filter is True
     assert "0017" in [t[0] for t in tc_bench._shown_tests()]
 
@@ -2558,7 +2558,7 @@ def test_a_click_on_the_chip_outlasts_the_supply(tc_bench):
     tc_bench.dispatch("tool_filter_toggle", {})       # on, with no supply
     assert tc_bench.tool_filter is True
 
-    assert tc_bench._psu_connect("COM6")
+    assert tc_bench._psu_connect("COM99")
     tc_bench.dispatch("psu_release", {})
     assert tc_bench.tool_filter is True, "the click stands"
 
