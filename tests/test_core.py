@@ -1280,6 +1280,61 @@ def test_dev_menu_nmt_skipped_when_not_connected(connected_bench, monkeypatch):
     assert len(bench.logs) == n_logs
 
 
+def test_the_listed_nmt_state_follows_the_heartbeat(connected_bench):
+    """A device that starts itself into Operational after a power cycle sent
+    nothing the bench asked for — its heartbeat is the only news of it, and
+    the list used to wait for the next scan."""
+    bench = connected_bench
+
+    def states():
+        return {d["node"]: d["nmt"] for d in bench.devices}
+
+    before = states()
+    assert set(before.values()) == {"Pre-Operational"} and 9 not in before
+
+    bench.bus.set_nmt(1, "Operational")  # the device's doing, no NMT from the bench
+    bench._drain_frames()
+    assert states() == {**before, 1: "Operational"}
+
+    bench.bus.set_nmt(1, "Stopped")
+    bench._drain_frames()
+    assert states() == {**before, 1: "Stopped"}
+
+    bench.bus.queue_raw(0x709, b"\x05")  # a node the list does not know
+    bench._drain_frames()
+    assert states() == {**before, 1: "Stopped"}
+
+
+def test_a_boot_up_lists_the_device_as_pre_operational(connected_bench):
+    """Whatever the device was before, a boot-up is its step into
+    Pre-Operational — the list does not keep the state from before."""
+    bench = connected_bench
+    bench.bus.set_nmt(1, "Operational")
+    bench._drain_frames()
+    dev = next(d for d in bench.devices if d["node"] == 1)
+    assert dev["nmt"] == "Operational"
+
+    bench.bus.queue_raw(0x701, b"\x00")
+    bench._drain_frames(max_frames=1)  # the boot-up alone, before the demo's next heartbeat
+    assert dev["nmt"] == "Pre-Operational"
+
+
+def test_a_heartbeat_pushes_only_when_the_state_changes(connected_bench, monkeypatch):
+    """Every device sends one a second; most of them say what the list
+    already shows."""
+    bench = connected_bench
+    pushes = []
+    monkeypatch.setattr(bench, "_changed", lambda: pushes.append(1))
+    for _ in range(3):
+        bench._drain_frames()
+    assert pushes == []
+
+    bench.bus.set_nmt(2, "Operational")
+    for _ in range(3):
+        bench._drain_frames()
+    assert pushes == [1]
+
+
 def test_eds_toggle_and_code(bench):
     bench.dispatch("eds_toggle", {"file": "dut_beta_v7.eds"})
     assert "dut_beta_v7.eds" in bench.eds_enabled
