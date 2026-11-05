@@ -4413,11 +4413,20 @@ class Bench:
         sel = self.sel_devices
         return sel[0]["node"] if sel else 1
 
-    def remember(self, key: str, value: str) -> None:
+    def remember(self, key: str, value: str, node: int | None = None) -> None:
         """A read of the selected device answered: keep the value everywhere
         it is kept — the table, how old it is, and the workspace database
         under the device's serial number, which is what brings it back
         when this device is selected again.
+
+        `node` names the device that answered, for a read that may finish
+        after the selection has moved on — one running off the event loop,
+        or a re-read scheduled for later. Its value goes under that
+        device's serial number, and into the table only while that device
+        is still the one the table shows. Without it, a box read or a
+        display re-read that outlasted a device switch put one device's
+        values under the other, on the page and in the database, and the
+        wrong display came back on every switch after that.
 
         The one way in, for the core and for plugins alike. There used to
         be five: two wrote the database, three wrote the table only, and a
@@ -4434,12 +4443,16 @@ class Bench:
         shutdown, it put the device back one read: every session opened on
         the display as it was before the last refresh.
         """
-        self.obj_vals[key] = value
-        self.obj_vals_at[key] = time.monotonic()
         sel = self.sel_devices
-        if sel and sel[0]["sn"] != NO_SERIAL:
-            self.db.remember_value(sel[0]["sn"], key, value, _stamp())
-            self._seen_dirty.discard((self._identity(sel[0]["node"]), key))
+        shown = sel[0] if sel else None
+        dev = shown if node is None else next(
+            (d for d in self.devices if d["node"] == node), None)
+        if node is None or (shown is not None and shown["node"] == node):
+            self.obj_vals[key] = value
+            self.obj_vals_at[key] = time.monotonic()
+        if dev is not None and dev["sn"] != NO_SERIAL:
+            self.db.remember_value(dev["sn"], key, value, _stamp())
+            self._seen_dirty.discard((self._identity(dev["node"]), key))
 
     def _identity(self, node: int) -> str:
         """What a value seen at a node belongs to: the device's serial
@@ -4590,26 +4603,31 @@ class Bench:
         return object_info(self._ods.load(dev["eds"]), want_i, want_s or 0)
 
     def act_obj_write(self, p: dict) -> None:
+        """The staged value to every selected device, like a firmware
+        download: one that cannot take it answers with an abort, and the
+        others are not held back by it. It used to reach the first one
+        only, while the selection said all of them."""
         idx, sub = p["idx"], p["sub"]
-        node = self._target_node()
         key = f"{idx}:{sub}"
-        value = p.get("val") or self.obj_vals.get(key) or ""
-        if not value:
+        staged = p.get("val") or self.obj_vals.get(key) or ""
+        if not staged:
             catalog, _groups, _hint = self._object_catalog()
             for rows in catalog.values():
                 for r in rows:
                     if r[0] == idx and r[1] == sub:
-                        value = r[5]
-        info = self._object_info(node, idx, sub)
-        value = self._pad_hex(value, info.width if info else 0)
-        res = self.bus.sdo_write(node, idx, sub, value)
-        if res.ok:
-            # a write the device accepted is what it holds now — remembered
-            # the same way a read is
-            self.remember(key, value)
-            self.log(f"SDO  write {idx}:{sub} ← {value} (node {node})", "sdo")
-        else:
-            self.log(f"SDO  write {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
+                        staged = r[5]
+        for node in [d["node"] for d in self.sel_devices] or [self._target_node()]:
+            # padded to each device's own width: two EDS may not agree
+            info = self._object_info(node, idx, sub)
+            value = self._pad_hex(staged, info.width if info else 0)
+            res = self.bus.sdo_write(node, idx, sub, value)
+            if res.ok:
+                # a write the device accepted is what it holds now — remembered
+                # the same way a read is
+                self.remember(key, value, node)
+                self.log(f"SDO  write {idx}:{sub} ← {value} (node {node})", "sdo")
+            else:
+                self.log(f"SDO  write {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")
 
     # -- object panels (a device's values as named boxes) ---------------------
     def _panel(self):
@@ -5034,7 +5052,7 @@ class Bench:
                 res = await asyncio.to_thread(self.bus.sdo_read, node, idx, sub)
                 key = f"{idx}:{sub}"
                 if res.ok:
-                    self.remember(key, res.value)
+                    self.remember(key, res.value, node)
                     done += 1
                 else:
                     self.log(f"SDO  read {idx}:{sub} ✗ abort {res.abort} (node {node})", "emcy0")

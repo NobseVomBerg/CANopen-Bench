@@ -1155,7 +1155,7 @@ function PanelBox({ g, busy, anyWrite }) {
     const writeBtn = writes || anyWrite ? html`
       <span class=${writes ? 'hv' : ''}
         onClick=${writes ? () => send('obj_write', { idx: f.idx, sub: f.sub }) : null}
-        title=${writes ? 'write the staged value' : ''}
+        title=${writes ? 'write the staged value to every selected device' : ''}
         style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;flex:none;${writes ? 'cursor:pointer' : 'visibility:hidden'}">Write</span>`
       : '';
     // A named value and a single bit are the same object underneath, so both
@@ -1387,7 +1387,7 @@ function ObjectsPage({ s, ui, setUi }) {
               title=${valueTitle(key, 'staged value — Write sends it') + numberHint}
               onCommit=${(v) => send('obj_set', { idx, sub, val: v })}
               style="border:1px solid var(--inp);background:var(--panel);color:${cur ? 'var(--acc)' : 'var(--tx)'};${defaultStyle(key)}border-radius:4px;padding:2px 7px;font:600 12px ${MONO};width:86px;outline:none;text-align:right" />
-            <span class="hv" onClick=${() => send('obj_write', { idx, sub })} title="write the staged value to the device"
+            <span class="hv" onClick=${() => send('obj_write', { idx, sub })} title="write the staged value to every selected device"
               style="${btn.ghost}font-size:10.5px;padding:2px 8px;border-radius:4px;cursor:pointer">Write</span>`
           : html`
             <span title=${valueTitle(key, '')} style="font:600 12px ${MONO};color:${cur ? 'var(--acc)' : 'var(--tx)'};${defaultStyle(key)}background:var(--chip);padding:2px 9px;border-radius:4px;min-width:44px;text-align:right">${shownValue(key, cur ?? '—')}</span>`}
