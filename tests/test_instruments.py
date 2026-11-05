@@ -85,31 +85,31 @@ def test_the_raw_answer_is_kept():
 # -- the driver -------------------------------------------------------------
 
 def test_identify_accepts_only_this_vendor():
-    yes = SerialLink("COM6", opener=opener_for(FakePort()))
+    yes = SerialLink("COM99", opener=opener_for(FakePort()))
     assert Toellner8952.identify(yes) == IDN
     other = SerialLink("COM3", opener=opener_for(FakePort({"*IDN?": "ACME,PSU,1,1"})))
     assert Toellner8952.identify(other) is None
 
 
 def test_state_reports_model_serial_and_firmware():
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(FakePort())))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(FakePort())))
     st = psu.state()
     assert (st.model, st.serial, st.firmware) == ("TOE8952-60", "102625", "3.63-3.62")
-    assert st.port == "COM6"
+    assert st.port == "COM99"
 
 
 def test_setting_a_voltage_selects_and_sets_in_one_line():
     """Two writes could be interrupted between select and value, leaving
     the wrong channel armed for whatever the next step does."""
     port = FakePort()
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(port)))
     psu.set_voltage(2, 26)
     assert port.written == ["SEL 2;V 26.00"]
 
 
 def test_current_and_output_commands():
     port = FakePort()
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(port)))
     psu.set_current(1, 0.5)
     psu.set_output(True)
     psu.set_output(False)
@@ -125,11 +125,11 @@ def test_the_port_is_opened_once_and_held():
     def opener(device, baud, timeout):
         made.append(device)
         return port
-    psu = Toellner8952(SerialLink("COM6", opener=opener))
+    psu = Toellner8952(SerialLink("COM99", opener=opener))
     psu.set_voltage(1, 10)
     psu.set_voltage(1, 20)
     psu.state()
-    assert made == ["COM6"]
+    assert made == ["COM99"]
     psu.close()
     assert port.closed
 
@@ -145,13 +145,13 @@ def test_discovery_only_opens_ports_a_driver_recognises():
         opened.append(device)
         return FakePort()
     found = discover(opener=opener, ports=[("COM1", "Silicon Labs CP210x"),
-                                           ("COM6", "USB Serial Port FTDI")])
-    assert opened == ["COM6"]
+                                           ("COM99", "USB Serial Port FTDI")])
+    assert opened == ["COM99"]
     assert found is not None and found[1] == IDN
 
 
 def test_discovery_returns_nothing_when_no_port_answers():
-    ports = [("COM6", "FTDI")]
+    ports = [("COM99", "FTDI")]
     got = discover(opener=opener_for(FakePort({"*IDN?": "somebody else"})), ports=ports)
     assert got is None
 
@@ -162,8 +162,8 @@ def test_reconnecting_to_a_known_port_probes_nothing_else():
     def opener(device, baud, timeout):
         opened.append(device)
         return FakePort()
-    got = connect("COM6", opener=opener)
-    assert got is not None and opened == ["COM6"]
+    got = connect("COM99", opener=opener)
+    assert got is not None and opened == ["COM99"]
 
 
 def test_without_pyserial_the_message_says_what_to_install(monkeypatch):
@@ -179,7 +179,7 @@ def test_without_pyserial_the_message_says_what_to_install(monkeypatch):
         return real_import(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", no_serial)
     with pytest.raises(InstrumentError, match="pyserial"):
-        SerialLink("COM6").open()
+        SerialLink("COM99").open()
 
 
 def _without_pyserial(monkeypatch):
@@ -209,7 +209,7 @@ def test_an_injected_port_list_needs_no_pyserial(monkeypatch):
     is the caller's own list and an opener — which is how the tests above
     run, and how a caller that knows its port can work without the extra."""
     _without_pyserial(monkeypatch)
-    got = discover(opener=opener_for(FakePort()), ports=[("COM6", "FTDI")])
+    got = discover(opener=opener_for(FakePort()), ports=[("COM99", "FTDI")])
     assert got is not None
 
 
@@ -240,7 +240,7 @@ def _bench_with_psu(tmp_path, port=FakePort):
         return made[device]
     bench = Bench(Db(tmp_path / "psu.db"), plugins=[])
     bench._psu_opener = opener
-    bench._psu_ports = [("COM1", "Silicon Labs"), ("COM6", "FTDI")]
+    bench._psu_ports = [("COM1", "Silicon Labs"), ("COM99", "FTDI")]
     return bench, made
 
 
@@ -267,7 +267,7 @@ def test_search_finds_the_supply_and_reports_its_set_values(tmp_path):
     bench, _ = _bench_with_psu(tmp_path)
     bench.dispatch("psu_search", {})
     psu = bench.snapshot()["psu"]
-    assert psu["found"] and psu["model"] == "TOE8952-60" and psu["port"] == "COM6"
+    assert psu["found"] and psu["model"] == "TOE8952-60" and psu["port"] == "COM99"
     assert [c["volt"] for c in psu["channels"]] == [5.0, 57.0]
     assert psu["output"] is True
 
@@ -277,28 +277,28 @@ def test_the_port_that_answered_is_remembered_across_a_restart(tmp_path):
     the moment somebody's CAN adapter gets an *IDN? written at it."""
     bench, made = _bench_with_psu(tmp_path)
     bench.dispatch("psu_search", {})
-    assert bench.db.get("psu_port") == "COM6"
+    assert bench.db.get("psu_port") == "COM99"
 
     from canopen_bench.core import Bench
     again = Bench(bench.db, plugins=[])       # same workspace db
-    assert again.snapshot()["psu"] is None    # no opener injected: nothing opens
+    assert again.snapshot()["psu"] is None    # no opener injected: COM99 does not exist, nothing opens
     again._psu_opener = lambda device, baud, timeout: made[device]
-    assert again._psu_connect("COM6") and again.snapshot()["psu"]["found"]
+    assert again._psu_connect("COM99") and again.snapshot()["psu"]["found"]
 
 
 def test_setting_a_voltage_from_the_box_reaches_the_instrument(tmp_path):
     bench, made = _bench_with_psu(tmp_path)
     bench.dispatch("psu_search", {})
     bench.dispatch("psu_set", {"ch": 2, "volt": "26"})
-    assert "SEL 2;V 26.00" in made["COM6"].written
+    assert "SEL 2;V 26.00" in made["COM99"].written
 
 
 def test_a_typo_in_the_field_changes_nothing_and_says_so(tmp_path):
     bench, made = _bench_with_psu(tmp_path)
     bench.dispatch("psu_search", {})
-    before = list(made["COM6"].written)
+    before = list(made["COM99"].written)
     bench.dispatch("psu_set", {"ch": 1, "volt": "twentysix"})
-    assert made["COM6"].written == before
+    assert made["COM99"].written == before
     assert any("is not a number" in row["msg"] for row in bench.logs)
 
 
@@ -308,7 +308,7 @@ def test_releasing_hands_the_port_back(tmp_path):
     bench, made = _bench_with_psu(tmp_path)
     bench.dispatch("psu_search", {})
     bench.dispatch("psu_release", {})
-    assert made["COM6"].closed
+    assert made["COM99"].closed
     assert bench.snapshot()["psu"] is None and bench.db.get("psu_port") == ""
 
 
@@ -322,14 +322,14 @@ def test_both_measurements_come_back_in_one_round_trip():
     it is worth copying: an unanswered query costs the read timeout, and
     this unit is known not to accept every SCPI command."""
     port = FakePort(MEAS)
-    Toellner8952(SerialLink("COM6", opener=opener_for(port))).state()
+    Toellner8952(SerialLink("COM99", opener=opener_for(port))).state()
     assert port.written.count(":MEAS:VOLT?;CURR?") == 2      # one per channel
 
 
 def test_a_half_answer_still_gives_what_it_gave():
     """Nothing here insists on getting both numbers to accept either."""
     port = FakePort({**MEAS, ":MEAS:VOLT?;CURR?": "4.98"})
-    st = Toellner8952(SerialLink("COM6", opener=opener_for(port))).state()
+    st = Toellner8952(SerialLink("COM99", opener=opener_for(port))).state()
     assert st.channels[0].meas_volt == 4.98
     assert st.channels[0].meas_curr is None
 
@@ -338,7 +338,7 @@ def test_measured_values_are_read_when_the_unit_answers():
     """The setting and what the terminals do are two numbers. A supply in
     current limit sits well below its set voltage, and a report that shows
     the setting instead claims something that did not happen."""
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(FakePort(MEAS))))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(FakePort(MEAS))))
     st = psu.state()
     assert st.channels[0].volt == 5.0            # the setting
     assert st.channels[0].meas_volt == 4.98      # the measurement
@@ -350,7 +350,7 @@ def test_a_unit_that_ignores_the_query_is_asked_once_and_then_left_alone():
     documented as not supporting the SCPI commands that have a short
     equivalent, so a "no" has to stick."""
     port = FakePort()                            # answers *IDN?/*LRN? only
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(port)))
     st = psu.state()
     assert st.channels[0].meas_volt is None
     assert psu.measures is False
@@ -360,7 +360,7 @@ def test_a_unit_that_ignores_the_query_is_asked_once_and_then_left_alone():
 
 
 def test_the_measurement_never_stands_in_for_the_setting():
-    st = Toellner8952(SerialLink("COM6", opener=opener_for(FakePort(MEAS)))).state()
+    st = Toellner8952(SerialLink("COM99", opener=opener_for(FakePort(MEAS)))).state()
     assert st.channels[1].volt == 57.0           # from *LRN?, unchanged
 
 
@@ -380,7 +380,7 @@ SCPI_ANSWERS = {
 
 def test_a_scpi_only_unit_still_reports_its_channels():
     port = FakePort(SCPI_ANSWERS)
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(port)))
     st = psu.state()
     assert psu.dialect == "scpi"
     assert [c.volt for c in st.channels] == [12.0, 12.0]   # both channels answer
@@ -389,7 +389,7 @@ def test_a_scpi_only_unit_still_reports_its_channels():
 
 def test_writes_follow_the_language_the_unit_answered_in():
     port = FakePort(SCPI_ANSWERS)
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(port)))
     psu.state()
     port.written.clear()
     psu.set_voltage(2, 26)
@@ -401,7 +401,7 @@ def test_a_unit_that_answers_the_short_form_is_left_in_it():
     """No language switching: that would change the device for every other
     tool on the bench, including the operator's own scripts."""
     port = FakePort()
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(port)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(port)))
     psu.state()
     assert psu.dialect == "short"
     assert not any("SYST:LANG" in w for w in port.written)
@@ -527,7 +527,7 @@ def test_a_bridge_that_came_back_is_reopened_rather_than_given_up_on():
     supply switched off and on left every write refused until somebody
     found the disconnect button. One fresh handle fixes it."""
     dead, alive = DeadPort(), FakePort()
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(dead, alive)))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(dead, alive)))
 
     psu.set_voltage(1, 10)
 
@@ -545,10 +545,10 @@ def test_a_port_that_is_really_gone_says_so_once(monkeypatch):
         tries.append(device)
         return DeadPort()
 
-    psu = Toellner8952(SerialLink("COM6", opener=opener))
+    psu = Toellner8952(SerialLink("COM99", opener=opener))
     with pytest.raises(InstrumentError) as caught:
         psu.set_voltage(1, 10)
-    assert "COM6" in str(caught.value)
+    assert "COM99" in str(caught.value)
     assert len(tries) == 2, "exactly one retry, not a loop"
 
 
@@ -557,5 +557,5 @@ def test_a_read_recovers_the_same_way():
         def readline(self) -> bytes:
             raise PermissionError(13, "Zugriff verweigert", None, 5)
 
-    psu = Toellner8952(SerialLink("COM6", opener=opener_for(DeadOnRead(), FakePort())))
+    psu = Toellner8952(SerialLink("COM99", opener=opener_for(DeadOnRead(), FakePort())))
     assert psu.state().model == "TOE8952-60"
