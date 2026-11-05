@@ -169,6 +169,9 @@ def test_scan_finds_slave_and_reads_identity(master, monkeypatch):
     assert dev.fw == "1.2.3"
     assert dev.sn == "0xDEADBEEF"
     assert dev.identity == "0xABCD·0x1234"  # canonical minimal-width format
+    # the device list's label, as the demo bus gives it — not canopen's "INITIALISING"
+    # for a node whose heartbeat has not been seen yet
+    assert dev.nmt == "Pre-Operational"
 
 
 def test_scan_respects_node_range(master, monkeypatch):

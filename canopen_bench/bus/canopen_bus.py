@@ -106,6 +106,16 @@ _SCAN_SETTLE_S = 0.5  # time to let SDO responses to a broadcast scan trickle in
 #: 100 ppm, far below anything the panel shows.
 _TS_WINDOW_S = 5.0
 
+# canopen's state names -> the device list's labels (core.NMT_STATE), which the demo bus
+# reports too. INITIALISING is also canopen's "no heartbeat seen yet"; a device that has
+# just answered the scan's SDOs is past it, and the next heartbeat corrects the guess.
+_NMT_STATE_LABELS = {
+    "OPERATIONAL": "Operational",
+    "PRE-OPERATIONAL": "Pre-Operational",
+    "STOPPED": "Stopped",
+    "INITIALISING": "Pre-Operational",
+}
+
 # canopen heartbeat states -> the tokens used by the test-step format
 _NMT_STATE_TOKENS = {
     "OPERATIONAL": "operational",
@@ -502,8 +512,10 @@ class CanopenBus(BusInterface):
                     f"·0x{int.from_bytes(product, 'little'):X}"
                     if vendor and product else "?"
                 )
+                state = node.nmt.state
                 found.append(FoundDevice(
-                    node=node_id, name=name, nmt=node.nmt.state, fw=fw, sn=sn, identity=identity,
+                    node=node_id, name=name, nmt=_NMT_STATE_LABELS.get(state, state.title()),
+                    fw=fw, sn=sn, identity=identity,
                 ))
             return found
         except (can.CanError, OSError, RuntimeError) as exc:
