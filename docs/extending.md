@@ -241,6 +241,13 @@ brings it back when the device is selected again. A value written into
 the table directly lasts until the next device switch and no longer;
 that is how a display panel's whole reading used to vanish.
 
+Pass the node that was read as well — **`bench.remember(key, value,
+node)`** — whenever the answer can arrive after the selection may have
+moved on: a read off the event loop, a re-read scheduled for later. The
+value then goes to that device's record, and into the table only while
+that device is still the one shown. Without it, it lands under whichever
+device is selected by then.
+
 ### Firmware download
 
 A real download takes minutes, and a `SwdlStrategy` runs where the UI
