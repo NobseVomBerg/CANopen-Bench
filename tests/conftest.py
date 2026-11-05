@@ -64,19 +64,19 @@ DataType=0x0007
 AccessType=ro
 DefaultValue=0x00050195
 
-[2040]
-ParameterName=Product identification
+[2020]
+ParameterName=Device identification
 ObjectType=0x9
 SubNumber=2
 
-[2040sub0]
+[2020sub0]
 ParameterName=Highest sub-index
 ObjectType=0x7
 DataType=0x0005
 AccessType=ro
 DefaultValue=1
 
-[2040sub1]
+[2020sub1]
 ParameterName=Product code
 ObjectType=0x7
 DataType=0x0007

@@ -98,7 +98,7 @@ def test_a_record_member_is_named_with_its_record():
     its sub-index with a slash everywhere — in a step's report line, in the
     object table and now in the trace — so the two never read as different
     notions."""
-    assert object_info(_od(), 0x2040, 1).name == "Product identification/Product code"
+    assert object_info(_od(), 0x2020, 1).name == "Device identification/Product code"
 
 
 def test_the_limits_are_the_eds_own_and_absent_where_it_states_none():
@@ -147,10 +147,10 @@ def test_the_table_shows_a_device_name_as_the_word_it_is(tmp_path):
     number those bytes are nineteen digits of nothing. The panel knew it;
     the table printed the digits, in whichever base."""
     bench = _bench(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x726564656546"     # "Feeder", as the bus spells it
+    bench.obj_vals["0x1008:00"] = "0x726F736E6553"     # "Sensor", as the bus spells it
     fmt = bench.snapshot()["objects"]["fmt"]["0x1008:00"]
-    assert fmt["txt"] == "Feeder"
-    assert "0x726564656546" in fmt["alt"], "the bytes stay one hover away"
+    assert fmt["txt"] == "Sensor"
+    assert "0x726F736E6553" in fmt["alt"], "the bytes stay one hover away"
 
 
 def test_the_range_check_is_made_where_the_number_is_known(tmp_path):
@@ -234,7 +234,7 @@ class _NamingPlugin(BenchPlugin):
 
     def describe_object(self, index: str, sub: str, symbols) -> str:
         return {("0x2070", "00"): "Sensors/TiltAngle",
-                ("0x2040", "01"): "Identity/ProductCode"}.get((str(index), str(sub)), "")
+                ("0x2020", "01"): "Identity/ProductCode"}.get((str(index), str(sub)), "")
 
 
 def test_the_firmwares_own_name_wins_in_the_object_table(tmp_path):
@@ -265,9 +265,9 @@ def test_the_same_name_reaches_the_trace(tmp_path):
     the run's own report called one object two different things."""
     bench = _bench(tmp_path, plugins=[_NamingPlugin()])
     row = {"time": "", "dir": "RX", "cob": "0x601", "len": "8",
-           "data": "40 40 20 01 00 00 00 00", "dec": "", "flag": "", "obj": "", "val": ""}
+           "data": "40 20 20 01 00 00 00 00", "dec": "", "flag": "", "obj": "", "val": ""}
     bench._annotate_sdo(row)
-    assert row["obj"] == "0x2040:01 Identity/ProductCode"
+    assert row["obj"] == "0x2020:01 Identity/ProductCode"
 
 
 def test_a_reload_of_the_headers_renames_what_they_name(tmp_path):
