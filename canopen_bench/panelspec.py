@@ -22,7 +22,7 @@ input is hex only where it says ``0x``, here as everywhere else.
 
 The format, at a glance::
 
-    name: Sample Feeder                 # what the view is called
+    name: Sample Device                 # what the view is called
     match: {eds: "Sample*"}             # which devices it applies to
     groups:
       - title: Temperatures

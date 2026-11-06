@@ -50,7 +50,7 @@ desc: "Checks that the device answers its own serial number."
 grade: automated
 steps:
   - log: "the part that reads"
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0x260001"}
 """
 
 FAIL_TC = """\
@@ -131,7 +131,7 @@ def _run(*cases: CaseRecord) -> RunRecord:
 
 
 def test_the_summary_links_every_case_to_its_own_file():
-    run = _run(_case(file="a.html"), _case(id="4857", name="Yarn breakage",
+    run = _run(_case(file="a.html"), _case(id="0140", name="Sensor fault",
                                            verdict="FAIL", file="b.html"))
     doc = summary_html(run)
     assert "href='a.html'" in doc and "href='b.html'" in doc
@@ -259,7 +259,7 @@ steps:
   - mov: {to: R11, value: 17}
   - mov: {to: R15, value: R11}
   - label: loop1
-  - sdo_read: {index: "0x2040", sub: "0x01", expect: "0x260001"}
+  - sdo_read: {index: "0x2020", sub: "0x01", expect: "0x260001"}
   - sub: {to: R15, value: 1}
   - jump_gt: {a: R15, b: 0, to: loop1}
   - label: loop1_end
@@ -656,7 +656,7 @@ def test_a_case_that_was_not_re_run_does_not_hold_the_variant_red():
     since would otherwise keep the variant red forever — long after the
     run that would have cleared it stopped including that case."""
     older = {"started": "2026-07-26T08:00:00", "cases": [
-        _case_doc(id="4857", name="Yarn breakage", verdict="FAIL",
+        _case_doc(id="0140", name="Sensor fault", verdict="FAIL",
                   started="2026-07-26T08:00:00")]}
     newest = {"started": "2026-07-28T08:00:00", "cases": [
         _case_doc(id="0070", name="Power off", verdict="PASS",
@@ -664,7 +664,7 @@ def test_a_case_that_was_not_re_run_does_not_hold_the_variant_red():
     (group,) = collect_overview([older, newest])
     assert group.verdict == "PASS"
     # the failure is not hidden — it is still in the case's own line
-    failing = next(c for c in group.cases if c.id == "4857")
+    failing = next(c for c in group.cases if c.id == "0140")
     assert failing.last_verdict == "FAIL" and failing.rate == "0/1"
 
 

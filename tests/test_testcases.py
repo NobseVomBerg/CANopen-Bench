@@ -163,7 +163,7 @@ steps:
   - label: after
   - can_send: {cob: "0x780", data: [1, 2, 3]}
   - wait_for: {cob: "0x700", timeout: 1.0}
-  - sdo_read: {index: "0x2040", sub: "0x01", into: R3}
+  - sdo_read: {index: "0x2020", sub: "0x01", into: R3}
   - sdo_write: {index: "0x2000", sub: "0x00", value: R3, size: 2}
   - fail: "should not be reached"
   - end:
