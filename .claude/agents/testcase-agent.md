@@ -39,7 +39,7 @@ steps: []           # required, non-empty
 | key | shape | verdict on failure |
 |---|---|---|
 | `nmt` | `nmt: start\|preop\|stop\|reset\|resetcomm` or `{cmd, node: all\|<value>}` | ERROR only if disconnected |
-| `sdo_read` | `{index, sub, into?, expect?, expect_abort?, mask?}` — result always lands in register `into` (default `R0`) | abort/timeout without `expect_abort` → FAIL; `expect` mismatch → FAIL |
+| `sdo_read` | `{index, sub, into?, expect?, expect_abort?, mask?}` — result lands in register `into`; without `into` no register is written | abort/timeout without `expect_abort` → FAIL; `expect` mismatch → FAIL |
 | `sdo_write` | `{index, sub, value, size?}` — `value` may be a register/builtin, then `size` 1/2/4 (default 4) sets the byte width | abort/timeout → FAIL |
 | `wait` | seconds, e.g. `wait: 1.5` | — |
 | `wait_for` | `{heartbeat: boot\|stopped\|operational\|pre-operational, timeout, node?}` or `{cob: <value>, timeout, data?: "00"}` | timeout → FAIL |
