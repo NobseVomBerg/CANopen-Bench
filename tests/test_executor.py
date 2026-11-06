@@ -965,7 +965,25 @@ id: "0023"
 name: "expect R0 compares against what the device answers, not against itself"
 steps:
   - mov: {to: R0, value: "0x99"}
-  - sdo_read: {index: "0x2020", sub: "0x01", expect: R0}
+  - sdo_read: {index: "0x2020", sub: "0x01", into: R0, expect: R0}
+"""
+
+READ_STORES_ONLY_INTO_TC = """\
+id: "0025"
+name: "a read without into leaves the registers alone"
+steps:
+  - mov: {to: R0, value: "0x99"}
+  - sdo_read: {index: "0x2020", sub: "0x01"}
+  - jump_ne: {a: R0, b: "0x99", to: overwritten}
+  - sdo_read: {index: "0x2020", sub: "0x01", into: R0}
+  - jump_ne: {a: R0, b: "0x260001", to: not_stored}
+  - lss_assign: {count: 2}
+  - jump_ne: {a: R0, b: "0x260001", to: overwritten}
+  - end:
+  - label: overwritten
+  - fail: "a step without into wrote R0"
+  - label: not_stored
+  - fail: "sdo_read into R0 did not store"
 """
 
 LITERAL_EXPECT_REGRESSION_TC = """\
@@ -1011,13 +1029,21 @@ def test_sdo_read_mask_resolves_from_a_register(tc_bench):
 
 def test_expect_r0_compares_against_the_device_not_against_itself(tc_bench):
     """Regression for the ordering bug: R0 is preloaded to 0x99 before the
-    read, and `into` defaults to R0 too. Resolving `expect: R0` *after*
+    read, and the read stores `into: R0` too. Resolving `expect: R0` *after*
     storing the read result would compare the value against itself and
     PASS unconditionally; resolving it first (against the preloaded 0x99)
     correctly FAILs since the device answers 0x260001."""
     _add_tc(tc_bench, "TC0023_expect_r0_self_compare.yaml", EXPECT_R0_SELF_COMPARE_TC)
     run_selected(tc_bench, {"0023"})
     assert tc_bench.results == {"0023": "FAIL"}
+
+
+def test_only_a_step_with_into_writes_a_register(tc_bench):
+    """A case keeps a value in R0 across later plain reads: neither an
+    sdo_read nor an lss_assign without `into` may overwrite it."""
+    _add_tc(tc_bench, "TC0025_read_stores_only_into.yaml", READ_STORES_ONLY_INTO_TC)
+    run_selected(tc_bench, {"0025"})
+    assert tc_bench.results == {"0025": "PASS"}
 
 
 def test_literal_expect_is_unaffected_by_register_resolution(tc_bench):
