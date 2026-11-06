@@ -6226,7 +6226,7 @@ class Bench:
             return "ok", done or "no unconfigured device answered"
         if key in ("sdo_read", "sdo_write") and "node" in val:
             # a case may talk to more than the one device it is about — a
-            # second feeder consuming yarn, a gateway. Default stays the
+            # second drive, a gateway. Default stays the
             # DUT resolved from the file's `dut`.
             node = _resolve(val["node"], regs, builtins)
         if key == "sdo_write":

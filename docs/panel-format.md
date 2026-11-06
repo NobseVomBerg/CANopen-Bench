@@ -17,7 +17,7 @@ the core as `canopen_bench/panels/DemoDevice.panel.yaml`.
 ## A file
 
 ```yaml
-name: Sample Feeder                 # what the view calls itself
+name: Sample Device                 # what the view calls itself
 match: {eds: "Sample*"}             # which devices it applies to
 
 groups:

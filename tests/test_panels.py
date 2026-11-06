@@ -21,13 +21,13 @@ from canopen_bench.plugin import BenchPlugin
 from canopen_bench.values import ValueError_
 
 SAMPLE = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Tension
     fields:
-      - {label: Working, obj: "0x2040:01", unit: cN, scale: 0.1, rw: true}
-      - {label: Reduced, obj: "2040:2", unit: cN, scale: 0.1}
+      - {label: Working, obj: "0x2020:01", unit: cN, scale: 0.1, rw: true}
+      - {label: Reduced, obj: "2020:2", unit: cN, scale: 0.1}
   - title: Identity
     cols: 2
     collapsed: true
@@ -42,7 +42,7 @@ def test_a_panel_reads_addresses_the_way_the_object_dictionary_is_written():
     zero off shows dashes and no error anywhere."""
     panel = parse_panel(SAMPLE, "sample.panel.yaml")
     tension, identity = panel.groups
-    assert [f.key for f in tension.fields] == ["0x2040:01", "0x2040:02"]
+    assert [f.key for f in tension.fields] == ["0x2020:01", "0x2020:02"]
     assert identity.fields[0].key == "0x1018:00"
     assert identity.fields[0].label == "0x1018:00"   # no label: the address itself
     assert (identity.cols, identity.collapsed) == (2, True)
@@ -128,7 +128,7 @@ def test_one_unreadable_panel_costs_only_itself(tmp_path):
                                              encoding="utf-8")
     said: list[str] = []
     panels = load_panels([tmp_path], log=said.append)
-    assert [p.name for p in panels] == ["Sample Feeder"]
+    assert [p.name for p in panels] == ["Sample Device"]
     assert len(said) == 1 and "bad.panel.yaml" in said[0] and "obj" in said[0]
 
 
@@ -160,14 +160,14 @@ def test_the_panel_reaches_the_page_for_the_device_it_matches(tmp_path):
 
     bench.dispatch("obj_view", {"view": "panel"})
     panel = bench.snapshot()["objects"]["panel"]
-    assert panel["name"] == "Sample Feeder"
+    assert panel["name"] == "Sample Device"
     assert [g["title"] for g in panel["groups"]] == ["Tension", "Identity"]
     assert [g["open"] for g in panel["groups"]] == [True, False]  # collapsed: true
     assert panel["groups"][0]["fields"][0] == {
-        "idx": "0x2040", "sub": "01", "label": "Working", "unit": "cN",
+        "idx": "0x2020", "sub": "01", "label": "Working", "unit": "cN",
         # what the device calls it, for the hover — the label is what this
         # box calls it, and the two are different sentences
-        "name": "Product identification/Product code",
+        "name": "Device identification/Product code",
         "rw": True, "widget": "number", "base": "dec", "wo": False,
         "val": "", "src": "", "age": 0.0,
     }
@@ -190,7 +190,7 @@ def test_a_panel_that_names_its_devices_beats_the_general_one(tmp_path):
     panel would queue behind the core's own instead of replacing it."""
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    assert bench.snapshot()["objects"]["panel"]["name"] == "Sample Feeder"
+    assert bench.snapshot()["objects"]["panel"]["name"] == "Sample Device"
 
 
 def test_no_device_selected_leaves_the_panel_out(tmp_path):
@@ -216,13 +216,13 @@ def test_what_the_operator_folds_away_stays_folded(tmp_path):
 def test_a_staged_value_is_scaled_back_to_what_the_device_stores(tmp_path):
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "16.0"})
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "val": "16.0"})
     # at the object's own width, not the digits of whatever was read last
-    assert bench.obj_vals["0x2040:01"] == "0x000000A0"
+    assert bench.obj_vals["0x2020:01"] == "0x000000A0"
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["val"] == "16.0"
 
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "nope"})
-    assert bench.obj_vals["0x2040:01"] == "0x000000A0"   # refused, not cleared
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "val": "nope"})
+    assert bench.obj_vals["0x2020:01"] == "0x000000A0"   # refused, not cleared
     assert "rejected" in bench.logs[-1]["msg"]
 
 
@@ -249,7 +249,7 @@ def test_a_box_read_asks_only_for_what_is_showing(tmp_path):
             assert not still, "panel read did not finish in time"
 
     asyncio.run(go({}))                       # every open box: Identity is folded
-    assert asked == [("0x2040", "01"), ("0x2040", "02")]
+    assert asked == [("0x2020", "01"), ("0x2020", "02")]
 
     asyncio.run(go({"group": "Identity"}))    # asked for by name: read anyway
     assert asked == [("0x1018", "00")]
@@ -263,10 +263,10 @@ match: {eds: "dut_alpha*"}
 groups:
   - title: Modes
     fields:
-      - {label: Mode,   obj: "0x2040:01", widget: enum, rw: true}
-      - {label: Locked, obj: "0x2040:01", widget: flag, bit: 4, rw: true}
-      - {label: Speed,  obj: "0x2040:01", widget: enum, lane: eSpeed, rw: true}
-      - {label: Shown,  obj: "0x2040:01", widget: enum}
+      - {label: Mode,   obj: "0x2020:01", widget: enum, rw: true}
+      - {label: Locked, obj: "0x2020:01", widget: flag, bit: 4, rw: true}
+      - {label: Speed,  obj: "0x2020:01", widget: enum, lane: eSpeed, rw: true}
+      - {label: Shown,  obj: "0x2020:01", widget: enum}
 """
 
 
@@ -286,7 +286,7 @@ class _FieldPlugin(BenchPlugin):
         from canopen_bench.values import Field
         # two lanes of one word, the way a status assembled out of a mode
         # and a selection is one object with two names in it
-        return {"0x2040:01": [Field(table="eMode", mask=0x0F),
+        return {"0x2020:01": [Field(table="eMode", mask=0x0F),
                               Field(table="eSpeed", mask=0xF00)]}
 
 
@@ -318,7 +318,7 @@ def test_an_enum_offers_the_names_the_firmware_uses(tmp_path):
     a list written into the panel file would be a second copy of the same
     table, kept in step by hand."""
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x12"          # lane 0x0F = 2 = eMode_Run
+    bench.obj_vals["0x2020:01"] = "0x12"          # lane 0x0F = 2 = eMode_Run
     mode = _fields(bench)[0]
     assert mode["widget"] == "enum"
     # …without the prefix all four of them share with the table: "eMode_"
@@ -335,7 +335,7 @@ groups:
   - title: Monitoring
     fields:
       - label: Monitoring
-        obj: "0x2040:01"
+        obj: "0x2020:01"
         rw: true
         parts:
           - {label: Sensor, widget: enum, lane: sensor, rw: true}
@@ -352,7 +352,7 @@ class _SharedTablePlugin(_FieldPlugin):
 
     def object_fields(self, symbols):
         from canopen_bench.values import Field
-        return {"0x2040:01": [Field("ePair", mask=0x03, shift=0, label="sensor"),
+        return {"0x2020:01": [Field("ePair", mask=0x03, shift=0, label="sensor"),
                               Field("ePair", mask=0x0C, shift=0, label="run")]}
 
 
@@ -380,7 +380,7 @@ def test_a_lane_offers_only_the_choices_that_fit_inside_it(tmp_path):
     picked — and the two lists would be indistinguishable, on a row whose
     whole point is that they are different settings."""
     bench = _bench_with_shared_table(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x0A"          # sensor on, run on
+    bench.obj_vals["0x2020:01"] = "0x0A"          # sensor on, run on
     (owner,) = _fields(bench)
     sensor, run = owner["parts"]
     assert [o[1] for o in sensor["options"]] == ["SensorOff", "SensorOn"]
@@ -393,7 +393,7 @@ def test_a_lane_the_device_has_not_set_reads_as_none(tmp_path):
     device has not set, and the dropdown says the same word the reading
     under the row does rather than "0x0"."""
     bench = _bench_with_shared_table(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x02"          # sensor on, run untouched
+    bench.obj_vals["0x2020:01"] = "0x02"          # sensor on, run untouched
     (owner,) = _fields(bench)
     _sensor, run = owner["parts"]
     assert run["val"] == "0" and ["0", "none"] in run["options"]
@@ -401,7 +401,7 @@ def test_a_lane_the_device_has_not_set_reads_as_none(tmp_path):
 
 def test_a_value_no_symbol_names_is_shown_rather_than_snapped_to_one(tmp_path):
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x07"          # lane = 7, named by nothing
+    bench.obj_vals["0x2020:01"] = "0x07"          # lane = 7, named by nothing
     mode = _fields(bench)[0]
     assert mode["val"] == "7"
     assert ["7", "0x7"] in mode["options"]
@@ -416,7 +416,7 @@ def test_a_second_lane_of_one_word_is_its_own_box_row(tmp_path):
     for what those bits hold, so a panel points at one without anybody
     inventing a second name for it."""
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x312"      # mode 2, bit 4, speed lane 3
+    bench.obj_vals["0x2020:01"] = "0x312"      # mode 2, bit 4, speed lane 3
     mode, _locked, speed, _shown = _fields(bench)
     assert mode["val"] == "2" and ["2", "Run"] in mode["options"]
     assert speed["val"] == "3" and ["3", "Fast"] in speed["options"]
@@ -427,32 +427,32 @@ def test_a_lane_stages_only_its_own_bits(tmp_path):
     """Two enums on one object, and the address alone does not say which.
     Staging the wrong one would write the speed into the mode."""
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x312"
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01",
+    bench.obj_vals["0x2020:01"] = "0x312"
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01",
                                  "lane": "eSpeed", "val": "1"})
-    assert bench.obj_vals["0x2040:01"] == "0x112"   # speed 3 -> 1, rest untouched
+    assert bench.obj_vals["0x2020:01"] == "0x112"   # speed 3 -> 1, rest untouched
 
 
 def test_picking_a_name_keeps_the_bits_it_does_not_own(tmp_path):
     """The lane is four bits of a byte. Staging the choice alone would
     clear the rest of the word — including the flag right next to it."""
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x12"          # bit 4 set, mode 2
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "0"})
-    assert bench.obj_vals["0x2040:01"] == "0x10"  # mode cleared, bit 4 untouched
+    bench.obj_vals["0x2020:01"] = "0x12"          # bit 4 set, mode 2
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "val": "0"})
+    assert bench.obj_vals["0x2020:01"] == "0x10"  # mode cleared, bit 4 untouched
 
 
 def test_a_flag_is_one_bit_and_leaves_the_others_alone(tmp_path):
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals["0x2040:01"] = "0x02"
+    bench.obj_vals["0x2020:01"] = "0x02"
     assert _fields(bench)[1]["on"] is False
 
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 4, "on": True})
-    assert bench.obj_vals["0x2040:01"] == "0x12"  # bit 4 set, mode 2 still there
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "bit": 4, "on": True})
+    assert bench.obj_vals["0x2020:01"] == "0x12"  # bit 4 set, mode 2 still there
     assert _fields(bench)[1]["on"] is True
 
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 4, "on": False})
-    assert bench.obj_vals["0x2040:01"] == "0x02"
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "bit": 4, "on": False})
+    assert bench.obj_vals["0x2020:01"] == "0x02"
 
 
 def test_part_of_a_value_nobody_has_read_is_refused_not_guessed(tmp_path):
@@ -460,9 +460,9 @@ def test_part_of_a_value_nobody_has_read_is_refused_not_guessed(tmp_path):
     unknown, the honest answer is to say so — a checkbox that assumed
     zeros would clear every flag beside it."""
     bench = _bench_with_widgets(tmp_path)
-    bench.obj_vals.pop("0x2040:01", None)
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 4, "on": True})
-    assert "0x2040:01" not in bench.obj_vals
+    bench.obj_vals.pop("0x2020:01", None)
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "bit": 4, "on": True})
+    assert "0x2020:01" not in bench.obj_vals
     assert "read it before writing part of it" in bench.logs[-1]["msg"]
 
 
@@ -491,9 +491,9 @@ def test_a_value_the_bus_carried_past_fills_the_box(tmp_path):
     the other kind is polling."""
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    # somebody else's SDO answer for 0x2040:01 = 0x00A0, node 1
+    # somebody else's SDO answer for 0x2020:01 = 0x00A0, node 1
     bench._drain_frames()
-    bench._annotate_sdo({"cob": "0x581", "data": "4B 40 20 01 A0 00 00 00",
+    bench._annotate_sdo({"cob": "0x581", "data": "4B 20 20 01 A0 00 00 00",
                          "node": 1, "cls": "SDO", "obj": "", "val": ""})
 
     field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
@@ -508,7 +508,7 @@ def test_a_pdo_signal_counts_as_much_as_an_sdo_answer(tmp_path):
     field on a mapped object follows without a frame of its own."""
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    bench._bus_sample(1, 0x2040, 0x01, 0x00C8, 2)     # what the annotator calls
+    bench._bus_sample(1, 0x2020, 0x01, 0x00C8, 2)     # what the annotator calls
 
     field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
     assert (field["val"], field["src"]) == ("20.0", "bus")
@@ -520,34 +520,34 @@ def test_what_the_operator_typed_is_not_overwritten_by_the_bus(tmp_path):
     the hand that typed it."""
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    bench._bus_sample(1, 0x2040, 0x01, 0x00A0, 2)     # bus says 16.0
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "val": "25.0"})
+    bench._bus_sample(1, 0x2020, 0x01, 0x00A0, 2)     # bus says 16.0
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "val": "25.0"})
 
     field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
     assert (field["val"], field["src"]) == ("25.0", "read")
 
-    bench._bus_sample(1, 0x2040, 0x01, 0x0032, 2)     # and now the bus is newer
+    bench._bus_sample(1, 0x2020, 0x01, 0x0032, 2)     # and now the bus is newer
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["val"] == "5.0"
 
 
 def test_a_value_belongs_to_the_device_it_came_from(tmp_path):
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    bench._bus_sample(9, 0x2040, 0x01, 0x00A0, 2)     # another node entirely
+    bench._bus_sample(9, 0x2020, 0x01, 0x00A0, 2)     # another node entirely
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["val"] == ""
 
 
 # -- boxes a machine does not have ------------------------------------------
 
 CONDITIONAL = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Always
-    fields: [{obj: "0x2040:01"}]
+    fields: [{obj: "0x2020:01"}]
   - title: Second axis
     when: {obj: "0x2050:00", bit: 3}
-    fields: [{obj: "0x2040:02"}]
+    fields: [{obj: "0x2020:02"}]
 """
 
 
@@ -593,14 +593,14 @@ def test_a_page_read_asks_what_the_conditions_are_about(tmp_path):
 
 
 VARIANTS = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Always
-    fields: [{obj: "0x2040:01"}]
+    fields: [{obj: "0x2020:01"}]
   - title: Second axis
     when: {obj: "0x2050:00", value: [3, 4]}
-    fields: [{obj: "0x2040:02"}]
+    fields: [{obj: "0x2020:02"}]
 """
 
 
@@ -643,8 +643,8 @@ def test_the_tooltip_carries_every_reading_of_the_number(tmp_path):
     the object table and the favourites panel keep it."""
     bench = _bench_with_panel(tmp_path)
     bench.dispatch("obj_view", {"view": "panel"})
-    bench.obj_vals["0x2040:01"] = "0x00A0"
-    bench.obj_vals_at["0x2040:01"] = time.monotonic()
+    bench.obj_vals["0x2020:01"] = "0x00A0"
+    bench.obj_vals_at["0x2020:01"] = time.monotonic()
 
     field = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]
     assert field["alt"] == "0x00A0 · 160"      # hex as the device stores it, then decimal
@@ -699,7 +699,7 @@ DefaultValue=0
 """
 
 TEXT_PANEL = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Identity
@@ -713,7 +713,7 @@ groups:
 #: 0x2060 is write-only in TEXT_EDS and 0x2061 is not — the two halves of
 #: what a part may assume about a word nobody has read
 WO_PARTS_PANEL = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Identity
@@ -764,8 +764,8 @@ def test_the_bytes_of_a_word_are_read_back_the_way_they_were_sent(tmp_path):
     had a second one that decoded UTF-8 with replacement, so bytes that
     were never characters came out as a word of question marks instead of
     saying they were not text."""
-    assert _hex_to_text("0x726564656546") == "Feeder"
-    assert _hex_to_text("0x00726564656546") == "Feeder"   # trailing NUL
+    assert _hex_to_text("0x726F736E6553") == "Sensor"
+    assert _hex_to_text("0x00726F736E6553") == "Sensor"   # trailing NUL
     assert _hex_to_text("DemoDevice") is None             # already a word
     assert _hex_to_text("0xABC") is None                  # not whole bytes
 
@@ -775,19 +775,19 @@ def test_a_device_name_is_a_word_not_nineteen_digits(tmp_path):
     reads those bytes as a number prints 3472900244173440512 where the
     device said its name. The EDS is what knows the difference."""
     bench = _bench_with_text_eds(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x726564656546"        # "Feeder", as the bus spells it
+    bench.obj_vals["0x1008:00"] = "0x726F736E6553"        # "Sensor", as the bus spells it
     bench.obj_vals["0x2000:00"] = "0x2A"
     name, counter, *_ = bench.snapshot()["objects"]["panel"]["groups"][0]["fields"]
-    assert name["val"] == "Feeder"
+    assert name["val"] == "Sensor"
     assert counter["val"] == "42", "a number must not be run through the decoder"
 
 
 def test_a_unit_on_a_word_is_dropped_rather_than_printed(tmp_path):
     """`unit` and `scale` are a number's, and a panel written against a
-    device's documentation may well carry one by accident. "Feeder mV" would
+    device's documentation may well carry one by accident. "Sensor mV" would
     be the one reading nobody can correct from the screen."""
     bench = _bench_with_text_eds(tmp_path)
-    bench.obj_vals["0x1008:00"] = "0x726564656546"
+    bench.obj_vals["0x1008:00"] = "0x726F736E6553"
     assert bench.snapshot()["objects"]["panel"]["groups"][0]["fields"][0]["unit"] == ""
 
 
@@ -840,13 +840,13 @@ def test_a_row_carries_the_name_the_device_gives_the_object(tmp_path):
 # -- a value assembled out of several ----------------------------------------
 
 PARTS_PANEL = """
-name: Sample Feeder
+name: Sample Device
 match: {eds: "dut_alpha*"}
 groups:
   - title: Identity
     fields:
       - label: Status
-        obj: "0x2040:01"
+        obj: "0x2020:01"
         base: hex
         parts:
           - {label: Locked, widget: flag, bit: 24}
@@ -861,11 +861,11 @@ def test_the_parts_of_a_value_take_the_object_of_the_row_above_them():
     address."""
     (group,) = parse_panel(PARTS_PANEL).groups
     (status,) = group.fields
-    assert [p.key for p in status.parts] == ["0x2040:01"] * 3
+    assert [p.key for p in status.parts] == ["0x2020:01"] * 3
     assert [p.widget for p in status.parts] == ["flag", "enum", "enum"]
     assert [p.lane for p in status.parts] == ["", "eMode", "eSpeed"]
     # and the row itself is still the whole value
-    assert (status.widget, status.base, status.key) == ("number", "hex", "0x2040:01")
+    assert (status.widget, status.base, status.key) == ("number", "hex", "0x2020:01")
     assert [f.label for f in status.every] == ["Status", "Locked", "Mode", "Speed"]
 
 
@@ -885,7 +885,7 @@ def test_an_enum_nobody_has_read_names_no_state(tmp_path):
     assert ["0", "Off"] in mode["options"]
 
     # …and the moment anything is known, it is the value that is shown
-    bench.obj_vals["0x2040:01"] = "0x00000000"
+    bench.obj_vals["0x2020:01"] = "0x00000000"
     mode = _fields(bench)[0]["parts"][1]
     assert mode["val"] == "0" and mode["options"][0] != ["", "—"]
 
@@ -895,7 +895,7 @@ def test_a_part_is_drawn_under_the_value_it_reads(tmp_path):
     one Read for the group, and the parts hang off the row that owns the
     object."""
     bench = _bench_with_widgets(tmp_path, PARTS_PANEL, "parts")
-    bench.obj_vals["0x2040:01"] = "0x01000012"
+    bench.obj_vals["0x2020:01"] = "0x01000012"
     (status,) = _fields(bench)
     assert status["val"] == "0x01000012"           # the word itself, base: hex
     assert [p["label"] for p in status["parts"]] == ["Locked", "Mode", "Speed"]
@@ -904,7 +904,7 @@ def test_a_part_is_drawn_under_the_value_it_reads(tmp_path):
     assert mode["val"] == "2"                      # lane 0x0F  → eMode_Run
     assert speed["val"] == "0"                     # lane 0xF00 → nothing set
     # a part carries no address of its own to show: it is the row above it
-    assert {p["idx"] for p in status["parts"]} == {"0x2040"}
+    assert {p["idx"] for p in status["parts"]} == {"0x2020"}
 
 
 def test_a_bit_of_a_write_only_register_can_be_staged_without_reading_it(tmp_path):
@@ -932,11 +932,11 @@ def test_staging_a_part_leaves_the_rest_of_the_word_alone(tmp_path):
     or a lane written as its own row — nesting them changed where they are
     drawn and nothing about what they write."""
     bench = _bench_with_widgets(tmp_path, PARTS_PANEL, "parts")
-    bench.obj_vals["0x2040:01"] = "0x01000012"
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "lane": "eSpeed", "val": "1"})
-    assert bench.obj_vals["0x2040:01"] == "0x01000112"
-    bench.dispatch("panel_set", {"idx": "0x2040", "sub": "01", "bit": 24, "on": False})
-    assert bench.obj_vals["0x2040:01"] == "0x00000112"
+    bench.obj_vals["0x2020:01"] = "0x01000012"
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "lane": "eSpeed", "val": "1"})
+    assert bench.obj_vals["0x2020:01"] == "0x01000112"
+    bench.dispatch("panel_set", {"idx": "0x2020", "sub": "01", "bit": 24, "on": False})
+    assert bench.obj_vals["0x2020:01"] == "0x00000112"
 
 
 # -- which way a box fills its columns ---------------------------------------

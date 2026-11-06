@@ -252,10 +252,10 @@ def test_favorites_migrates_legacy_fav_sets(tmp_path):
     "fav_set"); those carry over into the single auto-saved list on init."""
     db = Db(tmp_path / "test.db")
     db.set("fav_sets", {"Default": [{"idx": "0x2050", "sub": "00", "label": "Variant id"}],
-                        "Debug": [{"idx": "0x2040", "sub": "01", "label": "Product code"}]})
+                        "Debug": [{"idx": "0x2020", "sub": "01", "label": "Product code"}]})
     db.set("fav_set", "Debug")
     b = Bench(db)
-    assert b.favorites == [{"idx": "0x2040", "sub": "01", "label": "Product code"}]
+    assert b.favorites == [{"idx": "0x2020", "sub": "01", "label": "Product code"}]
 
 
 def _trace_row(cob: str, data: str) -> dict:
@@ -269,12 +269,12 @@ def test_trace_annotation_names_object_and_decodes_decimal(connected_bench):
     bench._annotate_sdo(row)
     assert row["obj"] == "0x2050:00 Variant id"
     assert row["val"] == "42"
-    req = _trace_row("0x601", "40 40 20 01 00 00 00 00")  # upload request, record member
+    req = _trace_row("0x601", "40 20 20 01 00 00 00 00")  # upload request, record member
     bench._annotate_sdo(req)
     # a record member carries its record's name, the way it does in the
     # object table and in a step's report line — "Product code" alone is
     # the half of a name that says which record it is not
-    assert req["obj"] == "0x2040:01 Product identification/Product code"
+    assert req["obj"] == "0x2020:01 Device identification/Product code"
     assert req["val"] == ""  # a read request carries no value
 
 
@@ -410,13 +410,13 @@ def test_plot_toggle_adds_then_removes_signal(connected_bench):
     bench = connected_bench  # node 1 carries dut_alpha_v2.eds (SEED_EDS)
     bench.dispatch("dev_toggle", {"node": 1})
     assert bench.plot_sel == []
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
-    assert bench.plot_sel == [{"idx": "0x2040", "sub": "01",
-                                "label": "Product identification/Product code"}]
-    assert bench._plot_keys == {"0x2040:01"}
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
+    assert bench.plot_sel == [{"idx": "0x2020", "sub": "01",
+                                "label": "Device identification/Product code"}]
+    assert bench._plot_keys == {"0x2020:01"}
     assert "added" in bench.logs[-1]["msg"]
 
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})  # toggle off
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})  # toggle off
     assert bench.plot_sel == []
     assert bench._plot_keys == set()
     assert "removed" in bench.logs[-1]["msg"]
@@ -425,7 +425,7 @@ def test_plot_toggle_adds_then_removes_signal(connected_bench):
 def test_plot_toggle_caps_at_plot_sel_max(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    signals = [("0x1000", "00"), ("0x2040", "00"), ("0x2040", "01"), ("0x2050", "00")]
+    signals = [("0x1000", "00"), ("0x2020", "00"), ("0x2020", "01"), ("0x2050", "00")]
     for idx, sub in signals:
         bench.dispatch("plot_toggle", {"idx": idx, "sub": sub})
     assert len(bench.plot_sel) == core_mod.PLOT_SEL_MAX == 4
@@ -440,20 +440,20 @@ def test_plot_toggle_caps_at_plot_sel_max(connected_bench):
 def test_plot_toggle_removal_drops_the_series(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
-    bench.plot_series["0x2040:01"] = deque([(1.0, 2.0)])
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
+    bench.plot_series["0x2020:01"] = deque([(1.0, 2.0)])
 
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})  # remove
-    assert "0x2040:01" not in bench.plot_series
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})  # remove
+    assert "0x2020:01" not in bench.plot_series
 
 
 def test_plot_clear_empties_selection_and_series(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    for idx, sub in [("0x1000", "00"), ("0x2040", "01")]:
+    for idx, sub in [("0x1000", "00"), ("0x2020", "01")]:
         bench.dispatch("plot_toggle", {"idx": idx, "sub": sub})
     bench.plot_series["0x1000:00"] = deque([(1.0, 2.0)])
-    bench.plot_series["0x2040:01"] = deque([(1.0, 3.0)])
+    bench.plot_series["0x2020:01"] = deque([(1.0, 3.0)])
 
     bench.dispatch("plot_clear", {})
     assert bench.plot_sel == []
@@ -461,17 +461,17 @@ def test_plot_clear_empties_selection_and_series(connected_bench):
 
 
 def test_plot_sample_ignores_unselected_signal(bench):
-    bench._plot_sample(0x2040, 1, "42")
+    bench._plot_sample(0x2020, 1, "42")
     assert bench.plot_series == {}
 
 
 def test_plot_sample_appends_numeric_value_for_selected_signal(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
 
-    bench._plot_sample(0x2040, 1, "42")
-    series = bench.plot_series["0x2040:01"]
+    bench._plot_sample(0x2020, 1, "42")
+    series = bench.plot_series["0x2020:01"]
     assert len(series) == 1
     ts, val = series[0]
     assert val == 42.0
@@ -481,20 +481,20 @@ def test_plot_sample_appends_numeric_value_for_selected_signal(connected_bench):
 def test_plot_sample_ignores_non_numeric_value(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
 
-    bench._plot_sample(0x2040, 1, "abort 0x06020000")
-    assert "0x2040:01" not in bench.plot_series
+    bench._plot_sample(0x2020, 1, "abort 0x06020000")
+    assert "0x2020:01" not in bench.plot_series
 
 
 def test_plot_sample_deque_caps_at_plot_points(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
 
     for i in range(core_mod.PLOT_POINTS + 50):
-        bench._plot_sample(0x2040, 1, i)
-    series = bench.plot_series["0x2040:01"]
+        bench._plot_sample(0x2020, 1, i)
+    series = bench.plot_series["0x2020:01"]
     assert len(series) == core_mod.PLOT_POINTS
     first_val = series[0][1]
     assert first_val == 50  # the oldest 50 samples fell off the deque
@@ -532,12 +532,12 @@ def test_annotate_pdo_samples_plot_for_every_mapped_signal(pdo_bench):
 def test_plot_snapshot_reflects_selection_and_series(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
-    bench._plot_sample(0x2040, 1, 7)
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
+    bench._plot_sample(0x2020, 1, 7)
 
     plot = bench.snapshot()["trace"]["plot"]
     assert plot["sel"] == bench.plot_sel
-    series = plot["series"]["0x2040:01"]
+    series = plot["series"]["0x2020:01"]
     assert isinstance(series, list)
     assert series[-1][1] == 7.0
 
@@ -545,11 +545,11 @@ def test_plot_snapshot_reflects_selection_and_series(connected_bench):
 def test_plot_toggle_persists_selection_to_db(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("plot_toggle", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("plot_toggle", {"idx": "0x2020", "sub": "01"})
 
     saved = bench.db.get("plot_sel")
-    assert {"idx": "0x2040", "sub": "01",
-            "label": "Product identification/Product code"} in saved
+    assert {"idx": "0x2020", "sub": "01",
+            "label": "Device identification/Product code"} in saved
 
 
 def test_emcy_codes_merge_plugin_wins_over_cia_table(tmp_path):
@@ -807,7 +807,7 @@ def test_raw_row_per_row_node_overrides_selection(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})  # selected device would otherwise win
     bench.dispatch("raw_update", {"row": 0, "field": "node", "value": "2"})
-    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2040"})
+    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2020"})
     bench.dispatch("raw_update", {"row": 0, "field": "s", "value": "01"})
     bench.dispatch("raw_read", {"row": 0})
     assert "(node 2)" in bench.logs[-1]["msg"]
@@ -817,7 +817,7 @@ def test_raw_row_empty_node_falls_back_to_selected_device(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 2})  # select node 2
     bench.dispatch("raw_update", {"row": 0, "field": "node", "value": ""})
-    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2040"})
+    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2020"})
     bench.dispatch("raw_update", {"row": 0, "field": "s", "value": "01"})
     bench.dispatch("raw_read", {"row": 0})
     assert "(node 2)" in bench.logs[-1]["msg"]
@@ -853,20 +853,20 @@ def test_raw_read_recovers_once_a_valid_index_is_set(connected_bench):
     bench.dispatch("raw_add", {})
     row = len(bench.raw_rows) - 1
     bench.dispatch("raw_update", {"row": row, "field": "node", "value": "1"})
-    bench.dispatch("raw_update", {"row": row, "field": "i", "value": "0x2040"})
+    bench.dispatch("raw_update", {"row": row, "field": "i", "value": "0x2020"})
     bench.dispatch("raw_update", {"row": row, "field": "s", "value": "01"})
 
     bench.dispatch("raw_read", {"row": row})
 
     last = bench.logs[-1]
     assert last["type"] == "sdo"
-    assert "SDO  read 0x2040:01" in last["msg"]
+    assert "SDO  read 0x2020:01" in last["msg"]
 
 
 def test_raw_node_out_of_range_skips_with_log(connected_bench):
     bench = connected_bench
     bench.dispatch("raw_update", {"row": 0, "field": "node", "value": "255"})
-    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2040"})
+    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2020"})
     bench.dispatch("raw_update", {"row": 0, "field": "s", "value": "01"})
 
     bench.dispatch("raw_read", {"row": 0})
@@ -879,7 +879,7 @@ def test_raw_node_out_of_range_skips_with_log(connected_bench):
 def test_raw_node_accepts_hex(connected_bench):
     bench = connected_bench
     bench.dispatch("raw_update", {"row": 0, "field": "node", "value": "0x02"})
-    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2040"})
+    bench.dispatch("raw_update", {"row": 0, "field": "i", "value": "0x2020"})
     bench.dispatch("raw_update", {"row": 0, "field": "s", "value": "01"})
 
     bench.dispatch("raw_read", {"row": 0})
@@ -1103,11 +1103,11 @@ def test_obj_set_stages_value_and_write_sends_it(connected_bench):
 def test_last_known_values_restored_on_select(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})  # select
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})  # remembered for SN 260001
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})  # remembered for SN 260001
     bench.obj_vals = {}
     bench.dispatch("dev_toggle", {"node": 1})  # deselect
     bench.dispatch("dev_toggle", {"node": 1})  # reselect -> restore from db
-    assert bench.obj_vals["0x2040:01"] == "0x00260001"
+    assert bench.obj_vals["0x2020:01"] == "0x00260001"
 
 
 def test_switching_devices_does_not_carry_values_over(connected_bench):
@@ -1116,11 +1116,11 @@ def test_switching_devices_does_not_carry_values_over(connected_bench):
     and Write would have sent them there."""
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
-    assert "0x2040:01" in bench.obj_vals
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})
+    assert "0x2020:01" in bench.obj_vals
     bench.dispatch("dev_toggle", {"node": 1})            # deselect
     bench.dispatch("dev_toggle", {"node": 2})            # a different device
-    assert "0x2040:01" not in bench.obj_vals
+    assert "0x2020:01" not in bench.obj_vals
 
 
 def test_a_late_answer_goes_to_the_device_that_gave_it(connected_bench):
@@ -1133,12 +1133,12 @@ def test_a_late_answer_goes_to_the_device_that_gave_it(connected_bench):
     sn = {d["node"]: d["sn"] for d in bench.devices}
     assert sn[1] != sn[2]
     bench.dispatch("dev_toggle", {"node": 2})            # switched before the answer
-    bench.remember("0x2040:01", "0x00001111", 1)         # node 1's answer
-    assert "0x2040:01" not in bench.obj_vals, "not on node 2's page"
-    assert "0x2040:01" not in bench.db.last_values(sn[2])
-    assert bench.db.last_values(sn[1])["0x2040:01"] == "0x00001111"
-    bench.remember("0x2040:01", "0x00002222", 2)         # the shown device's own
-    assert bench.obj_vals["0x2040:01"] == "0x00002222"
+    bench.remember("0x2020:01", "0x00001111", 1)         # node 1's answer
+    assert "0x2020:01" not in bench.obj_vals, "not on node 2's page"
+    assert "0x2020:01" not in bench.db.last_values(sn[2])
+    assert bench.db.last_values(sn[1])["0x2020:01"] == "0x00001111"
+    bench.remember("0x2020:01", "0x00002222", 2)         # the shown device's own
+    assert bench.obj_vals["0x2020:01"] == "0x00002222"
 
 
 def test_a_box_read_outlasting_a_switch_keeps_to_its_device(connected_bench, monkeypatch):
@@ -1153,9 +1153,9 @@ def test_a_box_read_outlasting_a_switch_keeps_to_its_device(connected_bench, mon
             d["sel"] = d["node"] == 2
         return res
     monkeypatch.setattr(bench.bus, "sdo_read", read_then_switch)
-    asyncio.run(bench._panel_read_async([("0x2040", "01")]))
-    assert "0x2040:01" in bench.db.last_values(sn[1])
-    assert "0x2040:01" not in bench.db.last_values(sn[2])
+    asyncio.run(bench._panel_read_async([("0x2020", "01")]))
+    assert "0x2020:01" in bench.db.last_values(sn[1])
+    assert "0x2020:01" not in bench.db.last_values(sn[2])
 
 
 def test_a_write_goes_to_every_selected_device(connected_bench, monkeypatch):
@@ -1181,7 +1181,7 @@ def test_a_write_goes_to_every_selected_device(connected_bench, monkeypatch):
 def test_deselecting_everything_empties_the_table(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})
     bench.dispatch("dev_toggle", {"node": 1})
     assert bench.obj_vals == {}
 
@@ -1204,7 +1204,7 @@ def test_a_device_without_a_serial_number_gets_no_remembered_values(connected_be
     bench = connected_bench
     bench.devices[0]["sn"] = NO_SERIAL
     bench.dispatch("dev_toggle", {"node": bench.devices[0]["node"]})
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})
     bench.dispatch("dev_toggle", {"node": bench.devices[0]["node"]})
     bench.dispatch("dev_toggle", {"node": bench.devices[0]["node"]})
     assert bench.obj_vals == {}
@@ -1216,10 +1216,10 @@ def test_a_scan_reloads_the_table_for_whoever_is_at_that_node(connected_bench):
     be the same one, so the values are re-fetched rather than kept."""
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
-    bench.obj_vals["0x2040:01"] = "0xDEADBEEF"       # never read from anything
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})
+    bench.obj_vals["0x2020:01"] = "0xDEADBEEF"       # never read from anything
     connect_and_scan(bench)
-    assert bench.obj_vals.get("0x2040:01") == "0x00260001"   # what the db holds
+    assert bench.obj_vals.get("0x2020:01") == "0x00260001"   # what the db holds
 
 
 def test_nmt_applies_to_selection_only(connected_bench):
@@ -4077,7 +4077,7 @@ def test_workspace_actions_without_root_log_switching_disabled(bench):
 def test_raw_row_load_normalizes_legacy_rows_without_cyc_run_id(tmp_path):
     db = Db(tmp_path / "test.db")
     db.set("raw_sdo", [
-        {"type": "sdo", "node": "", "i": "0x2040", "s": "01", "l": "4", "v": "0x00260001"},
+        {"type": "sdo", "node": "", "i": "0x2020", "s": "01", "l": "4", "v": "0x00260001"},
         {"type": "pdo", "node": "1", "i": "0x", "s": "00", "l": "1", "v": ""},
     ])
     bench = Bench(db)
@@ -4907,11 +4907,11 @@ def test_remember_is_the_one_way_a_value_gets_in(connected_bench):
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
 
-    bench.remember("0x2040:01", "0x00C8")
+    bench.remember("0x2020:01", "0x00C8")
 
-    assert bench.obj_vals["0x2040:01"] == "0x00C8"
-    assert bench.obj_vals_at["0x2040:01"] > 0
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
+    assert bench.obj_vals["0x2020:01"] == "0x00C8"
+    assert bench.obj_vals_at["0x2020:01"] > 0
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x00C8"
 
 
 def test_the_display_mirror_refresh_is_remembered_like_a_read(connected_bench):
@@ -4921,11 +4921,11 @@ def test_the_display_mirror_refresh_is_remembered_like_a_read(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
-    bench.db.eds_set_display(bench.sel_devices[0]["eds"], [{"idx": "0x2040", "sub": "01"}])
+    bench.db.eds_set_display(bench.sel_devices[0]["eds"], [{"idx": "0x2020", "sub": "01"}])
 
     bench.dispatch("mirror_refresh", {})
 
-    assert "0x2040:01" in bench.db.last_values(sn)
+    assert "0x2020:01" in bench.db.last_values(sn)
 
 
 def test_an_accepted_write_is_remembered_too(connected_bench):
@@ -4945,17 +4945,17 @@ def test_what_the_bus_carried_past_comes_back_for_that_device(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
-    bench._bus_sample(1, 0x2040, 0x01, 0x00C8, 2)        # node 1 broadcast 200
-    assert "0x2040:01" not in bench.db.last_values(sn), "not per frame"
+    bench._bus_sample(1, 0x2020, 0x01, 0x00C8, 2)        # node 1 broadcast 200
+    assert "0x2020:01" not in bench.db.last_values(sn), "not per frame"
 
     bench.dispatch("dev_toggle", {"node": 1})            # away: the flush
     bench.dispatch("dev_toggle", {"node": 2})
     bench.dispatch("dev_toggle", {"node": 2})
     bench.dispatch("dev_toggle", {"node": 1})            # …and back
 
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
-    assert bench.obj_vals["0x2040:01"] == "0x00C8"
-    assert bench._panel_value("0x2040:01", 1)[1] in ("bus", "db")
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x00C8"
+    assert bench.obj_vals["0x2020:01"] == "0x00C8"
+    assert bench._panel_value("0x2020:01", 1)[1] in ("bus", "db")
 
 
 def test_a_node_id_handed_to_another_unit_does_not_carry_its_values(connected_bench):
@@ -4964,13 +4964,13 @@ def test_a_node_id_handed_to_another_unit_does_not_carry_its_values(connected_be
     reading nobody took, on a device nobody read. Keyed by serial number
     they stay with the unit they came from."""
     bench = connected_bench
-    bench._bus_sample(1, 0x2040, 0x01, 0x00C8, 2)        # the unit at node 1
+    bench._bus_sample(1, 0x2020, 0x01, 0x00C8, 2)        # the unit at node 1
     old_sn = bench.devices[0]["sn"]
-    assert bench.seen_vals[(old_sn, "0x2040:01")][0] == "0x00C8"
+    assert bench.seen_vals[(old_sn, "0x2020:01")][0] == "0x00C8"
 
     bench.devices[0]["sn"] = "999999"                    # another unit, same node
-    assert bench._panel_value("0x2040:01", 1) == (None, "", 0.0)
-    assert (old_sn, "0x2040:01") in bench.seen_vals, "the old unit keeps its value"
+    assert bench._panel_value("0x2020:01", 1) == (None, "", 0.0)
+    assert (old_sn, "0x2020:01") in bench.seen_vals, "the old unit keeps its value"
 
 
 def test_the_bus_values_reach_the_database_every_few_seconds(connected_bench, monkeypatch):
@@ -4980,14 +4980,14 @@ def test_the_bus_values_reach_the_database_every_few_seconds(connected_bench, mo
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
-    bench._bus_sample(1, 0x2040, 0x01, 0x0032, 2)
+    bench._bus_sample(1, 0x2020, 0x01, 0x0032, 2)
     bench._tick_once_sync = lambda: asyncio.run(bench._tick_once())
     bench._tick_once_sync()
-    assert "0x2040:01" not in bench.db.last_values(sn), "too soon"
+    assert "0x2020:01" not in bench.db.last_values(sn), "too soon"
 
     monkeypatch.setattr(core_mod, "SEEN_FLUSH_S", 0.0)
     bench._tick_once_sync()
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x0032"
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x0032"
 
 
 def test_a_read_is_not_undone_by_an_older_bus_value_on_reselect(connected_bench):
@@ -5000,14 +5000,14 @@ def test_a_read_is_not_undone_by_an_older_bus_value_on_reselect(connected_bench)
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
-    bench._bus_sample(1, 0x2040, 0x01, 0x0011, 2)    # carried past, not flushed yet
-    bench.remember("0x2040:01", "0x00C8")             # then read: newer
+    bench._bus_sample(1, 0x2020, 0x01, 0x0011, 2)    # carried past, not flushed yet
+    bench.remember("0x2020:01", "0x00C8")             # then read: newer
 
     bench.dispatch("dev_toggle", {"node": 1})         # away: the flush
     bench.dispatch("dev_toggle", {"node": 1})         # back: the restore
 
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
-    assert bench.obj_vals["0x2040:01"] == "0x00C8"
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x00C8"
+    assert bench.obj_vals["0x2020:01"] == "0x00C8"
 
 
 def test_shutdown_does_not_put_back_what_a_later_read_replaced(connected_bench):
@@ -5017,10 +5017,10 @@ def test_shutdown_does_not_put_back_what_a_later_read_replaced(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
-    bench._bus_sample(1, 0x2040, 0x01, 0x0011, 2)
-    bench.remember("0x2040:01", "0x00C8")
+    bench._bus_sample(1, 0x2020, 0x01, 0x0011, 2)
+    bench.remember("0x2020:01", "0x00C8")
     bench.shutdown()
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x00C8"
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x00C8"
 
 
 def test_a_bus_value_after_a_read_still_wins(connected_bench):
@@ -5029,26 +5029,26 @@ def test_a_bus_value_after_a_read_still_wins(connected_bench):
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
     sn = bench.sel_devices[0]["sn"]
-    bench.remember("0x2040:01", "0x00C8")
-    bench._bus_sample(1, 0x2040, 0x01, 0x0033, 2)    # later on the bus
+    bench.remember("0x2020:01", "0x00C8")
+    bench._bus_sample(1, 0x2020, 0x01, 0x0033, 2)    # later on the bus
     bench._flush_seen()
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x0033"
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x0033"
 
 
 def test_shutdown_writes_the_last_seconds_of_the_bus(connected_bench):
     bench = connected_bench
     sn = bench.devices[0]["sn"]
-    bench._bus_sample(1, 0x2040, 0x01, 0x0011, 2)
+    bench._bus_sample(1, 0x2020, 0x01, 0x0011, 2)
     bench.shutdown()
-    assert bench.db.last_values(sn)["0x2040:01"] == "0x0011"
+    assert bench.db.last_values(sn)["0x2020:01"] == "0x0011"
 
 
 def test_a_value_seen_at_an_unknown_node_is_not_written_down(connected_bench):
     """"node:9" is not a device, it is where one happened to be."""
     bench = connected_bench
-    bench._bus_sample(9, 0x2040, 0x01, 0x0011, 2)
+    bench._bus_sample(9, 0x2020, 0x01, 0x0011, 2)
     bench._flush_seen()
-    assert bench.seen_vals[("node:9", "0x2040:01")][0] == "0x0011"
+    assert bench.seen_vals[("node:9", "0x2020:01")][0] == "0x0011"
     assert bench.db.last_values("node:9") == {}
 
 
@@ -5058,10 +5058,10 @@ def test_a_restored_value_says_it_was_restored(connected_bench):
     not. The previous device's timestamps went with it."""
     bench = connected_bench
     bench.dispatch("dev_toggle", {"node": 1})
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})
     bench.dispatch("dev_toggle", {"node": 1})
     bench.dispatch("dev_toggle", {"node": 1})
-    value, src, age = bench._panel_value("0x2040:01", 1)
+    value, src, age = bench._panel_value("0x2020:01", 1)
     assert value and src == "db" and age == 0.0
     assert bench.obj_vals_at == {}
 
@@ -5076,7 +5076,7 @@ def test_the_table_marks_the_eds_default_as_a_default(connected_bench):
     fmt = bench.snapshot()["objects"]["fmt"]
     assert fmt and all(row["dflt"] for row in fmt.values()), "nothing read, all defaults"
 
-    bench.dispatch("obj_read", {"idx": "0x2040", "sub": "01"})
+    bench.dispatch("obj_read", {"idx": "0x2020", "sub": "01"})
     fmt = bench.snapshot()["objects"]["fmt"]
-    assert fmt["0x2040:01"]["dflt"] is False
-    assert any(row["dflt"] for key, row in fmt.items() if key != "0x2040:01")
+    assert fmt["0x2020:01"]["dflt"] is False
+    assert any(row["dflt"] for key, row in fmt.items() if key != "0x2020:01")

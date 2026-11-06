@@ -67,7 +67,7 @@ class FakePlugin(BenchPlugin):
         return [self._tc_dir] if self._tc_dir else []
 
     def emcy_mec_text(self, mec: int) -> str:
-        return "Yarn breakage" if mec == 0x0065 else ""
+        return "Sensor fault" if mec == 0x0065 else ""
 
 
 def test_plugin_adapter_card_listed_first(tmp_path):
@@ -1890,13 +1890,13 @@ def test_a_plugin_brings_the_eds_files_its_rows_name(tmp_path):
     stop."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
-    (packaged / "acme_feeder.eds").write_text("[FileInfo]\nFileName=acme_feeder.eds\n",
+    (packaged / "acme_device.eds").write_text("[FileInfo]\nFileName=acme_device.eds\n",
                                            encoding="utf-8")
     (packaged / "notes.txt").write_text("not an EDS", encoding="utf-8")
 
     bench = Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])
 
-    assert (bench.db.eds_dir / "acme_feeder.eds").is_file()
+    assert (bench.db.eds_dir / "acme_device.eds").is_file()
     assert not (bench.db.eds_dir / "notes.txt").exists()
 
 
@@ -1905,15 +1905,15 @@ def test_the_packaged_eds_wins_and_one_of_ones_own_has_another_name(tmp_path):
     is the plugin's, on every start. A different EDS goes in renamed."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
-    (packaged / "acme_feeder.eds").write_text("packaged", encoding="utf-8")
+    (packaged / "acme_device.eds").write_text("packaged", encoding="utf-8")
 
     bench = Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])
-    (bench.db.eds_dir / "acme_feeder.eds").write_text("edited here", encoding="utf-8")
-    (bench.db.eds_dir / "acme_feeder_new.eds").write_text("mine", encoding="utf-8")
+    (bench.db.eds_dir / "acme_device.eds").write_text("edited here", encoding="utf-8")
+    (bench.db.eds_dir / "acme_device_new.eds").write_text("mine", encoding="utf-8")
     Bench(Db(tmp_path / "x.db"), plugins=[_eds_plugin(packaged)])   # a later start
 
-    assert (bench.db.eds_dir / "acme_feeder.eds").read_text() == "packaged"
-    assert (bench.db.eds_dir / "acme_feeder_new.eds").read_text() == "mine"
+    assert (bench.db.eds_dir / "acme_device.eds").read_text() == "packaged"
+    assert (bench.db.eds_dir / "acme_device_new.eds").read_text() == "mine"
 
 
 def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
@@ -1921,7 +1921,7 @@ def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
     match identities, and that has to be readable somewhere."""
     packaged = tmp_path / "packaged"
     packaged.mkdir()
-    (packaged / "acme_feeder.eds").write_text("packaged", encoding="utf-8")
+    (packaged / "acme_device.eds").write_text("packaged", encoding="utf-8")
 
     class Boom(BenchPlugin):
         name = "boom"
@@ -1932,11 +1932,11 @@ def test_an_eds_folder_that_cannot_be_written_is_said_not_raised(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[])
     bench.plugins = [Boom()]
     bench.db.eds_dir.mkdir(parents=True, exist_ok=True)
-    (bench.db.eds_dir / "acme_feeder.eds").mkdir()      # a directory in the file's place
+    (bench.db.eds_dir / "acme_device.eds").mkdir()      # a directory in the file's place
     bench.logs.clear()
     bench._seed_plugin_eds()                          # must not raise
 
-    assert any("acme_feeder.eds could not be installed" in entry["msg"] for entry in bench.logs)
+    assert any("acme_device.eds could not be installed" in entry["msg"] for entry in bench.logs)
 
 
 # -- packaged test cases -----------------------------------------------------
@@ -1992,7 +1992,7 @@ def test_the_manufacturer_error_code_is_read_and_named(tmp_path):
     bench = Bench(Db(tmp_path / "x.db"), plugins=[FakePlugin()])
     row = _emcy_row("00 10 01 65 00 00 00 00")
     bench._annotate_emcy(row, live=False)
-    assert row["obj"] == "0x1000 Generic error · MEC 0x0065 Yarn breakage"
+    assert row["obj"] == "0x1000 Generic error · MEC 0x0065 Sensor fault"
 
 
 def test_a_manufacturer_code_nobody_names_still_shows_its_number(tmp_path):
