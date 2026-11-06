@@ -6193,7 +6193,8 @@ class Bench:
                 assigned = await asyncio.to_thread(bus.lss_assign, count)
             except ConnectionError:
                 return "error", "connection lost"
-            regs[val.get("into", "R0")] = assigned & 0xFFFFFFFF
+            if "into" in val:
+                regs[val["into"]] = assigned & 0xFFFFFFFF
             return "ok", ""
         if key == "lss_fastscan":
             known = {sub: _resolve(val[part], regs, builtins) & 0xFFFFFFFF
@@ -6248,12 +6249,14 @@ class Bench:
         if key == "sdo_read":
             index_s, sub_s = _hexstr(val["index"]), _hexstr(val["sub"])
             res = await asyncio.to_thread(bus.sdo_read, node, index_s, sub_s)
-            # resolved *before* the result is stored: `into` defaults to R0,
-            # so an `expect: R0` resolved afterwards would compare the value
+            # resolved *before* the result is stored: with `into: R0` an
+            # `expect: R0` resolved afterwards would compare the value
             # against itself and pass no matter what the device answered
             spec = _with_registers(val, regs)
-            if res.ok:  # the result is always available for further processing
-                regs[val.get("into", "R0")] = (_as_int(res.value) or 0) & 0xFFFFFFFF
+            # only where the case says: a plain read that also wrote R0 would
+            # overwrite what an earlier read put there for later
+            if res.ok and "into" in val:
+                regs[val["into"]] = (_as_int(res.value) or 0) & 0xFFFFFFFF
             status, info = _judge_read(spec, res)
             if status == "ok" and res.ok:
                 # what came back, on the passing path too: a report that
