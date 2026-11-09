@@ -103,6 +103,10 @@ and every access shows up in the Trace like real bus traffic.
   investigation, a check across many devices, a report put together on
   the spot. The actions are the `act_*` methods in `canopen_bench/core.py`.
   No authentication, so the port stays on a trusted network.
+- **MCP server** — the same bench at `/mcp` for AI assistants (Claude
+  Code, GitHub Copilot): tools for devices, supply, test runs, firmware
+  download and the trace, which describe themselves to the assistant
+  ([docs/mcp.md](docs/mcp.md)).
 
 ## Screenshots
 
@@ -291,6 +295,7 @@ adapter card, its own tests, MIT. It is a separate distribution that
 - `IMPLEMENTATION.md` — architecture and design decisions
 - `CONTRIBUTING.md` — dev setup, test conventions, what goes where
 - `docs/extending.md` — plugin guide
+- `docs/mcp.md` — the MCP server for AI assistants
 - `docs/ablaeufe/` — operational sequence specs (German)
 - `docs/ablaeufe/testfall-format.md` — YAML test-case format
 

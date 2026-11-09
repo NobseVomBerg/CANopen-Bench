@@ -23,7 +23,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from . import __version__, usersettings
+from . import __version__, mcp, usersettings
 from .bus.interface import BusInterface
 from .core import Bench
 from .db import Db
@@ -280,6 +280,8 @@ def create_app(db_path: str | None = None, bus: BusInterface | None = None,
         Route("/api/trace/export.csv", export_csv),
         Route("/api/trace/export/candump", export_candump),
         Route("/api/report/{name}", report),
+        # the bench as an MCP server, for AI assistants (canopen_bench/mcp.py)
+        Route("/mcp", mcp.endpoint(lambda: holder["bench"]), methods=["GET", "POST", "DELETE"]),
         WebSocketRoute("/ws", ws),
         Mount("/static", _RevalidatedFiles(directory=STATIC), name="static"),
     ])

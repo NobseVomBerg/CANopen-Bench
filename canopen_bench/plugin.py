@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -273,6 +276,25 @@ class DevicePanel:
                     means no refresh control.
         """
         return None
+
+
+@dataclass
+class McpTool:
+    """A tool on the bench's MCP endpoint (``/mcp``, canopen_bench/mcp.py)
+    for an AI assistant driving the bench. ``run(bench, args)`` gets the
+    arguments the client sent and returns anything JSON can carry, or an
+    awaitable of it; an exception becomes an error result whose message
+    the assistant reads, so say what to do differently. A plugin's tools
+    are listed as ``<plugin name>_<name>``."""
+
+    name: str
+    description: str
+    run: Callable[[Any, dict], Any]
+    #: JSON-Schema ``properties`` of the arguments
+    params: dict = field(default_factory=dict)
+    required: tuple[str, ...] = ()
+    #: only looks — nothing on the bus, the devices or the instruments changes
+    read_only: bool = False
 
 
 class StepType:
@@ -614,6 +636,17 @@ class BenchPlugin:
         """Replacement firmware-download implementation, or None to keep
         the core simulation. With several plugins the first one wins."""
         return None
+
+    def mcp_tools(self) -> list[McpTool]:
+        """Extra tools on the bench's MCP endpoint, listed as
+        "<plugin name>_<tool name>"."""
+        return []
+
+    def mcp_instructions(self) -> str:
+        """What an assistant should know about this extension's devices
+        before it uses the tools — added to the endpoint's instructions,
+        which a client reads once when it connects."""
+        return ""
 
 
 def _installed_at(ep) -> str:
