@@ -77,6 +77,8 @@ only what you provide.
 | `actions(bench)` | `dict[str, callable]` | Extra API actions, dispatched as `<plugin>.<action>` — collision-free with core actions |
 | `step_types()` | `list[StepType]` | Extra flow/test-case step primitives, referenced in YAML as `<plugin>.<key>` |
 | `swdl_strategy()` | `SwdlStrategy \| None` | Real firmware-download protocol replacing the core simulation — the transfer itself, the phase and the failure it reports per node, and what Stop does; first plugin wins |
+| `mcp_tools()` | `list[McpTool]` | Extra tools on the bench's MCP endpoint, listed as `<plugin>_<name>` ([mcp.md](mcp.md)) |
+| `mcp_instructions()` | `str` | What an AI assistant should know about the plugin's devices, appended to the MCP server's instructions |
 
 A plugin's action is dispatched on the event loop with the browser
 waiting for it to return, so anything that has to wait for the device
@@ -84,7 +86,7 @@ belongs in `bench.spawn(coro)` rather than in a sleep: a press that reads
 the device again a second later must not stop the bench for that second.
 
 The helper base classes (`AddressingProvider`, `DemoHook`,
-`TraceDecoder`, `DevicePanel`, `StepType`, `SwdlStrategy`) are defined
+`TraceDecoder`, `DevicePanel`, `StepType`, `SwdlStrategy`, `McpTool`) are defined
 next to `BenchPlugin` in `canopen_bench/plugin.py`, each with docstrings
 covering the exact contract.
 
