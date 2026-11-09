@@ -10,8 +10,10 @@ from starlette.testclient import TestClient
 
 from canopen_bench import mcp
 from canopen_bench.app import create_app
+from canopen_bench.bus.interface import SdoResult
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
+from canopen_bench.eds_od import ObjectInfo
 from canopen_bench.plugin import BenchPlugin, McpTool
 
 PASS_TC = """\
@@ -89,6 +91,21 @@ def test_sdo_read_returns_the_value_and_says_so_in_the_log(bench):
     got, failed = call(bench, "sdo_read", node=1, index="0x2020", sub=1)
     assert not failed and got["ok"] and int(got["value"], 16) == 0x260001
     assert "MCP" in bench.logs[-1]["msg"]
+
+
+def test_a_read_says_what_the_eds_makes_of_the_value(bench, monkeypatch):
+    """A real bus hands a string over as one little-endian number and a signed value as its
+    two's complement; the answer carries both as somebody reads them."""
+    types = {0x1008: (0x0009, 64), 0x2001: (0x0004, 32)}  # VISIBLE_STRING, INTEGER32
+    monkeypatch.setattr(bench, "_object_info", lambda node, idx, sub: ObjectInfo(
+        int(idx, 16), int(sub, 16), "x", *types[int(idx, 16)], "ro"))
+    answers = {"0x1008": "0x0000003332315F4F4D4544", "0x2001": "0xFFFFFFFB"}
+    monkeypatch.setattr(bench.bus, "sdo_read",
+                        lambda node, idx, sub, timeout=None: SdoResult(True, answers[idx]))
+    got, _ = call(bench, "sdo_read", node=1, index="0x1008")
+    assert got["text"] == "DEMO_123" and "decimal" not in got
+    got, _ = call(bench, "sdo_read", node=1, index="0x2001")
+    assert got["value"] == "0xFFFFFFFB" and got["decimal"] == -5
 
 
 def test_sdo_write_is_sized_from_the_eds_and_reads_back(bench):

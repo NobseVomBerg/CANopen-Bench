@@ -31,9 +31,9 @@ from starlette.responses import JSONResponse, Response
 
 from . import __version__
 from . import testcases as tclib
-from .core import NMT_LABEL, NMT_STATE
+from .core import NMT_LABEL, NMT_STATE, _hex_to_text
 from .plugin import McpTool
-from .values import parse_value
+from .values import describe, parse_value
 
 #: newest first; a client asking for one of these gets it, any other the first
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -224,9 +224,26 @@ async def sdo_read(b, a):
         return {"ok": False, "abort": res.abort}
     b.remember(f"{idx}:{sub}", res.value, node)
     b.log(f"SDO  read {idx}:{sub} → {res.value} (node {node}) · MCP", "sdo")
-    out = {"ok": True, "value": res.value}
-    if str(res.value).lower().startswith("0x"):
-        out["decimal"] = int(str(res.value), 16)
+    return {"ok": True, "value": res.value, **_reading(b, node, idx, sub, res.value)}
+
+
+def _reading(b, node: int, idx: str, sub: str, value) -> dict:
+    """What a value means, as a report line says it: a string as its text, a signed object with its
+    sign, flag and enum names from the headers, a scaled value with its unit."""
+    info = b._object_info(node, idx, sub)
+    if info is not None and info.is_text:  # real buses hand a string over as a number, back to front
+        text = _hex_to_text(value) if str(value).lower().startswith("0x") else str(value)
+        return {"text": text} if text is not None else {}
+    if not str(value).lower().startswith("0x"):
+        return {}
+    raw = int(str(value), 16)
+    out = {"decimal": info.signed(raw) if info is not None else raw}
+    key = f"{idx}:{sub}"
+    if (fields := b._object_fields.get(key)) and (meaning := describe(raw, fields, b.symbols)):
+        out["meaning"] = meaning
+    if (unit := b._object_units.get(key)) is not None and \
+            (reading := unit.with_unit(str(value), info.signed_bits if info else 0)):
+        out["reading"] = reading
     return out
 
 
@@ -456,7 +473,8 @@ TOOLS = [
     McpTool("bench_log", "The bench's log (its last 40 lines), optionally filtered.", bench_log,
             {"lines": {"type": "integer"}, "contains": {"type": "string"}}, read_only=True),
     McpTool("scan", "Scan the bus for devices and wait for the result.", scan),
-    McpTool("sdo_read", "Read one object of a device by SDO.", sdo_read,
+    McpTool("sdo_read", "Read one object of a device by SDO. Besides the raw value: a string object "
+            "as text, a signed one with its sign, flag/enum names and units where the headers say.", sdo_read,
             {"node": _NODE, **_ADDR}, ("node", "index")),
     McpTool("sdo_write", "Write one object of a device by SDO. Sized from the device's EDS "
             "unless size is given.", sdo_write,
@@ -505,7 +523,8 @@ TOOLS = [
     McpTool("swdl", "Download a firmware file from the library to one device.", swdl,
             {"node": _NODE, "file": {"type": "string", "description": "from firmware_list"},
              "mode": {"type": "string", "enum": ["sdo", "pdo"]}, **_WAIT}, ("node", "file")),
-    McpTool("trace", "Frames from the bus trace (or the capture open on the page), oldest first.",
+    McpTool("trace", "Frames from the bus trace (or the capture open on the page), oldest first. "
+            'A boot-up is a heartbeat frame (0x700+node) with data "00".',
             trace, {**_FILTER, "limit": {"type": "integer", "description": "newest N, default 100"}},
             read_only=True),
     McpTool("trace_timing", "How regularly matching frames arrived: interval statistics and the "
