@@ -54,6 +54,10 @@ the workspace on first run). SDO reads/writes are answered from the EDS
 object dictionary — including realistic aborts on out-of-range writes —
 and every access shows up in the Trace like real bus traffic.
 
+An AI assistant can drive it as well: the running bench is an MCP server
+at `http://127.0.0.1:8000/mcp`, entered once in Claude Code or GitHub
+Copilot ([docs/mcp.md](docs/mcp.md)).
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/setup-dark.png">
   <img alt="Setup page: bus interface, EDS registry with identity matching, machine control" src="https://raw.githubusercontent.com/NobseVomBerg/CANopen-Bench/main/docs/img/setup.png">
