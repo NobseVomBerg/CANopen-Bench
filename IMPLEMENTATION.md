@@ -224,6 +224,8 @@ canopen_bench/
 │                     --db path keeps the single-file behaviour.
 ├── core.py           Bench service — owns all state; async step executor for
 │                     test runs, 0.8 s tick loop for trace polling + SWDL sim
+├── mcp.py            the bench as an MCP server at /mcp: tools for AI
+│                     assistants on top of the Bench, plus plugins' tools
 ├── testcases.py      YAML test-case parser/catalog (strict schema)
 ├── db.py             sqlite per workspace: config kv (incl. machine-control
 │                     expected state), EDS registry metadata, last-known
@@ -247,6 +249,9 @@ The browser is a thin renderer: every mutation goes through
 `POST /api/action {action, params}`, the server pushes full state snapshots
 over the WebSocket (initial snapshot on connect, then on every change/tick).
 Server restarts and multiple browsers therefore always agree on the state.
+An AI assistant is one more client of the same Bench: `/mcp` serves it
+tools that call the Bench directly and return what a read answered, which
+`/api/action` does not (`docs/mcp.md`).
 
 ## Real hardware vs. demo mode
 
@@ -316,7 +321,7 @@ device-family- or manufacturer-specific (vendor adapter cards, EDS
 registry seeds incl. device commands, firmware catalogs, addressing
 flows, session-identity providers, demo-bus protocol simulations, trace
 decoders, namespaced extra actions, custom step primitives for the flow
-VM, SWDL download strategies) lives in separate pip packages registered
+VM, SWDL download strategies, MCP tools) lives in separate pip packages registered
 under the `canopen_bench.plugins` entry-point group. Installing such a package activates it — no
 configuration. The concept and full hook reference are in
 `docs/extending.md`. Licensing is per package, not blanket: vendor
