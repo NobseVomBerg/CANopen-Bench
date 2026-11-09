@@ -28,6 +28,9 @@ development; the version counts from here.
 
 - Web UI (Starlette + Preact) with live state snapshots over WebSocket:
   Setup, Objects, Trace, Tests, Machine Control pages
+- MCP server at `/mcp` for AI assistants (Claude Code, GitHub Copilot):
+  devices, supply, test runs, firmware download and the trace as tools
+  that describe themselves; plugins add their own (`docs/mcp.md`)
 - Hardware backends via python-can: IXXAT VCI4 (the adapter this was
   built on), PCAN (wired up, never run against a device here) and
   CPC-USB — plus a hardware-free demo mode that simulates devices from
@@ -152,7 +155,7 @@ development; the version counts from here.
   ships (`docs/panel-format.md`); the core ships one for the objects CiA
   301 makes mandatory, so every device has a panel, and one for its own
   demo device
-- Plugin system (`canopen_bench.plugins` entry-point group, 23 hooks)
+- Plugin system (`canopen_bench.plugins` entry-point group, 25 hooks)
   for vendor hardware, device families and custom flows; in
   multi-workspace mode, plugin packages (`.whl`) install and activate
   straight from Setup > Extensions, no shell or restart needed. The same
