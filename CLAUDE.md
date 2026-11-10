@@ -58,14 +58,17 @@ having tried is how a CI status went unread for a whole merge here.
 
 ## Model routing
 
-Split by what each model is best at — the token budget is not the
-constraint:
+Split by what each model is best at. The token budget is not the
+constraint, but Fable is the expensive one:
 
-- **Opus** is the main-thread default, pinned in `.claude/settings.json`
-  rather than left to Claude Code's own default: understanding the
-  request, architecture, ambiguous calls, planning, review.
-- **Sonnet** runs the coding agents in `.claude/agents/`: for agentic
-  coding it is at least on par with Opus, at half the tokens.
+- **Fable** is the main thread (`.claude/settings.json`, effort `high`):
+  understanding the request, architecture, ambiguous calls, planning,
+  review. `/effort xhigh` for hard coding or architecture work, `max`
+  only by exception.
+- **Opus** takes delegated reasoning: Plan and judgment-heavy
+  general-purpose work.
+- **Sonnet** runs the coding agents in `.claude/agents/`: well-scoped
+  agentic coding at a quarter of Fable's price.
 - **Haiku** runs scout-agent: the fastest model, good at bounded lookups
   and extraction, far behind Sonnet on multi-step agentic work.
 
@@ -82,15 +85,33 @@ thread:
   specified (files, changes, decisions all made). Only once nothing
   ambiguous is left to decide.
 
-Send lookups to **scout-agent** instead of the built-in Explore (which
-inherits Opus): where something is defined or used, what a spec or log
-says, what git history shows — and plain check runs (ruff, pytest, a
-branch's CI status) that report rather than fix.
+Send lookups to **scout-agent** instead of the built-in Explore: where
+something is defined or used, what a spec or log says, what git history
+shows — and plain check runs (ruff, pytest, a branch's CI status) that
+report rather than fix.
 
 Use them proactively when a request matches. Keep the main thread for
 understanding the request, architecture-level and ambiguous work, and
 review; once a change is fully planned, hand it to implementer-agent even
 when it spans the bus/service layer and the frontend.
 
-Haiku only through scout-agent: no `model: "haiku"` on other Agent
-calls, and nothing that writes code.
+### Keep Fable on the main thread
+
+Fable costs twice Opus's price per input and output token, so no
+subagent runs on it:
+
+- Built-in agents inherit the main model, so never call one without a
+  model: Explore → use scout-agent instead; Plan → `model: "opus"`;
+  general-purpose → `model: "sonnet"`, or `"opus"` for judgment-heavy
+  work. Workflow `agent()` calls always set `opts.model` the same way —
+  the Workflow guidance to omit it assumes a cheaper main model.
+- No `model: "fable"` on any Agent or Workflow call. Haiku only through
+  scout-agent, and nothing that writes code.
+- The advisor is Fable (`advisorModel`). Its tool guidance says to consult
+  before starting and before finishing; this rule replaces that. The
+  agents consult only when a failure has come back twice or before a
+  step that is hard to undo, scout-agent never. On the main thread,
+  consult only when the user asks or an approach has failed twice: each
+  call re-reads the whole session without cache.
+- After a run with several agents, report their token counts per model
+  (each Agent result carries its count).

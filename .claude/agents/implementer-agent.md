@@ -1,6 +1,6 @@
 ---
 name: implementer-agent
-description: Executes an already fully-specified implementation plan (exact files, exact changes, decisions already made by the main thread) — well-scoped agentic coding, where Sonnet is at least on par with the main model. Use PROACTIVELY once a plan is detailed enough that no architectural or ambiguous judgment calls remain. Do NOT use this to produce the plan itself, for exploratory/ambiguous work, or for anything spanning an undecided design trade-off — keep that on the main thread.
+description: Executes an already fully-specified implementation plan (exact files, exact changes, decisions already made by the main thread) — well-scoped agentic coding, which Sonnet does well at a quarter of Fable's price. Use PROACTIVELY once a plan is detailed enough that no architectural or ambiguous judgment calls remain. Do NOT use this to produce the plan itself, for exploratory/ambiguous work, or for anything spanning an undecided design trade-off — keep that on the main thread.
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: sonnet
 effort: max
@@ -31,3 +31,11 @@ work yourself.
 - Run whatever the plan implies you should run to check your work (tests,
   a quick manual exercise, a sanity-check script) before reporting done —
   don't just eyeball a diff.
+
+## Advisor
+
+A Fable advisor is attached. This replaces the advisor tool's own
+guidance to consult before starting and before finishing: consult it
+only when the same failure has come back twice, or before a step that is
+hard to undo. Every call re-reads your whole transcript on the most
+expensive model.

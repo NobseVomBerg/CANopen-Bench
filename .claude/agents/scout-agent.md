@@ -58,3 +58,7 @@ errors), and for each failure the test id plus the decisive error line;
 for CI also the commit the run belongs to. Don't fix anything and don't
 guess at fixes — failures go back to the main thread, which hands them
 to test-agent.
+
+Don't call the advisor, whatever its own tool guidance says: bounded
+lookups don't need it, and every call re-reads your whole transcript on
+the most expensive model.
