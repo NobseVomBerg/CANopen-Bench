@@ -4171,14 +4171,9 @@ class Bench:
 
     async def _swdl_step(self, val: dict, node: int, regs: dict, builtins: dict,
                          should_stop) -> tuple[str, str]:
-        """``swdl``: one firmware download to one device, waited for.
-
-        The download machinery works on what the SWDL page has selected, so
-        the step selects its own device and file for the length of the
-        download and puts the page's choice back afterwards. A download
-        counts as done when the strategy says "done" for that device, not
-        when no error arrived: one whose task died leaves no error behind.
-        """
+        """``swdl``: one firmware download to one device, waited for — the
+        file and the device are resolved here, the download is
+        ``_swdl_download``'s."""
         file = _input_file(val["file"], builtins)
         if not self._fw_file(file):
             return "fail", (f"swdl: {file or val['file']} is not a firmware file in the "
@@ -4190,14 +4185,22 @@ class Bench:
         if dev is None:
             return "fail", (f"swdl: no device on node {n} — scan first" if n else
                             "swdl: which device? Name a node, or scan a bus with exactly one")
+        return await self._swdl_download(file, [n], val.get("mode", "sdo"), should_stop)
+
+    async def _swdl_download(self, file: str, nodes: list[int], mode: str,
+                             should_stop) -> tuple[str, str]:
+        """One download of ``file`` to these devices — one after another by
+        SDO, all at once by PDO — waited for, with the page's own selection
+        put back afterwards. The ``swdl`` step and the MCP tool both end
+        here; the devices are known to be on the bus."""
         if self.swdl_run:
             return "error", "swdl: a download is already running"
         if self.adapter != "demo" and isinstance(self._swdl, SimSwdlStrategy):
             return "error", "swdl: no vendor download protocol installed"
         kept = ({d["node"]: d["sel"] for d in self.devices}, self.fw_sel, self.swdl_mode)
         for d in self.devices:
-            d["sel"] = d is dev
-        self.fw_sel, self.swdl_mode = file, val.get("mode", "sdo")
+            d["sel"] = d["node"] in nodes
+        self.fw_sel, self.swdl_mode = file, mode
         stopping = False
         try:
             self._swdl.start(self)
@@ -4214,13 +4217,17 @@ class Bench:
             for d in self.devices:
                 d["sel"] = sel.get(d["node"], False)
             self._changed()
-        err = self.swdl_err.get(n)
         if stopping:
+            said = "; ".join(e for n in nodes if (e := self.swdl_err.get(n)))
             return "error", ("connection lost" if not self.connected else "aborted") + (
-                f" — {err}" if err else "")
-        if err or self.swdl_phase.get(n) != "done":
-            return "fail", f"swdl {file} node {n:02d}: {err or 'did not finish'}"
-        return "ok", f"{file} on node {n:02d}"
+                f" — {said}" if said else "")
+        # each device on its own: "done" from the strategy, not the absence of an error —
+        # a download whose task died leaves no error behind
+        bad = [n for n in nodes if self.swdl_err.get(n) or self.swdl_phase.get(n) != "done"]
+        if bad:
+            return "fail", f"swdl {file} " + "; ".join(
+                f"node {n:02d}: {self.swdl_err.get(n) or 'did not finish'}" for n in bad)
+        return "ok", f"{file} on " + ", ".join(f"node {n:02d}" for n in nodes)
 
     def act_demo_press(self, p: dict) -> None:
         """Demo mode only: simulate the operator pressing a device button."""

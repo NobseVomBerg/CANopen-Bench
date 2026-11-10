@@ -48,7 +48,7 @@ Another port or host: the URL is the bench's address plus `/mcp`.
 | `psu` | Set voltage/current, switch the output, read the supply |
 | `tests_list`, `testcase_check` | The test cases in the TestCases folder; a draft checked by the bench's own parser |
 | `tests_run`, `tests_status`, `tests_stop`, `tests_answer` | Run cases on a device, follow the run, answer a case's question to the operator |
-| `firmware_list`, `swdl` | The firmware library; a download to one device |
+| `firmware_list`, `swdl` | The firmware library; a download to one or more devices in one run, by the transfer the installed download prefers unless one is named |
 | `trace`, `trace_timing`, `trace_clear` | Frames from the trace, filtered; how regularly a COB-ID arrives (heartbeats, cyclic PDOs) and which frames came late |
 | `bench_action` | Any page action by name, for what no tool covers |
 

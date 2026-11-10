@@ -160,8 +160,20 @@ def _run_status(b) -> dict:
     return out
 
 
+def _preferred(b) -> str:
+    """The transfer the installed download runs when nobody names one."""
+    return getattr(b._swdl, "preferred_mode", "sdo")
+
+
+def _swdl_nodes(b, nodes) -> dict:
+    return {"nodes": {str(n): {"progress": round(b.swdl_prog.get(n, 0)), "phase": b.swdl_phase.get(n, ""),
+                               **({"error": b.swdl_err[n]} if n in b.swdl_err else {})} for n in nodes}}
+
+
 def _swdl_status(b) -> dict:
-    return {"running": b.swdl_run, "file": b.fw_sel, "mode": b.swdl_mode,
+    # the page's mode is what its own Start button uses; the tool goes by preferred_mode
+    return {"running": b.swdl_run, "file": b.fw_sel, "page_mode": b.swdl_mode,
+            "preferred_mode": _preferred(b),
             "progress": {str(k): round(v) for k, v in b.swdl_prog.items()},
             "phase": {str(k): v for k, v in b.swdl_phase.items()},
             "error": {str(k): v for k, v in b.swdl_err.items()}}
@@ -400,12 +412,20 @@ def firmware_list(b, a):
 
 async def swdl(b, a):
     _connected(b)
-    node = _device(b, a["node"])["node"]
+    asked = a.get("nodes") or ([a["node"]] if a.get("node") is not None else [])
+    if not asked:
+        raise ValueError("which devices? Name them in nodes")
+    nodes = list(dict.fromkeys(_device(b, n)["node"] for n in asked))
+    file = str(a["file"])
+    if not b._fw_file(file):
+        raise ValueError(f"{file} is not a firmware file in the library that an installed extension "
+                         "knows — see firmware_list")
     if b.swdl_run:
         raise ValueError("a download is already running — bench_status shows it")
-    task = asyncio.ensure_future(b._swdl_step(
-        {"file": str(a["file"]), "node": node, "mode": a.get("mode") or "sdo"},
-        node, {}, {}, lambda: False))
+    mode = a.get("mode") or _preferred(b)
+    if mode not in ("sdo", "pdo"):
+        raise ValueError("mode is sdo or pdo")
+    task = asyncio.ensure_future(b._swdl_download(file, nodes, mode, lambda: False))
     b._tasks.add(task)
 
     def said(t: asyncio.Task) -> None:
@@ -417,8 +437,8 @@ async def swdl(b, a):
     await asyncio.wait({task}, timeout=max(0.5, min(float(a.get("wait_s") or 0), 600.0)))
     if task.done():
         status, why = task.result()
-        return {"status": status, "detail": why}
-    return {"status": "running", **_swdl_status(b)}
+        return {"status": status, "detail": why, "mode": mode, **_swdl_nodes(b, nodes)}
+    return {"status": "running", "mode": mode, **_swdl_nodes(b, nodes)}
 
 
 def trace(b, a):
@@ -520,9 +540,14 @@ TOOLS = [
             {"choice": {"type": "string", "enum": ["ok", "no", "cancel"]},
              "value": {"type": "string"}}, ("choice",)),
     McpTool("firmware_list", "Firmware files in the bench's library.", firmware_list, read_only=True),
-    McpTool("swdl", "Download a firmware file from the library to one device.", swdl,
-            {"node": _NODE, "file": {"type": "string", "description": "from firmware_list"},
-             "mode": {"type": "string", "enum": ["sdo", "pdo"]}, **_WAIT}, ("node", "file")),
+    McpTool("swdl", "Download a firmware file from the library to one or more devices in one run. "
+            "pdo sends to all of them at once, sdo to one after another. Leave mode out unless the "
+            "user names one: the installed download's preferred transfer is used "
+            "(bench_status: swdl.preferred_mode).", swdl,
+            {"nodes": {"type": "array", "items": {"type": "integer"}, "description": "node-IDs"},
+             "node": _NODE | {"description": "a single node-ID, instead of nodes"},
+             "file": {"type": "string", "description": "from firmware_list"},
+             "mode": {"type": "string", "enum": ["pdo", "sdo"]}, **_WAIT}, ("file",)),
     McpTool("trace", "Frames from the bus trace (or the capture open on the page), oldest first. "
             'A boot-up is a heartbeat frame (0x700+node) with data "00".',
             trace, {**_FILTER, "limit": {"type": "integer", "description": "newest N, default 100"}},

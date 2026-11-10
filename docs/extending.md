@@ -311,6 +311,12 @@ least time between two frames that the sending thread keeps exactly, for
 a receiver that cannot take them back to back. It returns how many went
 out.
 
+Which of the two a run uses is `bench.swdl_mode`, "sdo" or "pdo". A
+strategy names the one it would rather run in its class attribute
+**`preferred_mode`** (default "sdo"). The MCP endpoint's `swdl` tool uses
+it whenever the assistant names no mode; the page and the test-case step
+keep their own default.
+
 ## Minimal example
 
 A plugin that adds one trace decoder and one custom step type:

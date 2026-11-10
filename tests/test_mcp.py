@@ -14,7 +14,7 @@ from canopen_bench.bus.interface import SdoResult
 from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.eds_od import ObjectInfo
-from canopen_bench.plugin import BenchPlugin, McpTool
+from canopen_bench.plugin import BenchPlugin, McpTool, SwdlStrategy
 
 PASS_TC = """\
 id: "0001"
@@ -177,3 +177,81 @@ def test_http_answers_json_and_turns_away_a_foreign_origin(tmp_path):
         assert client.get("/mcp").status_code == 405
         assert client.post("/mcp", json=init, headers={"Origin": "https://evil.example"}).status_code == 403
         assert client.post("/mcp", json=init, headers={"Origin": "http://localhost:8000"}).status_code == 200
+
+
+# -- firmware download: several devices in one run, the strategy's own transfer --------
+
+class _InstantSwdl(SwdlStrategy):
+    """Done one loop turn after the start; ``fail`` names nodes that end with an error."""
+
+    name = "instant"
+    preferred_mode = "pdo"
+
+    def __init__(self):
+        self.runs, self.fail = [], {}
+
+    def start(self, b) -> None:
+        b.swdl_run, b.swdl_done, b.swdl_prog, b.swdl_phase, b.swdl_err = True, False, {}, {}, {}
+        nodes = [d["node"] for d in b.sel_devices]
+        self.runs.append((b.fw_sel, nodes, b.swdl_mode))
+
+        async def run():
+            await asyncio.sleep(0.05)
+            for n in nodes:
+                if n in self.fail:
+                    b.swdl_err[n] = self.fail[n]
+                else:
+                    b.swdl_prog[n], b.swdl_phase[n] = 100, "done"
+            b.swdl_run, b.swdl_done = False, True
+        b.spawn(run())
+
+
+class _Firmware(BenchPlugin):
+    name = "fw"
+
+    def __init__(self):
+        self.strategy = _InstantSwdl()
+
+    def describe_firmware(self, path):
+        return {"ver": path.stem} if path.suffix == ".bin" else None
+
+    def swdl_strategy(self):
+        return self.strategy
+
+
+@pytest.fixture
+def fw_bench(tmp_path):
+    b = Bench(Db(tmp_path / "fw.db"), plugins=[_Firmware()])
+    write_seed_eds_files(b)
+    connect_and_scan(b)
+    folder = tmp_path / "fw"
+    folder.mkdir()
+    (folder / "board_2.bin").write_bytes(b"image")
+    b.dispatch("set_path", {"which": "fw", "value": str(folder)})
+    return b
+
+
+def test_swdl_takes_several_devices_in_one_run_by_the_strategys_own_transfer(fw_bench):
+    strategy = fw_bench.plugins[0].strategy
+    nodes = [d["node"] for d in fw_bench.devices][:2]
+    fw_bench.devices[-1]["sel"], page_mode = True, fw_bench.swdl_mode
+    got, failed = call(fw_bench, "swdl", nodes=nodes, file="board_2.bin", wait_s=5)
+    assert not failed and got["status"] == "ok" and got["mode"] == "pdo"
+    assert strategy.runs == [("board_2.bin", nodes, "pdo")]       # one run, both devices
+    assert [d["sel"] for d in fw_bench.devices] == [False] * (len(fw_bench.devices) - 1) + [True]
+    assert fw_bench.swdl_mode == page_mode
+    status, _ = call(fw_bench, "bench_status")
+    assert status["swdl"]["preferred_mode"] == "pdo"
+
+
+def test_swdl_runs_sdo_when_asked_and_names_the_device_that_failed(fw_bench):
+    strategy = fw_bench.plugins[0].strategy
+    n1, n2 = (d["node"] for d in fw_bench.devices[:2])
+    strategy.fail = {n2: "header rejected"}
+    got, failed = call(fw_bench, "swdl", nodes=[n1, n2], file="board_2.bin", mode="sdo", wait_s=5)
+    assert strategy.runs[-1][2] == "sdo"
+    assert got["status"] == "fail" and f"node {n2:02d}: header rejected" in got["detail"]
+    assert f"node {n1:02d}" not in got["detail"]
+    assert got["nodes"][str(n2)]["error"] == "header rejected"
+    one, _ = call(fw_bench, "swdl", node=n1, file="board_2.bin", wait_s=5)
+    assert one["status"] == "ok" and strategy.runs[-1][1] == [n1]
