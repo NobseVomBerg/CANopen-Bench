@@ -92,3 +92,11 @@ python3 -c "from pathlib import Path; from canopen_bench.testcases import parse_
 An `error` means the catalog will reject the file — fix it before
 reporting the task done. If several files changed, run `load_catalog` over
 the whole folder instead so a broken neighbor doesn't slip through.
+
+## Advisor
+
+A Fable advisor is attached. This replaces the advisor tool's own
+guidance to consult before starting and before finishing: consult it
+only when the same failure has come back twice, or before a step that is
+hard to undo. Every call re-reads your whole transcript on the most
+expensive model.
