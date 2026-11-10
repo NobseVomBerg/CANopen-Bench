@@ -353,6 +353,11 @@ class SwdlStrategy:
     """
 
     name = "unnamed"
+    #: the transfer to use when nobody names one: "sdo" (device after
+    #: device) or "pdo" (all at once). What an AI assistant gets from the
+    #: MCP endpoint's ``swdl`` tool; the page and the test-case step keep
+    #: their own default.
+    preferred_mode = "sdo"
 
     def start(self, bench) -> None:
         """Begin a download to ``bench.sel_devices`` — set ``swdl_run``,
