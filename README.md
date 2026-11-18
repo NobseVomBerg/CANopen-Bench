@@ -188,7 +188,7 @@ has been exercised, not what is warranted.
 | PCAN-USB | PCANBasic | wired up, never run — no such adapter here |
 | Vector VN1600 (VN1610/VN1630) | XL driver (Windows) | run against a VN1630 |
 | CPC-USB/ARM7 | `cob-cpcusb` over pyusb/libusb (Windows: WinUSB via Zadig) | comes with the install; tested against a simulated USB device |
-| SocketCAN (Linux): PCAN-USB, Kvaser, candleLight/CANable, CPC-USB, … | the kernel's own (`peak_usb`, `kvaser_usb`, `gs_usb`, `ems_usb`) | run against a virtual `vcan` interface in CI, never against a device |
+| SocketCAN (Linux): PCAN-USB, Kvaser, candleLight/CANable, CPC-USB, … | the kernel's own (`peak_usb`, `kvaser_usb`, `gs_usb`, `ems_usb`) | connects with a CPC-USB (`ems_usb`), from a container too — nothing else was on that bus, so no frame has gone either way on a device yet; CI runs it against a virtual `vcan` |
 | Demo mode | — | no hardware, EDS-driven simulation |
 | other adapters | via plugin packages | separate install |
 
@@ -256,13 +256,16 @@ and those the host's kernel drives:
   ```
 
   That reaches a PCAN-USB, Kvaser, candleLight/CANable or CPC-USB without
-  a driver in the image. Not yet tried with a device.
+  a driver in the image. Tried with a CPC-USB: the bench connects at
+  500 kbit/s on `can0`. Nothing else was on that bus, so no frame has
+  gone either way yet.
 - **CPC-USB** on a Linux host: either through SocketCAN, above, with the
   kernel's `ems_usb` left loaded — or `--device=/dev/bus/usb` hands the
   USB bus in for the bench's own driver, libusb is in the image. For that
   one `ems_usb` has to let go of the device: `sudo modprobe -r ems_usb`
   frees it until the next replug, a line `blacklist ems_usb` in
-  `/etc/modprobe.d/` for good. Neither way tried in a container yet.
+  `/etc/modprobe.d/` for good. The SocketCAN way connects from a
+  container; the `--device` way has not been tried in one yet.
 - **PCAN**: PCANBasic is not in the image, but on a Linux host the
   kernel's `peak_usb` makes the adapter `can0` — use SocketCAN.
 - **IXXAT, Vector**: their drivers are not in the image and exist only
