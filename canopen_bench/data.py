@@ -163,9 +163,11 @@ ADAPTERS = [
      "conn": "Vector connected", "foot": "Vector VN1600", "iface": "VECTOR",
      "driver": "driver: XL driver via python-can", "full": "Vector VN1610/VN1630"},
     # Every adapter the Linux kernel drives as a network interface: PCAN-USB,
-    # Kvaser, candleLight/CANable, CPC-USB (bus/socketcan.py). Run against
-    # vcan only, never a device — hence "untested". Linux only ("os").
-    {"key": "socketcan", "label": "SocketCAN", "sub": "Linux · untested on hardware",
+    # Kvaser, candleLight/CANable, CPC-USB (bus/socketcan.py). CI runs it
+    # against vcan; on a device it has connected — a CPC-USB through
+    # ems_usb, with nothing else on the bus, so no frame went either way —
+    # and the card says that much and no more. Linux only ("os").
+    {"key": "socketcan", "label": "SocketCAN", "sub": "Linux · CPC-USB connects",
      "conn": "SocketCAN connected", "foot": "SocketCAN", "iface": "SOCKETCAN",
      "driver": "driver: kernel via python-can", "full": "SocketCAN", "os": "linux"},
     {"key": "demo", "label": "Demo mode", "sub": "virtual DUTs from EDS",
