@@ -255,3 +255,15 @@ def test_swdl_runs_sdo_when_asked_and_names_the_device_that_failed(fw_bench):
     assert got["nodes"][str(n2)]["error"] == "header rejected"
     one, _ = call(fw_bench, "swdl", node=n1, file="board_2.bin", wait_s=5)
     assert one["status"] == "ok" and strategy.runs[-1][1] == [n1]
+
+
+def test_the_405_on_a_get_is_followed_by_a_line_saying_it_is_expected(tmp_path, caplog):
+    """An MCP client's GET is answered 405 by design, and on the console
+    uvicorn's access line for it reads like an error. The line after it
+    says otherwise, on the logger a console started by hand shows."""
+    app = create_app(db_path=str(tmp_path / "x.db"))
+    with TestClient(app) as client, caplog.at_level("INFO", logger="uvicorn.error"):
+        assert client.get("/mcp").status_code == 405
+        assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code == 200
+    notes = [r.getMessage() for r in caplog.records if r.name == "uvicorn.error"]
+    assert len(notes) == 1 and "405 on /mcp" in notes[0] and "expected" in notes[0]

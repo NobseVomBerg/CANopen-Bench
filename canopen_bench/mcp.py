@@ -20,12 +20,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
 import statistics
 import time
 from datetime import datetime
 from urllib.parse import urlsplit
 
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -641,7 +643,17 @@ def endpoint(bench_of):
             # a web page elsewhere must not drive the bench through the visitor's browser
             return JSONResponse(_error(None, -32600, "origin not allowed"), status_code=403)
         if request.method != "POST":
-            return Response(status_code=405, headers={"Allow": "POST"})
+            # An MCP client asks with a GET whether the server keeps a stream
+            # open for messages of its own; this one does not, and 405 is the
+            # answer the protocol has for that. On a console it reads like an
+            # error all the same, so the line after it says it is none — as
+            # a background task, which runs once the access line is out, and
+            # on uvicorn's logger, the one that console shows at INFO.
+            note = BackgroundTask(
+                logging.getLogger("uvicorn.error").info,
+                "the 405 on /mcp above is expected: an AI assistant connecting "
+                "asks for a message stream this server does not offer, and carries on")
+            return Response(status_code=405, headers={"Allow": "POST"}, background=note)
         try:
             body = await request.json()
         except ValueError:
