@@ -193,5 +193,7 @@ development; the version counts from here.
   backend, in a container too (`--network host`). The OS owns the
   bitrate there and python-can ignores the one it is handed, so connect
   reads the interface's back and refuses a mismatch, a down or a missing
-  interface, with the `ip` line that fixes it. Run against `vcan` in CI,
-  never against a device; the image carries `iproute2` for it
+  interface, with the `ip` line that fixes it. Run against `vcan` in CI;
+  on a device it has connected, from a container, with a CPC-USB through
+  `ems_usb` — nothing else was on that bus, so no frame has gone either
+  way yet. The image carries `iproute2` for it
