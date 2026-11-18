@@ -30,7 +30,9 @@ development; the version counts from here.
   Setup, Objects, Trace, Tests, Machine Control pages
 - MCP server at `/mcp` for AI assistants (Claude Code, GitHub Copilot):
   devices, supply, test runs, firmware download and the trace as tools
-  that describe themselves; plugins add their own (`docs/mcp.md`)
+  that describe themselves; plugins add their own (`docs/mcp.md`). A client's
+  `GET /mcp` is answered 405 by design, which on a console looks like an
+  error; the line after it now says it is expected
 - Hardware backends via python-can: IXXAT VCI4 (the adapter this was
   built on), PCAN (wired up, never run against a device here) and
   CPC-USB — plus a hardware-free demo mode that simulates devices from
