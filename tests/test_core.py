@@ -3498,7 +3498,7 @@ def test_catalog_says_which_cases_need_the_device_picked_in_the_devices_box(benc
     (tc_dir / "TC0001_picked.yaml").write_text(
         'id: "0001"\nname: "picked"\nsteps:\n  - log: "hi"\n')
     (tc_dir / "TC0002_by_code.yaml").write_text(
-        'id: "0002"\nname: "by code"\ndut:\n  code: "EFS2"\nsteps:\n  - log: "hi"\n')
+        'id: "0002"\nname: "by code"\ndut:\n  code: "D28"\nsteps:\n  - log: "hi"\n')
     bench.dispatch("set_path", {"which": "tc", "value": str(tc_dir)})
 
     rows = {r[0]: r[9] for r in bench.snapshot()["tests"]["catalog"]}
