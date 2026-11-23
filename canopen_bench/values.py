@@ -333,18 +333,32 @@ def parse_value(text: str, fields: list[Field], symbols) -> int:
             f'"{raw}" is neither a number nor a known symbol') from None
 
 
+def _ambiguous(name: str, symbols) -> bool:
+    return ":" not in name and name in getattr(symbols, "ambiguous", {})
+
+
 def _resolve_symbol(name: str, fields: list[Field], symbols) -> int:
     """A full symbol name, or a short one that is unambiguous within the
     tables this object actually uses — typing ``Run`` instead of
     ``eMode_Run`` is the point of having tables at all."""
     try:
         return symbols.value(name)
-    except Exception:
-        pass
+    except Exception as exc:
+        # a name two directories define differently is not one to look up
+        # some other way: the table below holds whichever of them was read
+        # last, and would hand that one over without a word
+        if _ambiguous(name, symbols):
+            raise ValueError_(str(exc)) from None
     matches = {sym.name: sym.value
                for field in fields
                for sym in symbols.tables.get(field.table, {}).values()
                if sym.name == name or sym.name.split("_", 1)[-1] == name}
+    for full in matches:
+        if _ambiguous(full, symbols):
+            try:
+                symbols.value(full)
+            except Exception as exc:  # says where, and how to qualify it
+                raise ValueError_(str(exc)) from None
     if len(set(matches.values())) == 1:
         return next(iter(matches.values()))
     if matches:

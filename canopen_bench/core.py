@@ -1055,14 +1055,19 @@ class Bench:
         # whose rows cannot be read adds nothing here — _seed_plugin_rows
         # says so, and is the one place that does.
         self._eds_owner: dict[str, str] = {}
+        # a family by naming rows, not by winning one: a plugin whose every
+        # file another plugin named first owns no device, and is still not
+        # one that speaks for everybody's
+        self._family_plugins: set[str] = set()
         for p in self.plugins:
             try:
                 files = [e["file"] for e in p.seed_eds()]
             except Exception:
                 continue
+            if files:
+                self._family_plugins.add(p.name)
             for file in files:
                 self._eds_owner.setdefault(file, p.name)
-        self._family_plugins = set(self._eds_owner.values())
         #: which plugin ships which test case and flow, by file name — the
         #: headers such a file is read against are that plugin's own
         #: (_symbols_for_file). Filled by the seeding, which is where a
@@ -1409,8 +1414,6 @@ class Bench:
         self.obj_view: str = db.get("obj_view", "table")
         self.panel_open: dict[str, bool] = db.get("panel_open", {})
         self.panel_busy = False  # a box- or page-wide read is walking the objects
-        self.symbols_dir = db.path.parent / "symbols"
-        self.symbols: SymbolTables = self._load_symbols()
         # the test-case, results and firmware folders are the workspace's own
         # subfolders, computed rather than stored so a copied or moved
         # workspace keeps pointing at its own copy. Folders elsewhere are a
@@ -7976,7 +7979,8 @@ class Bench:
             if origin in installed:
                 continue
             clashes = sum(1 for syms in tables.ambiguous.values()
-                          if any(sym.origin == origin for sym in syms))
+                          if any(sym.origin == origin for sym in syms)
+                          and any(sym.origin != origin for sym in syms))
             if clashes:
                 self.log(f"SYM  symbols/{origin} belongs to no installed plugin and defines "
                          f"{clashes} name(s) differently from another directory — an installed "

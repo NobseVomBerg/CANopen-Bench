@@ -268,3 +268,38 @@ def test_a_lane_with_nothing_in_it_says_so(syms):
     lane = Field("eMode", mask=0x0F)
     assert describe(0x00, [lane], syms) == "none"
     assert describe(0x07, [lane], syms) == "?0x7"
+
+
+# -- a name two directories define differently -----------------------------
+
+@pytest.fixture
+def two_origins(tmp_path):
+    for origin, on in (("acme", 1), ("borg", 5)):
+        folder = tmp_path / origin
+        folder.mkdir()
+        (folder / "lamp.h").write_text(
+            f"typedef enum eLamp {{ eLamp_Off = 0, eLamp_On = {on} }} eLamp;\n")
+    return load_symbols([("acme", tmp_path / "acme"), ("borg", tmp_path / "borg")])
+
+
+@pytest.mark.parametrize("typed", ["eLamp_On", "On"])
+def test_a_name_two_directories_disagree_on_is_refused_not_picked(two_origins, typed):
+    """The merged table holds whichever of the two was read last. Typed
+    into a field of a device nobody owns, the name used to come back as
+    that one's number without a word — full or short."""
+    with pytest.raises(ValueError, match="qualify it as <origin>:eLamp_On"):
+        parse_value(typed, [Field("eLamp")], two_origins)
+
+
+def test_the_qualified_name_and_the_agreed_one_still_resolve(two_origins):
+    fields = [Field("eLamp")]
+    assert parse_value("acme:eLamp_On", fields, two_origins) == 1
+    assert parse_value("borg:eLamp_On", fields, two_origins) == 5
+    assert parse_value("Off", fields, two_origins) == 0
+
+
+def test_a_family_reads_its_own_number_for_the_same_name(two_origins):
+    fields = [Field("eLamp")]
+    assert parse_value("On", fields, two_origins.scoped("acme")) == 1
+    assert parse_value("eLamp_On", fields, two_origins.scoped("borg")) == 5
+

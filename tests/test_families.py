@@ -995,9 +995,6 @@ def test_a_plugin_whose_rows_cannot_be_read_owns_no_device_and_stops_no_other(tm
     assert sum("no rows today" in row["msg"] for row in bench.logs) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="Bench.__init__ builds _family_plugins from the owners of "
-                   "the EDS files, so a plugin whose every row another plugin already owns is not "
-                   "a family at all — it speaks for every device, the other family's included")
 def test_a_plugin_naming_a_file_another_already_owns_is_still_a_family(tmp_path):
     """The first plugin to name a file owns it. A second one names rows too,
     which is what makes a plugin a family — one with no device of its own
@@ -1108,9 +1105,6 @@ def test_a_directory_no_plugin_owns_which_contradicts_another_is_said_once_per_l
     assert "legacy:NAME" in line, "and the way through"
 
 
-@pytest.mark.xfail(strict=True, reason="Bench.__init__ loads the symbol tables twice (core.py: "
-                   "`self.symbols = self._load_symbols()` at the top and again before the test "
-                   "cases), so every SYM line — this one too — is in the log twice after a start")
 def test_a_directory_no_plugin_owns_which_contradicts_another_is_said_once_at_the_start(tmp_path):
     assert len(_orphan_lines(_with_leftover(tmp_path, LEGACY_H, scan=False))) == 1
 
