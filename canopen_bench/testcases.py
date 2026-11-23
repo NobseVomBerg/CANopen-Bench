@@ -677,10 +677,18 @@ def parse_testcase(text: str, filename: str, require_prefix: bool = True,
 
 
 def load_catalog(folder: str | Path, extensions: dict | None = None,
-                 symbols=None) -> list[TestCase]:
+                 symbols=None, symbols_for=None) -> list[TestCase]:
     """All TC*.yaml files in the folder, sorted by filename. Unreadable or
     invalid files come back as entries with .error set (shown in the
-    catalog, not runnable) instead of vanishing silently."""
+    catalog, not runnable) instead of vanishing silently.
+
+    ``symbols`` resolves every file's ``$Symbol`` references.
+    ``symbols_for``, when given, takes its place per file: it is called
+    with the file's name and answers with the tables that file is read
+    against. A case shipped by a device family's plugin is written against
+    that family's headers, and has to keep loading when another family
+    defines the same names — one set of tables for the whole folder cannot
+    say that."""
     out: list[TestCase] = []
     try:
         files = sorted(p for p in Path(folder).iterdir()
@@ -690,7 +698,7 @@ def load_catalog(folder: str | Path, extensions: dict | None = None,
     for p in files:
         try:
             tc = parse_testcase(p.read_text(encoding="utf-8"), p.name,
-                                symbols=symbols,
+                                symbols=symbols_for(p.name) if symbols_for else symbols,
                                 extensions=extensions)
         except OSError as exc:
             tc = TestCase(file=p.name, error=str(exc))

@@ -15,6 +15,13 @@ constant expressions over symbols already parsed. Anything else is
 reported, never guessed: a table that is subtly wrong is worse than no
 table, because it makes the bench write to the wrong object and then
 blame the device.
+
+Every symbol is kept twice: in the bench-wide tables, where two origins
+that disagree about a name make it ambiguous, and under the origin it was
+read from. The second is what two device families in one bench need — each
+has its own ``eObjIdx`` with other values — and ``SymbolTables.scoped``
+builds the first kind of table out of it, as one origin's own headers read
+it.
 """
 from __future__ import annotations
 
@@ -61,6 +68,10 @@ class SymbolTables:
     a name defined twice with different values is dropped from the bare
     index and stays reachable only as ``origin:NAME`` — quietly picking one
     of two definitions is how a bench ends up writing to the wrong object.
+
+    These are the bench-wide tables: every origin merged, which is the
+    right answer for what belongs to no origin in particular. What belongs
+    to one — a plugin's own hooks, test cases and devices — asks ``scoped``.
     """
 
     by_name: dict[str, Symbol] = field(default_factory=dict)
@@ -72,6 +83,13 @@ class SymbolTables:
     descriptions: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     ambiguous: dict[str, list[Symbol]] = field(default_factory=dict)
+    #: origin -> every symbol it defines, in the order read. The merge above
+    #: loses who said what, and ``scoped`` needs exactly that.
+    origins: dict[str, list[Symbol]] = field(default_factory=dict, repr=False)
+    #: origin -> table -> its brief, for the same reason as ``origins``
+    briefs: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
+    #: origin -> its scope, built once: asked for per trace frame and per row
+    _scopes: dict[str, SymbolTables] = field(default_factory=dict, repr=False, compare=False)
 
     def value(self, name: str) -> int:
         """Resolve a symbol, optionally qualified as ``origin:NAME``.
@@ -79,6 +97,9 @@ class SymbolTables:
         parse time, not mid-run."""
         origin, _, bare = name.rpartition(":")
         if origin:
+            for sym in self.origins.get(origin, []):
+                if sym.name == bare:
+                    return sym.value
             for sym in self.ambiguous.get(bare, []) + [self.by_name.get(bare)]:
                 if sym is not None and sym.origin == origin:
                     return sym.value
@@ -109,6 +130,85 @@ class SymbolTables:
     def summary(self) -> dict:
         return {"tables": len(self.tables), "symbols": len(self.by_name),
                 "errors": list(self.errors)}
+
+    def scoped(self, origin: str) -> SymbolTables:
+        """The tables as one origin's own headers read them.
+
+        The merged tables are one answer for the whole bench, and with two
+        device families on it that answer suits neither: each has an
+        ``eObjIdx`` and a screen table of its own, the same names with other
+        values, so a name stops resolving bare and a reverse lookup lands in
+        whichever family was read last. A scope is the view the origin would
+        have had alone. Its own definitions win outright, and another
+        origin's symbol is visible only where the own origin defines neither
+        that name nor that symbol's table — the table is the unit, because
+        taking a neighbour's members into a table of the same name is how a
+        dropdown comes to offer choices its device never had.
+
+        It is also what keeps a plugin's own files loading when something
+        else defines the same names: another family, or the directory an
+        uninstalled plugin left behind in the workspace. Read from the merged
+        tables those names are ambiguous, and the plugin's own test cases
+        would stop loading for want of a prefix they were never written
+        with.
+
+        An origin that has no symbols, or a bench with only one origin, has
+        nothing to be told apart from: the merged tables come back as they
+        are.
+        """
+        own = self.origins.get(origin)
+        if not own or len(self.origins) < 2:
+            return self
+        hit = self._scopes.get(origin)
+        if hit is not None:
+            return hit
+        scope = SymbolTables(origins=self.origins, briefs=self.briefs)
+        for sym in own:
+            _add(scope, sym)
+        names = {sym.name for sym in own}
+        defined = {sym.table for sym in own} - {""}   # a #define has no table
+        for other, symbols in self.origins.items():
+            if other == origin:
+                continue
+            for sym in symbols:
+                if sym.name not in names and sym.table not in defined:
+                    _add(scope, sym)
+        for other, briefs in self.briefs.items():
+            if other != origin:
+                scope.descriptions.update(
+                    {table: text for table, text in briefs.items() if table not in defined})
+        scope.descriptions.update(self.briefs.get(origin, {}))
+        self._scopes[origin] = scope
+        return scope
+
+
+def _add(tables: SymbolTables, sym: Symbol) -> None:
+    """One symbol into the merged tables: its enum, and the bare index —
+    where a second, different definition of a name takes it out again.
+
+    A name already refused stays refused. Dropped from the index, it would
+    otherwise be free for a third definition to claim, and the bare name
+    would resolve again — to whichever origin happened to be read last.
+    """
+    if sym.table:
+        tables.tables.setdefault(sym.table, {})[sym.name] = sym
+    listed = tables.ambiguous.get(sym.name)
+    if listed is not None:
+        if all(known.value != sym.value for known in listed):
+            tables.errors.append(
+                f'"{sym.name}" defined as {listed[-1].value} in {listed[-1].source} and '
+                f"{sym.value} in {sym.source} — qualify it as <origin>:{sym.name}")
+        listed.append(sym)
+        return
+    prev = tables.by_name.get(sym.name)
+    if prev is None:
+        tables.by_name[sym.name] = sym
+    elif prev.value != sym.value:
+        tables.ambiguous.setdefault(sym.name, []).extend([prev, sym])
+        del tables.by_name[sym.name]
+        tables.errors.append(
+            f'"{sym.name}" defined as {prev.value} in {prev.source} and '
+            f"{sym.value} in {sym.source} — qualify it as <origin>:{sym.name}")
 
 
 # -- expression evaluation --------------------------------------------------
@@ -287,7 +387,9 @@ def parse_header(text: str, source: str) -> tuple[list[Symbol], list[str]]:
 def load_symbols(dirs: list[tuple[str, Path]]) -> SymbolTables:
     """Parse every ``*.h`` under each (origin, directory). ``origin`` labels
     where a header came from — the plugin name — and qualifies a symbol when
-    two origins disagree about it."""
+    two origins disagree about it. What each origin said is kept as well as
+    the merge (``SymbolTables.origins``), so that ``scoped`` can give it
+    back as that origin reads it."""
     tables = SymbolTables()
     for origin, directory in dirs:
         if not directory.is_dir():
@@ -301,17 +403,10 @@ def load_symbols(dirs: list[tuple[str, Path]]) -> SymbolTables:
                 continue
             symbols, errors = parse_header(text, source)
             tables.errors.extend(errors)
-            tables.descriptions.update(table_briefs(text))
+            briefs = table_briefs(text)
+            tables.descriptions.update(briefs)
+            tables.briefs.setdefault(origin, {}).update(briefs)
             for sym in symbols:
-                if sym.table:
-                    tables.tables.setdefault(sym.table, {})[sym.name] = sym
-                prev = tables.by_name.get(sym.name)
-                if prev is None:
-                    tables.by_name[sym.name] = sym
-                elif prev.value != sym.value:
-                    tables.ambiguous.setdefault(sym.name, []).extend([prev, sym])
-                    del tables.by_name[sym.name]
-                    tables.errors.append(
-                        f'"{sym.name}" defined as {prev.value} in {prev.source} and '
-                        f"{sym.value} in {sym.source} — qualify it as <origin>:{sym.name}")
+                tables.origins.setdefault(origin, []).append(sym)
+                _add(tables, sym)
     return tables

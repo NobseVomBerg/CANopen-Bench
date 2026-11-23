@@ -405,9 +405,24 @@ class BenchPlugin:
         return {}
 
     def seed_eds(self) -> list[dict]:
-        """EDS registry rows ({file, dev, ident, code, enabled}) seeded
-        once into an empty workspace registry — the files themselves are
-        uploaded/copied by the user as usual.
+        """EDS registry rows ({file, dev, ident, code, enabled}), added to
+        the workspace registry on every start where no row names the file
+        yet — a row the operator disabled or edited stays as it is. The
+        files themselves come with ``eds_dirs()``, or are uploaded/copied
+        by the user as usual.
+
+        The rows also say whose devices are whose. A plugin that names rows
+        is a device family, and a device assigned one of its EDS files is
+        its own: what the object table, the panels, a report line and the
+        trace say about it — fields, units, object names, EMCY texts — comes
+        from this plugin, and from the plugins that name no rows (they have
+        no devices of their own, so what they know is about all of them),
+        never from another family's. The two families may well use the same
+        address for different things. The same goes for the symbol tables:
+        a device reads them as this plugin's own headers read them
+        (``Bench.symbols_for``). A device whose EDS no plugin names — one
+        uploaded by hand, the generic base — has no owner, and every plugin
+        answers for it, as it always did.
 
         Two optional keys carry what the EDS panel would otherwise have to
         be told by hand, row by row:
@@ -465,6 +480,13 @@ class BenchPlugin:
         convention that ties a table to an object, a mask that the header
         itself names. That derivation is the plugin's business, not the
         core's — the convention belongs to whoever writes the headers.
+
+        It is the table as this plugin's own headers read it: what they
+        define wins, and a name another plugin defines differently does not
+        become ambiguous for it. Two families that both have an ``eObjIdx``
+        each get their own here. The answer is used for the devices this
+        plugin owns (see ``seed_eds``) and for those nobody owns — another
+        family's devices are described by that family.
         """
         return {}
 
@@ -488,7 +510,8 @@ class BenchPlugin:
 
         ``symbols`` is the parsed symbol table, for a plugin whose
         headers name the scaling factors (``object_fields`` gets it for
-        the same reason).
+        the same reason) — as this plugin's own headers read it, and the
+        answer is used for the same devices (see ``object_fields``).
         """
         return {}
 
@@ -511,7 +534,10 @@ class BenchPlugin:
         the workspace copy, which is the firmware under test rather than
         whatever the plugin was packaged with. Same argument as
         ``object_fields``, and for the same reason: an operator who dropped
-        in newer headers expects the names to follow.
+        in newer headers expects the names to follow. It is the table as
+        this plugin's own headers read it, too (see ``object_fields``), and
+        the name is asked for only on the devices this plugin owns and those
+        nobody owns: another family's device is named by that family.
         """
         return ""
 
