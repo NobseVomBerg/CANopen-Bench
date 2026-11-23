@@ -1046,6 +1046,34 @@ class Bench:
         # descriptions have to follow it rather than a packaged snapshot
         self.symbols_dir = db.path.parent / "symbols"
         self.symbols: SymbolTables = self._load_symbols()
+        # Which plugin a device belongs to: the one whose seed_eds() names
+        # the EDS file the device was assigned — the one thing a device
+        # carries that says what family it is. A plugin that names rows is
+        # a family; one that names none (a general-purpose extension) speaks
+        # for every device. Worked out here, before anything is asked of the
+        # hooks, because every answer below is asked per owner. A plugin
+        # whose rows cannot be read adds nothing here — _seed_plugin_rows
+        # says so, and is the one place that does.
+        self._eds_owner: dict[str, str] = {}
+        # a family by naming rows, not by winning one: a plugin whose every
+        # file another plugin named first owns no device, and is still not
+        # one that speaks for everybody's
+        self._family_plugins: set[str] = set()
+        for p in self.plugins:
+            try:
+                files = [e["file"] for e in p.seed_eds()]
+            except Exception:
+                continue
+            if files:
+                self._family_plugins.add(p.name)
+            for file in files:
+                self._eds_owner.setdefault(file, p.name)
+        #: which plugin ships which test case and flow, by file name — the
+        #: headers such a file is read against are that plugin's own
+        #: (_symbols_for_file). Filled by the seeding, which is where a
+        #: file's origin is known; empty for a file nobody ships.
+        self._tc_owner: dict[str, str] = {}
+        self._flow_owner: dict[str, str] = {}
         self.adapter_cards = ([c for p in self.plugins for c in p.adapters()]
                               + data.adapters_for(sys.platform))
         extra_backends = {key: backend for p in self.plugins
@@ -1079,20 +1107,38 @@ class Bench:
         self._obj_panels = load_panels(
             [path for p in self.plugins for path in p.object_panels()] + [PANEL_DIR],
             log=lambda msg: self.log(msg, "emcy0"))
-        # how to read an object's value symbolically, keyed "0x2007:09"
+        # how to read an object's value symbolically, keyed "0x2007:09".
+        # Each plugin is handed the tables as its own headers read them
+        # (symbols_for), and its answer is kept apart as well as merged:
+        # the merge is what a device nobody owns is shown with, the
+        # separate answers are what a device of one family is shown with
+        # (_fields_for) — two families may well use the same address for
+        # different things, and the later one would win it for both.
         self._object_fields: dict[str, list[Field]] = {}
+        self._plugin_fields: dict[str, dict[str, list[Field]]] = {}
         for p in self.plugins:
-            self._object_fields.update(p.object_fields(self.symbols))
+            fields = p.object_fields(self.symbols_for(p.name))
+            self._object_fields.update(fields)
+            self._plugin_fields.setdefault(p.name, {}).update(fields)
         # and what it means physically — the one thing about an object that
         # no EDS answers, so the only source is the device's documentation
         # by way of a plugin. Same key, and used wherever a value is shown
         self._object_units: dict[str, Quantity] = {}
+        self._plugin_units: dict[str, dict[str, Quantity]] = {}
         for p in self.plugins:
-            self._object_units.update(p.object_units(self.symbols))
+            units = p.object_units(self.symbols_for(p.name))
+            self._object_units.update(units)
+            self._plugin_units.setdefault(p.name, {}).update(units)
         # CiA-301 EMCY texts with vendor codes merged over them (plugin wins)
         self._emcy_codes = dict(data.EMCY_CODES)
+        self._plugin_emcy: dict[str, dict[int, str]] = {}
         for p in self.plugins:
-            self._emcy_codes.update(p.emcy_codes())
+            codes = p.emcy_codes()
+            self._emcy_codes.update(codes)
+            self._plugin_emcy.setdefault(p.name, {}).update(codes)
+        #: the three answers above, merged over the plugins that may speak
+        #: for one owner's devices — (fields, units, EMCY texts), per owner
+        self._owner_cache: dict[str, tuple[dict, dict, dict]] = {}
         # plugin actions are namespaced "<plugin>.<name>" — they can never
         # shadow a core act_* handler
         self._plugin_actions = {f"{p.name}.{name}": fn
@@ -1118,10 +1164,12 @@ class Bench:
         self._catalog_cache: dict[str, tuple[float, tuple[dict, list] | str]] = {}
         #: what the plugins' headers call an address (see _symbol_label).
         #: Asked per trace frame and per table row per tick, and answered
-        #: from the symbol tables alone — so it is worked out once
-        self._sym_labels: dict[tuple[str, str], str] = {}
-        #: manufacturer error codes a plugin has named (_mec_text)
-        self._mec_texts: dict[int, str] = {}
+        #: from the symbol tables alone — so it is worked out once, per
+        #: owner of the device it is asked for: (owner, index, sub)
+        self._sym_labels: dict[tuple[str, str, str], str] = {}
+        #: manufacturer error codes a plugin has named (_mec_text),
+        #: per owner: (owner, code)
+        self._mec_texts: dict[tuple[str, int], str] = {}
         self._ods = OdCache(db.eds_dir)  # object names for the trace interpreter
         # bus backends report a vanished interface (adapter unplugged) from
         # their worker threads; the captured loop gets us back on the loop
@@ -1366,8 +1414,6 @@ class Bench:
         self.obj_view: str = db.get("obj_view", "table")
         self.panel_open: dict[str, bool] = db.get("panel_open", {})
         self.panel_busy = False  # a box- or page-wide read is walking the objects
-        self.symbols_dir = db.path.parent / "symbols"
-        self.symbols: SymbolTables = self._load_symbols()
         # the test-case, results and firmware folders are the workspace's own
         # subfolders, computed rather than stored so a copied or moved
         # workspace keeps pointing at its own copy. Folders elsewhere are a
@@ -2181,37 +2227,160 @@ class Bench:
             # the firmware's own name wins where a plugin can give one: the
             # case was written against the headers, and its author is who
             # this line is for. The EDS name stands in when none can be
-            name = self._label(idx, sub, self._object_label(idx, sub))
+            name = self._label(idx, sub, self._object_label(idx, sub),
+                               self._owner(self._step_node(val, regs, builtins)))
             if name:
                 text += f"  ({name})"
         return text
 
-    def _symbol_label(self, idx: str, sub: str) -> str:
+    def _step_node(self, val: dict, regs: dict | None, builtins: dict | None) -> int | None:
+        """The node a step is about, as far as a progress line can tell:
+        the one it names itself, else the case's device, else None — the
+        selected one.
+
+        A step's own ``node:`` may be a register the case has not filled
+        yet, or ``$node`` with nothing to resolve it against. That is for
+        the run to report when it gets there; the line before it only
+        wants to know whose names to use, and goes on without one.
+        """
+        if "node" in val:
+            try:
+                return _resolve(val["node"], regs or {}, builtins or {})
+            except (ValueError, KeyError, TypeError):
+                pass
+        return builtins.get("node") if builtins else None
+
+    # -- whose knowledge answers for a device ------------------------------
+    def symbols_for(self, plugin: str) -> SymbolTables:
+        """The symbol tables as one plugin's own headers read them.
+
+        What a plugin's own code should ask — its actions, device panels and
+        MCP tools — instead of ``bench.symbols``. Those are every plugin's
+        headers merged, so two device families that both have an
+        ``eObjIdx`` with other values make the name ambiguous there, for
+        both of them; here each reads its own, and what the other family
+        defines is visible only where it does not contradict (see
+        ``SymbolTables.scoped``). A plugin with no headers, and a bench with
+        only one plugin's, get the merged tables back.
+        """
+        return self.symbols.scoped(plugin)
+
+    def _owner(self, node: int | None = None) -> str:
+        """The plugin a device belongs to — the one whose ``seed_eds()``
+        names the EDS file assigned to it — or "" when none does.
+
+        "" does not mean nobody knows: it means every plugin, which is what
+        the bench did before a device had an owner, and still does for one
+        whose EDS no plugin seeded (a file somebody uploaded, the generic
+        base). With no node it is the selected device that is asked about,
+        which is what the object table and a report line are written for.
+        """
+        if node is None:
+            sel = self.sel_devices
+            dev = sel[0] if sel else None
+        else:
+            dev = next((d for d in self.devices if d["node"] == node), None)
+        eds = dev["eds"] if dev is not None else ""
+        return "" if eds in ("", "—") else self._eds_owner.get(eds, "")
+
+    def _plugins_for(self, owner: str) -> list:
+        """The plugins that may speak about one owner's devices: the owner
+        and every plugin that is not a family of its own, in plugin order.
+
+        A plugin that seeds no EDS has no devices to call its own, so what
+        it knows is about all of them. A family's knowledge is about its own
+        devices only: its addresses and its names mean something else on
+        another family's, and answering from them is how a lamp comes to be
+        called after a motor. Owner "" is every plugin, as before.
+        """
+        if not owner:
+            return list(self.plugins)
+        return [p for p in self.plugins
+                if p.name == owner or p.name not in self._family_plugins]
+
+    def _symbols_of(self, owner: str) -> SymbolTables:
+        """The tables a device of this owner is read with: its plugin's view
+        of them (``symbols_for``), the merged ones for no owner."""
+        return self.symbols.scoped(owner) if owner else self.symbols
+
+    def _merged_for(self, owner: str) -> tuple[dict, dict, dict]:
+        """(fields, units, EMCY texts) as the plugins that may speak for one
+        owner's devices gave them — later over earlier, like the merged
+        dicts, with the CiA-301 texts underneath. Built once per owner: the
+        object table asks per row per tick."""
+        hit = self._owner_cache.get(owner)
+        if hit is None:
+            fields: dict[str, list[Field]] = {}
+            units: dict[str, Quantity] = {}
+            codes = dict(data.EMCY_CODES)
+            for p in self._plugins_for(owner):
+                fields.update(self._plugin_fields.get(p.name, {}))
+                units.update(self._plugin_units.get(p.name, {}))
+                codes.update(self._plugin_emcy.get(p.name, {}))
+            hit = self._owner_cache[owner] = (fields, units, codes)
+        return hit
+
+    def _fields_for(self, key: str, owner: str) -> list[Field]:
+        """How the object at ``key`` ("0x2007:09") is read symbolically on a
+        device of this owner. No owner: the merged answer of every plugin."""
+        return (self._merged_for(owner)[0] if owner else self._object_fields).get(key, [])
+
+    def _unit_for(self, key: str, owner: str) -> Quantity | None:
+        """What the object at ``key`` means physically on a device of this
+        owner, or None."""
+        return (self._merged_for(owner)[1] if owner else self._object_units).get(key)
+
+    def _emcy_codes_for(self, owner: str) -> dict[int, str]:
+        """The EMCY texts a device of this owner is explained with: CiA 301,
+        and over it what the plugins that may speak for it say."""
+        return self._merged_for(owner)[2] if owner else self._emcy_codes
+
+    def _symbols_for_file(self, name: str, flow: bool = False) -> SymbolTables:
+        """The tables a test case or flow file is read against: the headers
+        of the plugin that ships a file of that name, the merged ones for a
+        file nobody ships.
+
+        A case a plugin ships was written against that plugin's headers and
+        has to keep loading when another family defines the same names. One
+        nobody ships — somebody's own, in the TestCases folder — belongs to
+        no family, sees every origin, and needs ``$<origin>:NAME`` where two
+        of them disagree. By file name, since that is all the catalog and
+        the flow folder know about where a file came from.
+        """
+        owners = self._flow_owner if flow else self._tc_owner
+        return self._symbols_of(owners.get(Path(name).name, ""))
+
+    def _symbol_label(self, idx: str, sub: str, owner: str = "") -> str:
         """What a plugin's headers call this object, or "" — first answer
         wins, and a plugin that raises is one that does not get to stop a
         run over a label.
+
+        Only the plugins that may speak for the device's owner are asked
+        (``_plugins_for``), each with the tables as its own headers read
+        them: another family's name for the same address is a name for
+        something else.
 
         Memoised, because the answer depends on the loaded symbol tables
         and on nothing else: the trace asks it per frame, and the object
         table per row per tick. ``act_symbols_reload`` empties the memo,
         which is the only thing that can change an answer.
         """
-        hit = self._sym_labels.get((idx, sub))
+        hit = self._sym_labels.get((owner, idx, sub))
         if hit is not None:
             return hit
         found = ""
-        for plugin in self.plugins:
+        for plugin in self._plugins_for(owner):
             try:
-                name = plugin.describe_object(idx, sub, self.symbols)
+                name = plugin.describe_object(idx, sub, self.symbols_for(plugin.name))
             except Exception:
                 continue
             if name:
                 found = name
                 break
-        self._sym_labels[(idx, sub)] = found
+        self._sym_labels[(owner, idx, sub)] = found
         return found
 
-    def _label(self, idx: str, sub: str, eds_name: str = "") -> str:
+    def _label(self, idx: str, sub: str, eds_name: str = "", owner: str = "") -> str:
         """What to call this object, wherever it is shown.
 
         The firmware's own name wins where a plugin can give one, and the
@@ -2224,23 +2393,29 @@ class Bench:
         the signal plot and the trace alike. It used to hold in the
         report only, so the same object answered to two names on one
         screen depending on which box you were looking at.
-        """
-        return self._symbol_label(idx, sub) or eds_name
 
-    def _value_note(self, idx: str, sub: str, value: object, like: object = None) -> str:
+        ``owner`` is whose device it is shown for (``_owner``): the name is
+        the owner's, not that of the first plugin that has one.
+        """
+        return self._symbol_label(idx, sub, owner) or eds_name
+
+    def _value_note(self, idx: str, sub: str, value: object, like: object = None,
+                    node: int | None = None) -> str:
         """A value as the report should show it: what came back, and what
-        it means where the device's own headers say so."""
+        it means where the device's own headers say so — those of the
+        family ``node`` belongs to, not another one's on the same bench."""
         key = f"{idx}:{sub}"
-        fields = self._object_fields.get(key, [])
+        owner = self._owner(node)
+        fields = self._fields_for(key, owner)
         number = _as_int(value)
         if fields and number is not None:
-            meaning = describe(number, fields, self.symbols)
+            meaning = describe(number, fields, self._symbols_of(owner))
             if meaning:
                 return f"{value} — {meaning}"
         # "160 — 16.0 cN". A report is read by somebody who wants to know
         # what the machine did, and 160 is the number the bus carried
         # rather than the quantity anybody set
-        quantity = self._object_units.get(key)
+        quantity = self._unit_for(key, owner)
         if quantity is not None and number is not None:
             info = self._sel_info(idx, sub)
             reading = quantity.with_unit(f"0x{number:X}", info.signed_bits if info else 0)
@@ -2568,7 +2743,8 @@ class Bench:
         obj = f"0x{idx:04X}:{sub:02X}"
         node = cob & 0x7F
         info = self._object_info(node, f"0x{idx:04X}", f"{sub:02X}")
-        name = self._label(f"0x{idx:04X}", f"{sub:02X}", info.name if info else "")
+        name = self._label(f"0x{idx:04X}", f"{sub:02X}", info.name if info else "",
+                           self._owner(node))
         if name:
             obj += f" {name}"
         row["obj"] = obj
@@ -2629,6 +2805,7 @@ class Bench:
         od = self._ods.load(eds)
         if od is None:
             return
+        owner = self._eds_owner.get(eds, "")
         entries = pdo_mapping(od, mapping_index)
         raw = int.from_bytes(payload, "little")
         pos = 0
@@ -2644,7 +2821,7 @@ class Bench:
             # mapping may carry fewer bits of an object than it has
             if info is not None:
                 val = info.signed(val, bits)
-            name = self._label(f"0x{idx:04X}", f"{sub:02X}", info.name if info else "") \
+            name = self._label(f"0x{idx:04X}", f"{sub:02X}", info.name if info else "", owner) \
                 or f"0x{idx:04X}:{sub:02X}"
             decoded.append((name, idx, sub, val))
             if live:
@@ -2660,29 +2837,33 @@ class Bench:
         else:
             row["obj"] = " · ".join(f"{name}={val}" for name, _, _, val in decoded)
 
-    def _emcy_text(self, code: int) -> str:
-        """Resolve an EMCY error code against the merged code table:
-        exact match, then the 0xXX00 class, then the 0xX000 group."""
+    def _emcy_text(self, code: int, owner: str = "") -> str:
+        """Resolve an EMCY error code against the code table of the device's
+        owner (``_emcy_codes_for``): exact match, then the 0xXX00 class,
+        then the 0xX000 group."""
+        codes = self._emcy_codes_for(owner)
         for key in (code, code & 0xFF00, code & 0xF000):
-            if key in self._emcy_codes:
-                return self._emcy_codes[key]
+            if key in codes:
+                return codes[key]
         return "Unknown error code"
 
-    def _mec_text(self, mec: int) -> str:
+    def _mec_text(self, mec: int, owner: str = "") -> str:
         """What the device calls this manufacturer error code, or "".
 
         The five manufacturer bytes of an EMCY are the device's own, and
         the standard says nothing about what is in them — so the frame is
         read here and named there, the same split as an object's address
-        and its name (``describe_object``). Memoised per code: a device
-        raising the same error twice a second would otherwise walk every
-        plugin's table per frame.
+        and its name (``describe_object``). Only the plugins that may speak
+        for the device's owner are asked: a code is a number in one
+        family's table and means something else in the next one's.
+        Memoised per owner and code: a device raising the same error twice
+        a second would otherwise walk every plugin's table per frame.
         """
-        hit = self._mec_texts.get(mec)
+        hit = self._mec_texts.get((owner, mec))
         if hit is not None:
             return hit
         found = ""
-        for plugin in self.plugins:
+        for plugin in self._plugins_for(owner):
             try:
                 name = plugin.emcy_mec_text(mec)
             except Exception:
@@ -2690,7 +2871,7 @@ class Bench:
             if name:
                 found = name
                 break
-        self._mec_texts[mec] = found
+        self._mec_texts[(owner, mec)] = found
         return found
 
     def _annotate_emcy(self, row: dict, live: bool = True) -> None:
@@ -2710,14 +2891,17 @@ class Bench:
         if len(payload) < 3:
             return
         code = payload[0] | (payload[1] << 8)
-        text = self._emcy_text(code)
+        # whose texts: the sender's, where the row says who that is
+        sender = row.get("node")
+        owner = self._owner(sender) if sender is not None else ""
+        text = self._emcy_text(code, owner)
         # the manufacturer field, where the device puts its own error
         # number. Shown only when there is one: five zero bytes are what
         # every frame that has nothing to say there carries, and a "MEC
         # 0x0000" on all of them would be a column of noise
         mfr = payload[3:8]
         if any(mfr):
-            named = self._mec_text(_mec(mfr))
+            named = self._mec_text(_mec(mfr), owner)
             text += f" · MEC 0x{_mec(mfr):04X}" + (f" {named}" if named else "")
         row["obj"] = f"0x{code:04X} {text}"
         reg = f"reg 0x{payload[2]:02X}"
@@ -3162,7 +3346,8 @@ class Bench:
     def _load_testcases(self, log: bool = True) -> None:
         catalog = tclib.load_catalog(self.paths.get("tc", ""),
                                      extensions=self._step_types,
-                                     symbols=self.symbols)
+                                     symbols=self.symbols,
+                                     symbols_for=self._symbols_for_file)
         self.testcases = {tc.id: tc for tc in catalog}
         clashes = _duplicate_ids(catalog)
         for tid, files in clashes.items():
@@ -3819,19 +4004,26 @@ class Bench:
         A case that has stopped shipping is not deleted. The folder is
         also somebody's, and guessing which files in it were once ours is
         exactly the bookkeeping the headers no longer do.
+
+        Which plugin ships which file is remembered (``_tc_owner``): the
+        case is read against that plugin's own headers when the catalog is
+        loaded, and that has to hold on a start that copied nothing as well
+        as on the one that did. The last plugin to ship a name is the one
+        whose copy is in the folder, and is the one remembered.
         """
         folder = Path(self.paths.get("tc") or "")
-        packaged = [d for p in self.plugins for d in p.testcase_dirs()]
+        packaged = [(p.name, Path(d)) for p in self.plugins for d in p.testcase_dirs()]
+        shipped = [(plugin, src) for plugin, src_dir in packaged if src_dir.is_dir()
+                   for src in sorted(src_dir.glob("*.yaml"))]
+        for plugin, src in shipped:
+            self._tc_owner[src.name] = plugin
         if not packaged or not str(folder):
             return
         folder.mkdir(parents=True, exist_ok=True)
-        for src_dir in packaged:
-            if not Path(src_dir).is_dir():
-                continue
-            for src in sorted(Path(src_dir).glob("*.yaml")):
-                dst = folder / src.name
-                if not dst.exists() or dst.read_bytes() != src.read_bytes():
-                    shutil.copy2(src, dst)
+        for _plugin, src in shipped:
+            dst = folder / src.name
+            if not dst.exists() or dst.read_bytes() != src.read_bytes():
+                shutil.copy2(src, dst)
 
     def _seed_default_flows(self) -> None:
         """Workspace flows dir with the shipped procedures — from the core
@@ -3843,16 +4035,19 @@ class Bench:
 
         Which names a plugin brought is remembered: that, and not the name
         itself, is what makes one of them the addressing procedure to
-        prefer."""
+        prefer. The plugin it was is remembered too (``_flow_owner``),
+        since a flow is read against the headers of the plugin that ships
+        it."""
         self.flows_dir.mkdir(parents=True, exist_ok=True)
-        sources = [(Path(__file__).parent / "flows", False)]
-        sources += [(d, True) for p in self.plugins for d in p.flow_dirs()]
-        for packaged, from_plugin in sources:
+        sources: list[tuple[Path, str | None]] = [(Path(__file__).parent / "flows", None)]
+        sources += [(d, p.name) for p in self.plugins for d in p.flow_dirs()]
+        for packaged, plugin in sources:
             if not packaged.is_dir():
                 continue
             for src in sorted(packaged.glob("*.yaml")):
-                if from_plugin:
+                if plugin is not None:
                     self._plugin_flows.add(src.name)
+                    self._flow_owner[src.name] = plugin
                 dst = self.flows_dir / src.name
                 data = src.read_bytes()
                 if not dst.is_file() or dst.read_bytes() != data:
@@ -3867,7 +4062,7 @@ class Bench:
             return None
         flow = tclib.parse_testcase(text, name, require_prefix=False,
                                     extensions=self._step_types,
-                                    symbols=self.symbols)
+                                    symbols=self._symbols_for_file(name, flow=True))
         if flow.error:
             self.log(f'MC   flow "{name}" invalid — {flow.error}', "emcy0")
             return None
@@ -4536,8 +4731,9 @@ class Bench:
         if not text.strip():
             self.obj_vals[key] = ""
             return
+        owner = self._owner()
         try:
-            value = parse_value(text, self._object_fields.get(key, []), self.symbols)
+            value = parse_value(text, self._fields_for(key, owner), self._symbols_of(owner))
         except ValueError as exc:
             self.log(f"OBJ  {key} ← {text!r} rejected — {exc}", "emcy0")
             return
@@ -4710,9 +4906,10 @@ class Bench:
             return next((f for f in rest if f.lane == lane), None)
         return next(iter(rest), None)
 
-    def _panel_enum(self, key: str, lane: str = ""):
+    def _panel_enum(self, key: str, lane: str = "", owner: str = ""):
         """The symbol table behind an enum field: the field a plugin
-        declared for this object (``object_fields``), or None.
+        declared for this object (``object_fields``), or None — the one the
+        plugins that may speak for ``owner``'s devices declared.
 
         The names come from the device's own headers that way, so a panel
         says ``widget: enum`` and gets whatever the firmware calls those
@@ -4732,7 +4929,7 @@ class Bench:
         lanes of the same table apart, which is the case a table name
         cannot cover — three colours of one LED enum.
         """
-        fields = [f for f in self._object_fields.get(key, []) if not f.flags]
+        fields = [f for f in self._fields_for(key, owner) if not f.flags]
         if lane:
             return next((f for f in fields if lane in (f.label, f.table)), None)
         return next(iter(fields), None)
@@ -4762,7 +4959,7 @@ class Bench:
             return mine, "db", 0.0
         return mine, "read", now - mine_at
 
-    def _quantity(self, key: str, own: Quantity | None = None) -> Quantity:
+    def _quantity(self, key: str, own: Quantity | None = None, owner: str = "") -> Quantity:
         """What a value at this address means physically.
 
         What the caller states itself where it states anything — a panel
@@ -4770,15 +4967,21 @@ class Bench:
         what a plugin declared for the address, which is a fact about the
         device rather than about one view of it: a panel that repeated it
         would be the same fact written down twice, kept in step by hand.
+        Of the plugins that may speak for ``owner``'s devices: the same
+        address is something else on another family's.
         """
         if own is not None and own.stated:
             return own
-        return self._object_units.get(key) or own or Quantity()
+        return self._unit_for(key, owner) or own or Quantity()
 
     def _panel_field_view(self, f, node: int) -> dict:
         raw, src, age = self._panel_value(f.key, node)
         info = self._object_info(node, f.idx, f.sub)
         bits = info.signed_bits if info is not None and f.widget == "number" else 0
+        # every name, unit and table below is the one of the family this
+        # device belongs to — the panel is drawn for one device
+        owner = self._owner(node)
+        symbols = self._symbols_of(owner)
         # a text object is a word, whatever the wire carried it as; the
         # widgets below all mean numbers, so this is the whole of it. A
         # value that is already a word — the trace decodes SDO answers and
@@ -4788,7 +4991,7 @@ class Bench:
         # window that label is the first thing the row cuts off. The name
         # rule is the one every other view uses — the firmware's word for
         # it, the EDS's where no plugin has one (_label)
-        name = self._label(f.idx, f.sub, info.name if info is not None else "")
+        name = self._label(f.idx, f.sub, info.name if info is not None else "", owner)
         if raw and f.widget == "number" and info is not None and info.is_text:
             return {"idx": f.idx, "sub": f.sub, "label": f.label, "unit": "",
                     "name": name, "wo": info.access == "wo",
@@ -4797,7 +5000,7 @@ class Bench:
         # a unit and a scale belong to a number; the widgets that mean a
         # name or a bit reject them in the file, and must not pick one up
         # from a plugin's declaration either
-        q = self._quantity(f.key, f.quantity) if f.widget == "number" else f.quantity
+        q = self._quantity(f.key, f.quantity, owner) if f.widget == "number" else f.quantity
         # a field the file calls a register is shown as one: the bit
         # pattern written the way its documentation writes it, padded to
         # the object's own width so a byte stays two digits. Display only —
@@ -4826,20 +5029,20 @@ class Bench:
         # (the same `alternatives` the object table and favourites use)
         shown = _typed_number(raw or "")
         if shown is not None:
-            out["alt"] = alternatives(shown, self._object_fields.get(f.key, []),
-                                      self.symbols, len((raw or "").removeprefix("0x")) or 2,
+            out["alt"] = alternatives(shown, self._fields_for(f.key, owner),
+                                      symbols, len((raw or "").removeprefix("0x")) or 2,
                                       info.signed(shown) if info is not None else None)
         value = _typed_number(raw or "") or 0
         if f.widget == "flag":
             out["on"] = bool(value >> f.bit & 1)
             out["bit"] = f.bit
         elif f.widget == "enum":
-            field = self._panel_enum(f.key, f.lane)
+            field = self._panel_enum(f.key, f.lane, owner)
             # sent back on a pick: several lanes can sit on one object, and
             # the address alone would stage whichever the core listed first
             out["lane"] = f.lane
-            table = self.symbols.tables.get(field.table, {}) if field else {}
-            shift = field.resolved_shift(self.symbols) if field else 0
+            table = symbols.tables.get(field.table, {}) if field else {}
+            shift = field.resolved_shift(symbols) if field else 0
             # every choice sheds the prefix it shares with its table: a
             # table name repeated on all four of them says nothing the one
             # open dropdown does not already say, and costs the width the
@@ -4863,7 +5066,7 @@ class Bench:
             # true thing about it, and reads as the dash the other widgets
             # show.
             known = _typed_number(raw or "") is not None
-            out["val"] = (str(field.extract(value, self.symbols))
+            out["val"] = (str(field.extract(value, symbols))
                           if field and known else "" if field else out["val"])
             # a value no symbol names is still a fact about the device, so
             # it is shown rather than snapped to the nearest name — as the
@@ -4952,7 +5155,10 @@ class Bench:
                 if fld is not None else None)
         bits = info.signed_bits if info is not None else 0
         key = f"{p['idx']}:{p['sub']}"
-        quantity = self._quantity(key, fld.quantity) if fld is not None else Quantity()
+        # the scale the box displayed it with — the owner's of this device,
+        # or what is typed would be read in another family's units
+        quantity = (self._quantity(key, fld.quantity, self._owner(node))
+                    if fld is not None else Quantity())
         # an unscaled field goes through the object table's own parsing,
         # which knows hex, binary and symbol names. A signed one does not:
         # that path stages the digits as an unsigned word, and -500 leaves
@@ -5009,10 +5215,12 @@ class Bench:
             bit = 1 << fld.bit
             value = current | bit if p.get("on") else current & ~bit
         else:
-            field = self._panel_enum(key, fld.lane)
+            # the table of the device the write goes to, as the box showed it
+            owner = self._owner(self._target_node())
+            field = self._panel_enum(key, fld.lane, owner)
             if field is None:
                 return
-            shift = field.resolved_shift(self.symbols)
+            shift = field.resolved_shift(self._symbols_of(owner))
             try:
                 chosen = int(str(p.get("val", "")), 0)
             except ValueError:
@@ -6270,7 +6478,7 @@ class Bench:
                 # only records failures cannot answer "what did it read
                 # last Tuesday", which is most of why anybody keeps them
                 info = "Response: " + self._value_note(
-                    index_s, sub_s, res.value, spec.get("expect"))
+                    index_s, sub_s, res.value, spec.get("expect"), node=node)
             return status, info
         if key == "psu":
             if self.psu is None:
@@ -7652,6 +7860,9 @@ class Bench:
                       ("netvar", "Network variables", 0xA000, 0xAFFF),
                       ("sysvar", "System variables", 0xB000, 0xBFFF)]
         catalog: dict[str, list] = {k: [] for k, _, _, _ in group_defs}
+        # named by the family whose EDS this is; a file no plugin seeded has
+        # no owner and takes the first answer of any
+        owner = self._eds_owner.get(file, "")
 
         def add_row(var: ODVariable) -> None:
             for key, _, lo, hi in group_defs:
@@ -7669,7 +7880,7 @@ class Bench:
                         val = f"0x{int(default) & ((1 << (info.bits or 8)) - 1):0{width}X}"
                     idx, sub = f"0x{var.index:04X}", f"{var.subindex:02X}"
                     catalog[key].append([
-                        idx, sub, self._label(idx, sub, info.name),
+                        idx, sub, self._label(idx, sub, info.name, owner),
                         info.type_name, info.access, val, info.lo, info.hi,
                     ])
                     return
@@ -7727,7 +7938,18 @@ class Bench:
 
         Origins are per plugin directory, so two vendors' identically
         named tables stay apart instead of the winner depending on file
-        order.
+        order. What reads which of them is ``symbols_for``: a plugin's
+        hooks, its own test cases and flows and the devices of its family
+        read their own directory first, and the others only where they do
+        not contradict it.
+
+        A directory that no installed plugin owns any more — the plugin
+        was uninstalled, the copy stayed behind, since the folder is
+        somebody's — is still read, because a header of a firmware under
+        test lives in the same place. Where it defines a name differently
+        from another directory it says so, in one line: an installed
+        plugin's own files are not affected by it (they read their own),
+        but any other file has to say which directory it means.
         """
         for plugin in self.plugins:
             for src_dir in plugin.symbol_dirs():
@@ -7752,6 +7974,18 @@ class Bench:
                      f"from {', '.join(o for o, _ in origins)}")
         for err in tables.errors:
             self.log(f"SYM  {err}", "emcy0")
+        installed = {p.name for p in self.plugins}
+        for origin, _directory in origins:
+            if origin in installed:
+                continue
+            clashes = sum(1 for syms in tables.ambiguous.values()
+                          if any(sym.origin == origin for sym in syms)
+                          and any(sym.origin != origin for sym in syms))
+            if clashes:
+                self.log(f"SYM  symbols/{origin} belongs to no installed plugin and defines "
+                         f"{clashes} name(s) differently from another directory — an installed "
+                         f"plugin's own files and devices keep reading their own headers; any "
+                         f"other file needs {origin}:NAME for those names", "emcy0")
         return tables
 
     def act_num_base(self, p: dict) -> None:
@@ -7767,8 +8001,12 @@ class Bench:
         self.symbols = self._load_symbols()
         # the names every view shows come from those tables (see _label),
         # so a reload that did not empty this would leave the old firmware
-        # naming the objects of the new one
+        # naming the objects of the new one. Its sibling memos go with it —
+        # the manufacturer error names and the per-owner merges: nothing
+        # worked out before a reload is to outlive it
         self._sym_labels.clear()
+        self._mec_texts.clear()
+        self._owner_cache.clear()
         self._catalog_cache.clear()
         self._load_testcases()
 
@@ -7791,6 +8029,10 @@ class Bench:
         # asked again on every tick
         dev = self.sel_devices[0] if self.sel_devices else None
         od = self._ods.load(dev["eds"]) if dev else None
+        # read as the family of the device on screen reads it — once, not
+        # per row: the table is a thousand of them asked again every tick
+        owner = self._owner()
+        symbols = self._symbols_of(owner)
 
         out: dict[str, dict] = {}
         for key, (width, default) in keys.items():
@@ -7818,7 +8060,7 @@ class Bench:
                 value = int(str(raw), 16)
             except ValueError:
                 continue  # string-typed object: leave it exactly as it is
-            fields = self._object_fields.get(key, [])
+            fields = self._fields_for(key, owner)
             # what the word *means* as a number. Hex stays the word as
             # stored — that is what a word is — while decimal is the
             # reading the EDS declares: 0xFE0C is -500 on an INTEGER16 and
@@ -7828,14 +8070,14 @@ class Bench:
             # reading where a plugin declared fields, the physical one
             # where it declared a unit. Never both — a mode word is not
             # measured in anything, and a tension is not an enum
-            quantity = self._object_units.get(key)
-            meaning = describe(value, fields, self.symbols) if fields else ""
+            quantity = self._unit_for(key, owner)
+            meaning = describe(value, fields, symbols) if fields else ""
             if not meaning and quantity is not None:
                 meaning = quantity.with_unit(raw, info.signed_bits if info else 0)
             out[key] = {
                 "txt": format_number(value, "hex", width) if self.num_base == "hex"
                 else str(dec),
-                "alt": alternatives(value, fields, self.symbols, width, dec)
+                "alt": alternatives(value, fields, symbols, width, dec)
                 + (f" · {meaning}" if quantity is not None and meaning else ""),
                 "sym": meaning,
                 # the EDS's own limits, checked against that same reading.

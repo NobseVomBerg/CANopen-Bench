@@ -56,7 +56,7 @@ only what you provide.
 |---|---|---|
 | `adapters()` | `list[dict]` | Extra adapter cards on the Setup page (listed before the built-ins) |
 | `adapter_backends()` | `dict` | Adapter key → (python-can interface, default channel) for those cards; the python-can driver itself ships via python-can's own `can.interface` group |
-| `seed_eds()` | `list[dict]` | EDS registry rows seeded once into an empty workspace; a row may bring its `commands` and its `variant` (`{index, sub, map?}` — where this family keeps its variant number) instead of the operator configuring both by hand |
+| `seed_eds()` | `list[dict]` | EDS registry rows, added on every start where no row names the file yet; a row may bring its `commands` and its `variant` (`{index, sub, map?}` — where this family keeps its variant number) instead of the operator configuring both by hand. The rows also say which devices are this plugin's own family ([Object fields](#object-fields)) |
 | `firmware()` | `list[dict]` | Firmware library entries for the SWDL page that have no file of their own — a fixed list, shown beside the folder |
 | `describe_firmware(path)` | `dict \| None` | What one file in the firmware folder is: `{ver, tag?, meta?}` for a file of this vendor's format, `None` for anything else. The core lists the folder and knows no format; first plugin with an answer wins, and a file nobody claims is listed as unknown and cannot be selected |
 | `flow_dirs()` | `list[Path]` | Directories with packaged flow files (format-v2 YAML); copied into the workspace flows dir on every start, over the copy there where it differs — a flow of one's own goes in under another name. A flow with `grade: production` is a procedure for the Production view instead, with the firmware files it asks for under `inputs:`. A fresh workspace picks one of these as its addressing procedure over the standard-LSS flow the core ships — by where the file came from, not by what it is called, since how a device family is addressed is that family's business. A flow that declares a `button:` is a procedure somebody presses instead ([the format](ablaeufe/testfall-format.md)) |
@@ -107,15 +107,45 @@ Headers are copied into `<workspace>/symbols/<plugin>/` on every start,
 over whatever is there: a header is part of its plugin the way its panels
 are, and both are read from the package. The firmware actually under test
 goes in beside them under a name of its own and is left alone — that is
-what the folder is for besides looking at. The per-plugin subdirectory is
-also what keeps two vendors' `eObjIdx` apart; where they disagree, the
-bare name stops resolving and `$<plugin>:<NAME>` is the way through.
+what the folder is for besides looking at.
 
 Only a small subset of C is accepted: enums (including implicit
 successors and constant expressions over symbols already parsed, so
 `(eLamp_Off << 8)` works) and `#define` constants. Anything else is
 reported with file and line rather than guessed — a table that is subtly
 wrong is worse than no table.
+
+#### Two families in one bench
+
+The per-plugin subdirectory is also what keeps two vendors' `eObjIdx`
+apart, and that is what lets two device families share a bench. Everything
+a plugin owns reads the tables *as its own headers read them*: its hooks
+(`object_fields`, `object_units` and `describe_object` are handed that
+view as their `symbols`), the test cases and flows it ships, and the
+devices whose EDS its `seed_eds()` rows name. Where its own headers define
+a name or a table, they win; what another family defines is visible only
+where the own headers define neither that name nor that symbol's table.
+So `$eObjIdx_LampControl` in one family's case means that family's, however
+the other one's `eObjIdx` is written — and its cases keep loading when a
+second family arrives, instead of turning ambiguous for want of a prefix
+they were never written with.
+
+What no plugin owns reads the bench-wide tables, which are every directory
+merged: a test case in the TestCases folder that nobody ships, a device
+whose EDS no plugin seeded. There a name that two directories define
+differently stops resolving bare, and `$<origin>:NAME` — the directory's
+name, as in `$acme:eObjIdx_LampControl` — is the way through. A plugin's
+own code, such as an action, a device panel or an MCP tool, should ask
+`bench.symbols_for("<plugin name>")` rather than `bench.symbols`, for the
+same reason its hooks are handed that view.
+
+A directory under `symbols/` that no installed plugin owns any more is
+still read. The folder is somebody's, and the headers of a firmware under
+test live there too, so nothing deletes what an uninstalled plugin left
+behind. Where such a directory defines names differently from another one,
+the state log says so. It does not disturb an installed plugin —
+that reads its own headers first — but a file nobody ships needs
+`$<that directory>:NAME` for those names, or the directory has to go.
 
 ### Object fields
 
@@ -137,6 +167,15 @@ def object_fields(self, symbols):
 
 Deriving these from a naming convention is a plugin's business, not the
 core's — the convention belongs to whoever writes the headers.
+
+Which device an answer is for is decided by its EDS file. A plugin whose
+`seed_eds()` names rows is a device family, and a device assigned one of
+those files is its own: its fields, units, object names and EMCY texts come
+from that plugin — and from the plugins that seed no EDS at all, which own
+no devices, so what they know is about all of them. Another family's answers
+are left out, since the same address regularly means something else there.
+A device whose EDS no plugin seeded (one uploaded by hand, the generic base)
+gets what every plugin says, as it always did.
 
 Two things the renderer will not do. It never replaces the number with a
 name: the value column keeps showing the number in the operator's chosen

@@ -199,3 +199,16 @@ development; the version counts from here.
   on a device it has connected, from a container, with a CPC-USB through
   `ems_usb` — nothing else was on that bus, so no frame has gone either
   way yet. The image carries `iproute2` for it
+- Two device-family plugins side by side: symbols, object fields, units,
+  object names and EMCY texts are answered per device family. A plugin's
+  `seed_eds()` rows say which devices are its own, and those read its
+  headers and hear from it (and from plugins that seed no EDS), not from
+  the other family — two families that both have an `eObjIdx` with other
+  values no longer make the name ambiguous for each other, nor for the
+  test cases and flows each ships (`bench.symbols_for("<plugin>")` is that
+  view, for a plugin's own code). A device no plugin owns and a case
+  nobody ships read the bench-wide tables as before, and one plugin alone
+  behaves exactly as it did. A name defined three ways stays ambiguous
+  instead of resolving to the last of them, and a `symbols/` directory
+  left by a plugin that is gone says in the state log which names it
+  defines differently

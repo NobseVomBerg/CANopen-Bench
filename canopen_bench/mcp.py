@@ -63,17 +63,22 @@ the devices, bus connection and power supply its web page shows, and the page sh
 
 # -- helpers -------------------------------------------------------------------
 
-def _num(b, value, what: str) -> int:
+def _num(b, value, what: str, node=None) -> int:
+    """A number or a symbol name. With a node, the names are the ones the
+    headers of that device's family give them: two families may call
+    different things by the same name, and the answer has to be the one
+    for the device the call is about."""
+    symbols = b._symbols_of(b._owner(node)) if node is not None else b.symbols
     try:  # "$Name" is how a test case writes a symbol; the same name is meant
-        return parse_value(str(value).replace("$", ""), [], b.symbols)
+        return parse_value(str(value).replace("$", ""), [], symbols)
     except ValueError as exc:
         raise ValueError(f"{what} {value!r}: {exc}") from None
 
 
-def _addr(b, args: dict) -> tuple[str, str]:
+def _addr(b, args: dict, node=None) -> tuple[str, str]:
     """Index and sub-index the way the page writes them: 0x1017 and 00."""
-    return (f"0x{_num(b, args['index'], 'index'):04X}",
-            f"{_num(b, args.get('sub', 0), 'sub-index'):02X}")
+    return (f"0x{_num(b, args['index'], 'index', node):04X}",
+            f"{_num(b, args.get('sub', 0), 'sub-index', node):02X}")
 
 
 def _device(b, node) -> dict:
@@ -231,7 +236,7 @@ async def scan(b, a):
 async def sdo_read(b, a):
     _connected(b)
     node = _device(b, a["node"])["node"]
-    idx, sub = _addr(b, a)
+    idx, sub = _addr(b, a, node)
     res = await asyncio.to_thread(b.bus.sdo_read, node, idx, sub)
     if not res.ok:
         b.log(f"SDO  read {idx}:{sub} ✗ abort {res.abort} (node {node}) · MCP", "emcy0")
@@ -253,9 +258,11 @@ def _reading(b, node: int, idx: str, sub: str, value) -> dict:
     raw = int(str(value), 16)
     out = {"decimal": info.signed(raw) if info is not None else raw}
     key = f"{idx}:{sub}"
-    if (fields := b._object_fields.get(key)) and (meaning := describe(raw, fields, b.symbols)):
+    owner = b._owner(node)
+    if (fields := b._fields_for(key, owner)) and \
+            (meaning := describe(raw, fields, b._symbols_of(owner))):
         out["meaning"] = meaning
-    if (unit := b._object_units.get(key)) is not None and \
+    if (unit := b._unit_for(key, owner)) is not None and \
             (reading := unit.with_unit(str(value), info.signed_bits if info else 0)):
         out["reading"] = reading
     return out
@@ -264,9 +271,9 @@ def _reading(b, node: int, idx: str, sub: str, value) -> dict:
 async def sdo_write(b, a):
     _connected(b)
     node = _device(b, a["node"])["node"]
-    idx, sub = _addr(b, a)
+    idx, sub = _addr(b, a, node)
     info = b._object_info(node, idx, sub)
-    num = _num(b, a["value"], "value")
+    num = _num(b, a["value"], "value", node)
     width = int(a.get("size") or (info.width if info else 0))
     if num < 0:
         bits = width * 8 if a.get("size") else (info.signed_bits if info else 0)
@@ -354,8 +361,11 @@ def tests_list(b, a):
 
 def testcase_check(b, a):
     name = str(a.get("filename") or "")
+    # a file a plugin ships is read against that plugin's headers, as the
+    # catalog reads it; a draft has no name to say whose it is
     tc = tclib.parse_testcase(str(a["text"]), name or "draft.yaml", require_prefix=bool(name),
-                              extensions=b._step_types, symbols=b.symbols)
+                              extensions=b._step_types,
+                              symbols=b._symbols_for_file(name) if name else b.symbols)
     if tc.error:
         return {"ok": False, "error": tc.error}
     return {"ok": True, "id": tc.id, "name": tc.name,

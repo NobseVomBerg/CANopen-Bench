@@ -299,9 +299,16 @@ die Antwort so, wie das Gerät sie geschickt hat.
     Aufgelöst wird beim **Laden** der Datei, nicht zur Laufzeit: ein
     Tippfehler macht den Testfall im Katalog ungültig, statt mitten im Lauf
     an echter Hardware zu scheitern. Woher die Symbole kommen und wie man
-    eigene ergänzt: `docs/extending.md`, Abschnitt „Symbol tables". Bei
-    gleichnamigen Symbolen aus zwei Plugins qualifiziert
-    `$acme:eObjIdx_LampControl`.
+    eigene ergänzt: `docs/extending.md`, Abschnitt „Symbol tables".
+
+    Ein Testfall oder Ablauf, den ein Plugin mitbringt, löst bloße Namen in
+    den Headern **dieses Plugins** auf — auch wenn ein anderes Plugin
+    denselben Namen anders definiert; die Datei muss nichts qualifizieren
+    und lädt weiter, wenn eine zweite Geräte-Familie dazukommt. Nur eine
+    Datei, die kein Plugin mitbringt (ein eigener Testfall im
+    TestCases-Ordner), sieht die Header aller Verzeichnisse unter `symbols/`
+    zusammen, und nur dort braucht ein Name, den zwei von ihnen verschieden
+    definieren, den Präfix: `$acme:eObjIdx_LampControl`.
 
 ## Schritt-Primitive
 
