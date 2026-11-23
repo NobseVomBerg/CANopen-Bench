@@ -14,7 +14,7 @@ from canopen_bench.core import Bench
 from canopen_bench.db import Db
 from canopen_bench.plugin import BenchPlugin
 from canopen_bench.symbols import SymbolError, load_symbols, parse_header
-from canopen_bench.testcases import parse_testcase
+from canopen_bench.testcases import load_catalog, parse_testcase
 
 
 def syms(text: str, source: str = "fake/x.h"):
@@ -191,6 +191,155 @@ def test_conflicting_definitions_are_refused_and_need_qualifying(tmp_path):
     assert tables.value("globex:eIdx_Button") == 0x3000
 
 
+# -- two origins: the tables as each of them reads them ----------------------
+#
+# Two device families each ship an eObjIdx and a mode table — the same names,
+# other values. The bench-wide tables cannot hold both, and `scoped` is what
+# lets each family read the one it wrote.
+
+_ACME_H = """\
+/// @brief Lamp states of the acme family
+typedef enum eLamp { eLamp_Off = 0, eLamp_On = 1 } eLamp;
+typedef enum eObjIdx { eObjIdx_Lamp = 0x2050 } eObjIdx;
+#define SHARED_LIMIT 10
+#define ACME_LIMIT 99
+"""
+
+_BORG_H = """\
+/// @brief Lamp states of the borg family
+typedef enum eLamp { eLamp_Off = 0, eLamp_On = 5, eLamp_Blinking = 6 } eLamp;
+/// @brief Object indices of the borg family
+typedef enum eObjIdx { eObjIdx_Lamp = 0x2150 } eObjIdx;
+/// @brief Speeds of a borg motor
+typedef enum eSpeed { eSpeed_Slow = 1, eSpeed_Fast = 2 } eSpeed;
+#define SHARED_LIMIT 20
+#define BORG_RETRIES 3
+"""
+
+
+def _origins(tmp_path, **headers: str | list[str]):
+    """One directory per origin, holding the header or headers it is given."""
+    dirs = []
+    for origin, texts in headers.items():
+        (tmp_path / origin).mkdir()
+        for i, text in enumerate([texts] if isinstance(texts, str) else texts):
+            (tmp_path / origin / f"h{i}.h").write_text(text)
+        dirs.append((origin, tmp_path / origin))
+    return load_symbols(dirs)
+
+
+@pytest.fixture()
+def two(tmp_path):
+    return _origins(tmp_path, acme=_ACME_H, borg=_BORG_H)
+
+
+def test_the_bench_wide_tables_leave_a_shared_name_ambiguous(two):
+    for name in ("eObjIdx_Lamp", "eLamp_On", "SHARED_LIMIT"):
+        with pytest.raises(SymbolError, match="qualify"):
+            two.value(name)
+
+
+def test_a_name_every_origin_defines_alike_is_not_ambiguous(two):
+    assert two.value("eLamp_Off") == 0
+    assert "eLamp_Off" not in two.ambiguous
+
+
+def test_a_scope_reads_a_shared_name_as_its_own_headers_define_it(two):
+    acme, borg = two.scoped("acme"), two.scoped("borg")
+    assert (acme.value("eObjIdx_Lamp"), borg.value("eObjIdx_Lamp")) == (0x2050, 0x2150)
+    assert (acme.value("eLamp_On"), borg.value("eLamp_On")) == (1, 5)
+    assert (acme.value("SHARED_LIMIT"), borg.value("SHARED_LIMIT")) == (10, 20)
+    assert not acme.ambiguous and not borg.ambiguous
+
+
+@pytest.mark.parametrize("view", ["merged", "acme", "borg"])
+def test_a_qualified_name_means_the_same_in_the_merged_tables_and_in_either_scope(two, view):
+    tables = two if view == "merged" else two.scoped(view)
+    assert tables.value("acme:eObjIdx_Lamp") == 0x2050
+    assert tables.value("borg:eObjIdx_Lamp") == 0x2150
+
+
+def test_a_reverse_lookup_in_a_scope_answers_from_its_own_table_only(two):
+    acme, borg = two.scoped("acme"), two.scoped("borg")
+    assert acme.name("eLamp", 1) == "eLamp_On" and borg.name("eLamp", 5) == "eLamp_On"
+    # 5 is something in borg's table and nothing in acme's, and the other way round
+    assert acme.name("eLamp", 5) == "" and borg.name("eLamp", 1) == ""
+    assert acme.name("eLamp", 6) == "", "borg's member, a value acme's table does not have either"
+
+
+def test_a_member_only_the_other_version_of_a_table_has_stays_out_of_the_scope(two):
+    """The table is the unit: taking a neighbour's members into a table of
+    the same name is how a dropdown comes to offer choices its device never
+    had."""
+    acme, borg = two.scoped("acme"), two.scoped("borg")
+    assert set(acme.tables["eLamp"]) == {"eLamp_Off", "eLamp_On"}
+    assert set(borg.tables["eLamp"]) == {"eLamp_Off", "eLamp_On", "eLamp_Blinking"}
+    with pytest.raises(SymbolError, match="unknown symbol"):
+        acme.value("eLamp_Blinking")
+    assert acme.value("borg:eLamp_Blinking") == 6, "reachable, but only by saying whose it is"
+
+
+def test_a_table_or_a_define_only_the_other_origin_has_is_visible(two):
+    acme, borg = two.scoped("acme"), two.scoped("borg")
+    assert acme.tables["eSpeed"]["eSpeed_Fast"].value == 2
+    assert acme.value("eSpeed_Slow") == 1
+    assert acme.value("BORG_RETRIES") == 3
+    assert borg.value("ACME_LIMIT") == 99
+
+
+def test_a_scope_describes_a_shared_table_by_its_own_brief_and_the_others_by_theirs(two):
+    acme, borg = two.scoped("acme"), two.scoped("borg")
+    assert acme.descriptions["eLamp"] == "Lamp states of the acme family"
+    assert borg.descriptions["eLamp"] == "Lamp states of the borg family"
+    assert acme.descriptions["eSpeed"] == "Speeds of a borg motor"
+    # a table acme defines is described by acme or not at all: borg's sentence
+    # is about borg's eObjIdx
+    assert "eObjIdx" not in acme.descriptions
+
+
+def test_scoped_hands_back_the_merged_tables_for_a_single_origin(tmp_path):
+    solo = _origins(tmp_path, acme=_ACME_H)
+    assert solo.scoped("acme") is solo
+
+
+@pytest.mark.parametrize("origin", ["nobody", "", "empty"],
+                         ids=["unknown origin", "no origin", "origin without symbols"])
+def test_scoped_hands_back_the_merged_tables_where_there_is_nothing_to_tell_apart(tmp_path, origin):
+    tables = _origins(tmp_path, acme=_ACME_H, borg=_BORG_H, empty="// nothing declared in here\n")
+    assert tables.scoped(origin) is tables
+
+
+def test_a_scope_is_built_once_and_each_origin_has_its_own(two):
+    assert two.scoped("acme") is two.scoped("acme")
+    assert two.scoped("acme") is not two
+    assert two.scoped("acme") is not two.scoped("borg")
+
+
+def test_an_origin_that_contradicts_itself_stays_ambiguous_in_its_own_scope(tmp_path):
+    tables = _origins(tmp_path,
+                      acme=["typedef enum eX { eX_A = 1 } eX;\n",
+                            "typedef enum eX { eX_A = 2 } eX;\n"],
+                      borg="typedef enum eB { eB_First = 3 } eB;\n")
+    with pytest.raises(SymbolError, match="qualify"):
+        tables.scoped("acme").value("eX_A")
+
+
+def test_a_name_defined_three_ways_stays_ambiguous(tmp_path):
+    """Dropped from the bare index by the second definition, the name was
+    free for a third to claim — and resolved again, to whichever origin
+    happened to be read last. The same silent pick the refusal exists to
+    prevent."""
+    tables = _origins(tmp_path, **{origin: f"typedef enum eX {{ eX_A = {value} }} eX;\n"
+                                   for origin, value in (("acme", 1), ("borg", 2), ("globex", 3))})
+    with pytest.raises(SymbolError, match="qualify"):
+        tables.value("eX_A")
+    assert "eX_A" not in tables.by_name
+    assert [tables.value(f"{origin}:eX_A") for origin in ("acme", "borg", "globex")] == [1, 2, 3]
+    assert any("globex/h0.h" in error for error in tables.errors), "the third is reported too"
+    # …and each of them still reads its own
+    assert [tables.scoped(origin).value("eX_A") for origin in ("acme", "borg", "globex")] == [1, 2, 3]
+
+
 # -- workspace wiring -------------------------------------------------------
 
 class _SymbolPlugin(BenchPlugin):
@@ -336,3 +485,36 @@ def test_builtins_are_left_alone(tables):
         'value: "0x01"', "value: $node")
     tc = parse_testcase(case, "TC9.9_x.yaml", symbols=tables)
     assert tc.error is None and tc.steps[0]["sdo_write"]["value"] == "$node"
+
+
+@pytest.fixture()
+def cases(tmp_path):
+    """A folder with one case per family, both written with the bare name."""
+    folder = tmp_path / "cases"
+    folder.mkdir()
+    for ident, origin in (("9.1", "acme"), ("9.2", "borg")):
+        (folder / f"TC{ident}_{origin}.yaml").write_text(_CASE.replace('"9.9"', f'"{ident}"'))
+    return folder
+
+
+def test_a_catalog_reads_each_file_against_the_tables_symbols_for_gives_it(two, cases):
+    """What a case a device family ships needs: it was written against that
+    family's headers, and has to keep loading when another family defines the
+    same names. Given the merged tables as well, which would refuse both
+    files, the per-file answer is the one that counts."""
+    views = {"TC9.1_acme.yaml": two.scoped("acme"), "TC9.2_borg.yaml": two.scoped("borg")}
+    asked: list[str] = []
+
+    def symbols_for(name: str):
+        asked.append(name)
+        return views[name]
+
+    catalog = load_catalog(cases, symbols=two, symbols_for=symbols_for)
+    assert asked == ["TC9.1_acme.yaml", "TC9.2_borg.yaml"]
+    assert [tc.error for tc in catalog] == [None, None]
+    assert [tc.steps[0]["sdo_write"]["index"] for tc in catalog] == ["0x2050", "0x2150"]
+
+
+def test_a_catalog_without_symbols_for_reads_the_whole_folder_against_one_set_of_tables(two, cases):
+    catalog = load_catalog(cases, symbols=two)
+    assert all(tc.error and "qualify" in tc.error for tc in catalog)
