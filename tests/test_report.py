@@ -514,13 +514,13 @@ def test_grouping_splits_by_variant_and_falls_back_to_device(tmp_path):
     """Two variants in one run are two groups; a case with no variant
     still has to show up somewhere, so it groups under its device name."""
     run = {"started": "2026-07-28T10:00:00", "cases": [
-        _case_doc(id="01", variant="V1", device="D1"),
-        _case_doc(id="02", variant="V2", device="D2"),
-        _case_doc(id="03", variant="", device="D3"),
+        _case_doc(id="01", variant="V1", device="DEV1"),
+        _case_doc(id="02", variant="V2", device="DEV2"),
+        _case_doc(id="03", variant="", device="DEV3"),
     ]}
     variants = collect_overview([run])
     keys = {v.key for v in variants}
-    assert keys == {"V1", "V2", "D3"}
+    assert keys == {"V1", "V2", "DEV3"}
     for group in variants:
         assert group.runs == 1
 
