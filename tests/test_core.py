@@ -1158,6 +1158,24 @@ def test_a_box_read_outlasting_a_switch_keeps_to_its_device(connected_bench, mon
     assert "0x2020:01" not in bench.db.last_values(sn[2])
 
 
+def test_a_staged_value_is_not_the_devices_until_it_is_written(connected_bench):
+    """A view that mirrors the device asks ``device_value``: staging leaves
+    it at what was last read, an accepted write or a read settles it."""
+    bench = connected_bench
+    bench.dispatch("dev_toggle", {"node": 1})
+    assert bench.device_value("0x2000:00") is None
+    bench.remember("0x2000:00", "0x00000001")
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x42"})
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x43"})
+    assert bench.obj_vals["0x2000:00"] == "0x00000043"
+    assert bench.device_value("0x2000:00") == "0x00000001"
+    bench.dispatch("obj_write", {"idx": "0x2000", "sub": "00"})
+    assert bench.device_value("0x2000:00") == "0x00000043"
+    bench.dispatch("obj_set", {"idx": "0x2000", "sub": "00", "val": "0x44"})
+    bench.remember("0x2000:00", "0x00000043")
+    assert bench.device_value("0x2000:00") == "0x00000043"
+
+
 def test_a_write_goes_to_every_selected_device(connected_bench, monkeypatch):
     """Like a firmware download: every selected device gets the value, and
     one that cannot take it answers with an abort without holding back the

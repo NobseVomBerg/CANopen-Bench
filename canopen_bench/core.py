@@ -1215,6 +1215,9 @@ class Bench:
         #: when each obj_vals entry was learned (monotonic), so a value the
         #: bus carried past can be told from an older one somebody read
         self.obj_vals_at: dict[str, float] = {}
+        #: what obj_vals held for a key before the operator staged another
+        #: value over it — until a read or an accepted write settles it
+        self.obj_held: dict[str, str | None] = {}
         #: values seen on the wire, (node, "0x2007:01") -> (value, when).
         #: Separate from obj_vals, which also holds what the operator has
         #: typed and not yet written (see _bus_sample)
@@ -3025,6 +3028,7 @@ class Bench:
         # read. Left in place, the previous device's timestamps said the
         # restored numbers were seconds old
         self.obj_vals_at = {}
+        self.obj_held = {}
         if not announce:
             return
         if first is None:
@@ -4691,6 +4695,7 @@ class Bench:
         if node is None or (shown is not None and shown["node"] == node):
             self.obj_vals[key] = value
             self.obj_vals_at[key] = time.monotonic()
+            self.obj_held.pop(key, None)
         if dev is not None and dev["sn"] != NO_SERIAL:
             self.db.remember_value(dev["sn"], key, value, _stamp())
             self._seen_dirty.discard((self._identity(dev["node"]), key))
@@ -4743,7 +4748,7 @@ class Bench:
         key = f"{p['idx']}:{p['sub']}"
         text = str(p.get("val", ""))
         if not text.strip():
-            self.obj_vals[key] = ""
+            self._stage(key, "")
             return
         owner = self._owner()
         try:
@@ -4771,8 +4776,25 @@ class Bench:
         # the signed half of the range: with the table in hex, 0xFE0C is
         # what the box *shows* for -500, and a field that will not accept
         # back what it just printed is worse than one that is strict
-        self.obj_vals[key] = f"0x{value:0{self._staged_width(key, info, bits)}X}"
-        self.obj_vals_at[key] = time.monotonic()
+        self._stage(key, f"0x{value:0{self._staged_width(key, info, bits)}X}")
+
+    def _stage(self, key: str, value: str) -> None:
+        """A value the operator set and has not written: into the table,
+        with what the device was last known to hold kept beside it."""
+        self.obj_held.setdefault(key, self.obj_vals.get(key))
+        self.obj_vals[key] = value
+        if value:
+            self.obj_vals_at[key] = time.monotonic()
+
+    def device_value(self, key: str) -> str | None:
+        """What the device was last known to hold at ``key`` — the table's
+        value, or the one from before the operator staged another over it.
+        For a view that mirrors the device: a staged value is an intention,
+        and a picture that followed it would show a state the device is
+        not in. None for an object nothing is known of."""
+        if key not in self.obj_vals:
+            return None
+        return self.obj_held[key] if key in self.obj_held else self.obj_vals[key]
 
     def _staged_width(self, key: str, info: ObjectInfo | None, bits: int) -> int:
         """How many hex digits a staged value is written with.
@@ -5182,7 +5204,7 @@ class Bench:
             return
         text = str(p.get("val", ""))
         if not text.strip():
-            self.obj_vals[key] = ""
+            self._stage(key, "")
             return
         try:
             raw = quantity.to_raw(text, bits)
@@ -5193,8 +5215,7 @@ class Bench:
         # the EDS decides it here rather than the digits of whatever the
         # last read happened to answer
         width = self._staged_width(key, info, bits)
-        self.obj_vals[key] = f"0x{raw:0{width}X}"
-        self.obj_vals_at[key] = time.monotonic()
+        self._stage(key, f"0x{raw:0{width}X}")
 
     def _panel_stage_part(self, fld, p: dict) -> None:
         """Stage a change that touches only part of an object's value: one
@@ -5246,8 +5267,7 @@ class Bench:
         # missing value used to default to
         width = len(known.removeprefix("0x")) or self._staged_width(
             key, self._object_info(self._target_node(), fld.idx, fld.sub), 0)
-        self.obj_vals[key] = f"0x{value:0{width}X}"
-        self.obj_vals_at[key] = time.monotonic()
+        self._stage(key, f"0x{value:0{width}X}")
 
     def act_panel_read(self, p: dict) -> None:
         """Read one box (``group``) or every box that is open.
