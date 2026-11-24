@@ -276,7 +276,10 @@ element drawn statically because the description had no word for
 "flashing" reads as a different device state than the real one.
 
 `render()` runs on every snapshot and must not touch the bus. It formats
-cached values (`bench.obj_vals`); reads and writes belong in the
+cached values — **`bench.device_value(key)`** for a picture of the device,
+which is what was last read or written and not a value the operator has
+typed or ticked and not sent yet (`bench.obj_vals` holds those too);
+reads and writes belong in the
 plugin's `actions()`, which the panel's buttons and its refresh control
 dispatch. That is what keeps a visible panel from quietly becoming a
 poll loop.
