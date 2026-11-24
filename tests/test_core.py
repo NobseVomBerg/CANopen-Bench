@@ -3461,12 +3461,13 @@ def test_catalog_row_carries_grade_variants_and_empty_errmsg_for_a_valid_case(be
 
     snap = bench.snapshot()
     row = next(r for r in snap["tests"]["catalog"] if r[0] == "0001")
-    tid, name, tools, est, err, grade, variants, file, errmsg, needs_dut = row
+    tid, name, tools, est, err, grade, variants, file, errmsg, needs_dut, family = row
     assert err is False
     assert grade == "automated"
     assert variants == ["820", "920"]
     assert file == "TC0001_valid.yaml"
     assert errmsg == ""
+    assert family == "", "nobody ships this case"
 
 
 def test_catalog_row_for_a_broken_file_carries_err_file_and_errmsg(bench, tmp_path):
@@ -3481,7 +3482,7 @@ def test_catalog_row_for_a_broken_file_carries_err_file_and_errmsg(bench, tmp_pa
     # parsing, so the catalog falls back to the filename as the row's id —
     # find the row by file instead
     row = next(r for r in snap["tests"]["catalog"] if r[7] == "TC0002_broken.yaml")
-    tid, name, tools, est, err, grade, variants, file, errmsg, needs_dut = row
+    tid, name, tools, est, err, grade, variants, file, errmsg, needs_dut, family = row
     assert err is True
     assert file == "TC0002_broken.yaml"
     assert errmsg  # the UI shows this instead of "see file"

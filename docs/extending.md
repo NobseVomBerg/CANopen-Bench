@@ -177,6 +177,13 @@ are left out, since the same address regularly means something else there.
 A device whose EDS no plugin seeded (one uploaded by hand, the generic base)
 gets what every plugin says, as it always did.
 
+The test list follows the same rule. The cases a family's plugin ships
+(`testcase_dirs()`) are listed while one of that family's devices is
+selected, or none at all, or one that no family owns; with only another
+family's devices selected they are left out. Cases of one's own in the
+TestCases folder, and those a plugin without devices ships, are always
+listed.
+
 Two things the renderer will not do. It never replaces the number with a
 name: the value column keeps showing the number in the operator's chosen
 base, with the reading beside it. And it never drops bits — a value no

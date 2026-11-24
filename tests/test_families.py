@@ -1144,3 +1144,40 @@ def test_any_other_file_needs_the_leftover_directorys_name(tmp_path):
     mine = {tc.file: tc for tc in bench.testcases.values()}
     assert "qualify" in mine["TC9003_mine.yaml"].error
     assert mine["TC9004_mine.yaml"].steps[0]["sdo_read"]["index"] == "0x3000"
+
+
+# -- the test list ------------------------------------------------------------
+
+def _listed(bench: Bench) -> dict[str, str]:
+    """The catalog as the Tests page filters it: id -> the family the case
+    is for, without those the selected devices' families leave out."""
+    tests = bench.snapshot()["tests"]
+    return {row[0]: row[10] for row in tests["catalog"]
+            if tests["families"] is None or not row[10] or row[10] in tests["families"]}
+
+
+def test_the_test_list_follows_the_family_of_the_selected_device(fam):
+    """With one family's device selected, the other family's cases are not
+    what anybody is about to run — a list of a hundred of them hid the seven
+    that were."""
+    bench = fam.bench
+    (Path(bench.paths["tc"]) / "TC9100_own.yaml").write_text(
+        'id: "9100"\nname: own\nsteps:\n  - log: "nobody ships this"\n', encoding="utf-8")
+    bench.dispatch("tc_rescan", {})
+    everything = {"9001": "acme", "9002": "borg", "9100": ""}
+    assert _listed(bench) == everything, "nothing is selected"
+    _pick(bench, ACME)
+    assert _listed(bench) == {"9001": "acme", "9100": ""}
+    _pick(bench, BORG)
+    assert _listed(bench) == {"9002": "borg", "9100": ""}
+    _pick(bench, PLAIN)
+    assert _listed(bench) == everything, "a device no family owns may be anybody's"
+
+
+def test_devices_of_two_families_selected_list_both_families_cases(fam):
+    bench = fam.bench
+    _pick(bench, ACME)
+    bench.dispatch("dev_toggle", {"node": BORG})
+    assert bench.snapshot()["tests"]["families"] == ["acme", "borg"]
+    bench.dispatch("dev_toggle", {"node": PLAIN})
+    assert bench.snapshot()["tests"]["families"] is None
