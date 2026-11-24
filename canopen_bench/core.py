@@ -2283,6 +2283,20 @@ class Bench:
         eds = dev["eds"] if dev is not None else ""
         return "" if eds in ("", "—") else self._eds_owner.get(eds, "")
 
+    def _case_family(self, file: str) -> str:
+        """The device family a test case is for: the plugin that ships the
+        file, where that plugin is a family. "" for a case of one's own and
+        for one a plugin without devices ships — those are for every device."""
+        owner = self._tc_owner.get(Path(file).name, "")
+        return owner if owner in self._eds_owner.values() else ""
+
+    def _selected_families(self) -> list[str] | None:
+        """The families the selected devices belong to, for the test list to
+        follow — or None where it has nothing to follow: no device selected,
+        or one among them that no family owns, which every case may be for."""
+        owners = {self._owner(d["node"]) for d in self.sel_devices}
+        return sorted(owners) if owners and "" not in owners else None
+
     def _plugins_for(self, owner: str) -> list:
         """The plugins that may speak about one owner's devices: the owner
         and every plugin that is not a family of its own, in plugin order.
@@ -8238,10 +8252,12 @@ class Bench:
                 # target, only "selected" needs one picked in the Devices
                 # box. The demo rows below are shorter and so read as
                 # False, which is right — that catalog runs in sim mode
-                # and never touches a device.
+                # and never touches a device. After it, the family the
+                # case is for ("" for every device's).
                 "catalog": ([[tc.id, tc.name, ", ".join(tc.tools) or "—",
                               tc.est or "—", bool(tc.error), tc.grade, tc.variants,
-                              tc.file, tc.error or "", tc.dut == "selected"]
+                              tc.file, tc.error or "", tc.dut == "selected",
+                              self._case_family(tc.file)]
                              for tc in sorted(self.testcases.values(), key=lambda t: t.id)]
                             if self.testcases
                             else [list(t) + ["", [], "", ""] for t in data.TESTS]
@@ -8250,6 +8266,9 @@ class Bench:
                 #: actually in the folder — an empty dropdown is better
                 #: than one listing grades no case has
                 "grades": sorted({tc.grade for tc in self.testcases.values() if tc.grade}),
+                #: whose cases the list shows: the selected devices'
+                #: families, null for everybody's
+                "families": self._selected_families(),
                 "variants": sorted({v for tc in self.testcases.values()
                                     for v in tc.variants}),
                 # the demo's "previous run" lasts until a run starts here,

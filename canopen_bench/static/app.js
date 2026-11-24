@@ -1678,7 +1678,11 @@ function TestsPage({ s, ui, setUi }) {
     }, wait);
     return () => clearTimeout(timer);
   }, [wanted, loaded]);
+  // a family's cases are listed for that family's devices: with a device of
+  // another one selected they are not what anybody is about to run. Cases of
+  // no family, and every case while nothing is selected, are always there.
   const shown = t.catalog
+    .filter((r) => !t.families || !r[10] || t.families.includes(r[10]))
     .filter(([id]) => !ui.resultFilter || (due ? current && !ran.has(id) : RED.has(verdicts[id])))
     .filter(([, , tools]) => t.toolFilter || tools === '—')
     .filter(([, , , , , grade]) => !ui.gradeFilter || grade === ui.gradeFilter)
