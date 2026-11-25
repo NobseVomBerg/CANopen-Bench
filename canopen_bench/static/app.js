@@ -1077,7 +1077,12 @@ const FIELD_MIN = 300;
 //: The slack goes to the right edge of the box instead, where nothing
 //: has to be read across it.
 const FIELD_MAX = 520;
-const CELL = `display:flex;align-items:center;gap:8px;min-width:0;max-width:${FIELD_MAX}px`;
+//: one height for every row, whatever it holds. A checkbox is lower than
+//: an input and a dropdown is not quite as high as either, and a box that
+//: fills its columns downwards balances on the sum: a pixel more or less
+//: in one row moved a value from one column to the other.
+const CELL_H = 22;
+const CELL = `display:flex;align-items:center;gap:8px;min-width:0;max-width:${FIELD_MAX}px;height:${CELL_H}px;box-sizing:border-box`;
 //: one width for every value in a box, whatever kind it is — a staged
 //: number, a value only read, a checkbox, a dropdown. They used to be
 //: 78, 66, 110 and 126 px wide, and the two that are not numbers also
