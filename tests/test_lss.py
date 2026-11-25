@@ -79,6 +79,17 @@ def test_a_device_with_another_product_stops_the_scan(bus):
     assert bus.unconfigured() == 1 and not bus._lss[0]["config"]
 
 
+def test_devices_with_another_product_can_be_left_for_a_scan_of_their_own(bus):
+    """One product at a time: the first scan ends at the other product
+    without an error, the second picks those up on the next node-IDs."""
+    products = sorted({slave["address"][1] for slave in bus._lss})
+    found = lsslib.assign(bus, 1, 20, {1: products[0]}, FAST, leave_others=True)
+    assert [dev.node for dev in found] == [1, 2]
+    assert bus.unconfigured() == 1 and not any(slave["config"] for slave in bus._lss)
+    rest = lsslib.assign(bus, 3, 20, {1: products[1]}, FAST, leave_others=True)
+    assert [dev.node for dev in rest] == [3] and bus.unconfigured() == 0
+
+
 def test_more_devices_than_node_ids_fail_and_leave_the_rest_waiting(bus):
     with pytest.raises(lsslib.LssError, match=r"more unconfigured devices than node-IDs 1\.\.2"):
         lsslib.assign(bus, 1, 2, {}, FAST)

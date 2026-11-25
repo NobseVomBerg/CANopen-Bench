@@ -6456,7 +6456,7 @@ class Bench:
             try:
                 found = await asyncio.to_thread(
                     lsslib.assign, bus, first, last, known, float(val.get("timeout", 0.01)),
-                    float(val.get("bootup", 0.5)), should_stop)
+                    float(val.get("bootup", 0.5)), should_stop, val.get("others") == "leave")
             except lsslib.LssError as exc:
                 found, failed = exc.assigned, str(exc)
             except ConnectionError:

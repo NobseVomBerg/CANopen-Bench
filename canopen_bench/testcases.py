@@ -294,8 +294,10 @@ def _check_step(step: object, extensions: dict | None = None) -> str | None:
         if not isinstance(val, dict):
             return "lss_fastscan: needs a mapping, e.g. {vendor: \"0x4D2\", first: 1, last: 32}"
         if unknown := set(val) - {"vendor", "product", "revision", "serial", "first", "last",
-                                  "timeout", "bootup", "into", "expect"} - _NOTE:
+                                  "timeout", "bootup", "into", "expect", "others"} - _NOTE:
             return f"lss_fastscan: unknown field(s) {sorted(unknown)}"
+        if val.get("others", "leave") != "leave":
+            return f"lss_fastscan: others can only be \"leave\", got {val['others']!r}"
         for name in ("vendor", "product", "revision", "serial", "first", "last", "expect"):
             if name in val and not _is_value(val[name]):
                 return f"lss_fastscan: invalid {name} {val[name]!r}"
