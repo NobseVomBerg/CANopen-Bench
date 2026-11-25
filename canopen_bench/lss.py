@@ -58,6 +58,10 @@ class LssError(Exception):
         self.assigned = assigned or []
 
 
+class OthersOnly(LssError):
+    """Unconfigured slaves answer, but none with the parts given as known."""
+
+
 class LssMaster:
     def __init__(self, bus, timeout: float = 0.01) -> None:
         self.bus = bus
@@ -105,8 +109,8 @@ class LssMaster:
                         value |= 1 << bit
             if not self._scan(value, 0, sub, (sub + 1) % 4):
                 if sub in known:
-                    raise LssError(f"an unconfigured device answers, but none with "
-                                   f"{PARTS[sub]} 0x{value:08X}")
+                    raise OthersOnly(f"an unconfigured device answers, but none with "
+                                     f"{PARTS[sub]} 0x{value:08X}")
                 raise LssError(f"the device went quiet while its {PARTS[sub]} was read")
             address.append(value)
         return tuple(address)
@@ -138,19 +142,30 @@ def _booted(bootups, timeout: float) -> bool:
 
 
 def assign(bus, first: int, last: int, known: dict[int, int], timeout: float = 0.01,
-           bootup: float = 0.5, stop: Callable[[], bool] = lambda: False) -> list[Assigned]:
+           bootup: float = 0.5, stop: Callable[[], bool] = lambda: False,
+           leave_others: bool = False) -> list[Assigned]:
     """Give every unconfigured slave a node-ID, ``first`` upwards in the
     order the fastscan finds them, which is lowest LSS address first. Each
     one is stored and switched back to waiting, and its boot-up on the new
     ID has to come within ``bootup`` seconds. Raises LssError where it
-    stops. Returns early, with what it assigned, once ``stop()`` says so."""
+    stops. Returns early, with what it assigned, once ``stop()`` says so.
+
+    With ``leave_others`` the slaves that differ in a known part are not an
+    error: they stay unconfigured, and the scan ends with those it found.
+    That is one product at a time on a bus that carries several."""
     master = LssMaster(bus, timeout)
     done: list[Assigned] = []
     try:
         master.switch_global(WAITING)
         node = first
         while not stop():
-            address = master.fastscan(known)
+            try:
+                address = master.fastscan(known)
+            except OthersOnly:
+                if not leave_others:
+                    raise
+                master.switch_global(WAITING)
+                break
             if address is None:
                 break
             if node > last:
