@@ -101,6 +101,66 @@ def test_bus_lost_flips_state_and_logs(connected_bench):
     assert len(connected_bench.logs) == log_count  # no duplicate log entry
 
 
+def test_a_disturbed_bus_is_connected_again_and_scanned(connected_bench, monkeypatch):
+    """A bus error the driver gives up on is not an unplugged adapter: the
+    bench connects again by itself and scans the devices it had."""
+    import canopen_bench.core as core
+    monkeypatch.setattr(core, "RECONNECT_DELAYS_S", (0.01, 0.01))
+    bench = connected_bench
+
+    async def go():
+        bench._on_bus_lost("Error warning limit exceeded")
+        assert not bench.connected
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if bench.connected and bench.devices:
+                break
+    asyncio.run(go())
+    assert bench.connected and len(bench.devices) == 3
+    said = [log["msg"] for log in bench.logs]
+    assert any("reconnecting in" in m for m in said)
+
+
+def test_an_unplugged_adapter_is_not_connected_again(connected_bench):
+    async def go():
+        connected_bench._on_bus_lost("function canControlGetStatus failed")
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    assert not connected_bench.connected
+    assert not any("reconnecting" in log["msg"] for log in connected_bench.logs)
+
+
+def test_a_disconnect_by_hand_cancels_a_waiting_reconnect(connected_bench, monkeypatch):
+    import canopen_bench.core as core
+    monkeypatch.setattr(core, "RECONNECT_DELAYS_S", (0.05,))
+    bench = connected_bench
+
+    async def go():
+        bench._on_bus_lost("Bus off status")
+        bench.dispatch("connect_toggle", {})   # connects by hand ...
+        bench.dispatch("connect_toggle", {})   # ... and disconnects again
+        await asyncio.sleep(0.15)
+    asyncio.run(go())
+    assert not bench.connected
+
+
+def test_a_bus_that_keeps_failing_is_given_up(connected_bench, monkeypatch):
+    import canopen_bench.core as core
+    monkeypatch.setattr(core, "RECONNECT_DELAYS_S", (0.01, 0.01))
+    bench = connected_bench
+
+    async def go():
+        for _ in range(3):
+            bench._on_bus_lost("Bus off status")
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if bench.connected:
+                    break
+    asyncio.run(go())
+    assert not bench.connected
+    assert any("not reconnecting" in log["msg"] for log in bench.logs)
+
+
 def test_bus_lost_when_never_connected_is_silent(bench):
     bench._on_bus_lost("x")
     assert bench.connected is False

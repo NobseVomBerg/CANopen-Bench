@@ -94,6 +94,20 @@ SCAN_DELAY_S = 1.1
 #: database. Often enough that a bench closed with Ctrl-C loses seconds,
 #: not a session; rare enough that a busy bus is not a busy disk.
 SEEN_FLUSH_S = 10.0
+
+#: What the drivers call a bus that is disturbed rather than gone: a loose
+#: contact, a missing terminator, a device that flooded it. The adapter is
+#: still there, so the bench connects again by itself (see
+#: ``_schedule_reconnect``). Anything else — the adapter unplugged, the
+#: driver gone — stays disconnected until somebody connects by hand.
+TRANSIENT_BUS_ERRORS = ("warning limit", "bus off", "bus-off", "busoff", "overrun",
+                        "bus coupling")
+#: how long to wait before each attempt in a row; one more failure than
+#: there are entries and the bench stops trying
+RECONNECT_DELAYS_S = (1.0, 2.0, 5.0, 10.0, 20.0)
+#: a connection that held this long ends a row of attempts: the next loss
+#: is a new disturbance and starts at the first delay again
+RECONNECT_SETTLED_S = 60.0
 #: the addressing procedure this package ships — vendor-neutral LSS. The
 #: procedure a real device family uses is that family's and arrives as a
 #: plugin's flow file, which is what a fresh workspace prefers.
@@ -1156,6 +1170,13 @@ class Bench:
         self._demo_bus.install_hooks([h for p in self.plugins for h in p.demo_hooks()])
         self._notify: Callable[[], Awaitable[None]] | None = None
         self._tasks: set[asyncio.Task] = set()
+        #: bumped by every connect or disconnect somebody asks for: a
+        #: reconnect that was waiting gives way to it
+        self._reconnect_gen = 0
+        #: attempts in the current row (RECONNECT_DELAYS_S)
+        self._reconnect_streak = 0
+        #: when the bus last came up (monotonic)
+        self._connected_at = 0.0
         # one state push at a time, plus a note that another was asked for
         # while it ran (see _changed)
         self._push_task: asyncio.Task | None = None
@@ -1571,12 +1592,53 @@ class Bench:
     def _apply_bus_lost(self, reason: str) -> None:
         if not self.connected:  # already disconnected — nothing to do, no duplicate log
             return
+        had_devices = bool(self.devices)
         self._stop_cyclic()
         self.connected = False
         self.devices = []
         self._autosave_close("bus lost")
         self.log(f"BUS  connection lost — {reason} — auto-disconnected", "emcy0")
+        if any(word in reason.lower() for word in TRANSIENT_BUS_ERRORS):
+            if time.monotonic() - self._connected_at >= RECONNECT_SETTLED_S:
+                self._reconnect_streak = 0
+            self._schedule_reconnect(rescan=had_devices)
         self._changed()
+
+    def _schedule_reconnect(self, rescan: bool) -> None:
+        """Connect again after a disturbed bus, a little later each time.
+
+        A loose contact makes the driver give up on the bus, but the
+        adapter is still there and the next connect usually works. A bus
+        that keeps failing is not helped by more attempts: after the last
+        delay the bench says so and leaves it to the operator. What was
+        running when the bus went — a test, a download — has ended with
+        it and is not started again; the devices are scanned again if
+        there were any.
+        """
+        if self._reconnect_streak >= len(RECONNECT_DELAYS_S):
+            self._reconnect_streak = 0
+            self.log("BUS  not reconnecting — the bus kept failing; check the wiring, "
+                     "then connect by hand", "emcy0")
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:  # no event loop (a script, a test): nothing to wait on
+            return
+        delay = RECONNECT_DELAYS_S[self._reconnect_streak]
+        self._reconnect_streak += 1
+        self.log(f"BUS  reconnecting in {delay:g} s "
+                 f"(attempt {self._reconnect_streak} of {len(RECONNECT_DELAYS_S)})")
+        self.spawn(self._reconnect_after(delay, self._reconnect_gen, rescan))
+
+    async def _reconnect_after(self, delay: float, gen: int, rescan: bool) -> None:
+        await asyncio.sleep(delay)
+        if gen != self._reconnect_gen or self.connected:
+            return  # somebody connected, disconnected or changed the adapter meanwhile
+        if not self._connect():
+            self._schedule_reconnect(rescan)
+            return
+        if rescan:
+            self.act_scan({})
 
     def _changed(self) -> None:
         """Ask for a state push, with at most one of them in flight.
@@ -2459,6 +2521,8 @@ class Bench:
 
     # -- connection / devices --------------------------------------------
     def act_connect_toggle(self, p: dict) -> None:
+        self._reconnect_gen += 1
+        self._reconnect_streak = 0
         if self.connected:
             self._stop_cyclic()
             self.connected = False
@@ -2470,12 +2534,17 @@ class Bench:
             self._autosave_close("bus disconnected")
             self.log("BUS  disconnected")
             return
+        self._connect()
+
+    def _connect(self) -> bool:
+        """Open the selected adapter; False, and said so, where it fails."""
         self._capture_loop()
         try:
             self.bus.connect(self.adapter, int(self.bitrate), self.channel_for(self.adapter))
         except Exception as exc:  # driver missing, adapter unplugged, channel busy
             self.log(f"BUS  connect failed — {exc}", "emcy0")
-            return
+            return False
+        self._connected_at = time.monotonic()
         self.bus_load = 0.0
         self.err_frames = 0
         self._load_win.clear()
@@ -2500,6 +2569,7 @@ class Bench:
         # "validate on start" (A-05) fires on connect
         if self.mc["enabled"] and self.mc.get("scanStart"):
             self.act_mc_verify({})
+        return True
 
     def spawn(self, coro) -> None:
         """Run a coroutine alongside the bench, keeping a reference to it.
@@ -3186,6 +3256,7 @@ class Bench:
     def act_set_adapter(self, p: dict) -> None:
         if p["adapter"] == self.adapter:
             return
+        self._reconnect_gen += 1  # a reconnect still waiting was for the other adapter
         if self.connected:
             # the bus property routes by adapter key, so disconnect the old
             # backend before the key flips underneath it
