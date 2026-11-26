@@ -131,6 +131,19 @@ als HTTP 500). Jetzt:
    auto-disconnected` (`emcy0`) und pusht den Snapshot an die Browser.
    Ein laufender Testlauf bricht über die bestehende
    `connected`-Prüfung im Step-Executor mit „connection lost" ab.
+5. **[umgesetzt]** Ein gestörter Bus ist kein abgezogener Adapter: Nennt
+   der Fehlertext eine Störung (`TRANSIENT_BUS_ERRORS` in `core.py`: Error
+   Warning Limit, Bus-Off, Overrun, Bus Coupling Error — beim IXXAT etwa
+   nach Acknowledgment- und CRC-Fehlern durch einen Wackler), verbindet
+   die Bench selbst neu (`_schedule_reconnect`), nach 1, 2, 5, 10 und
+   20 s (`RECONNECT_DELAYS_S`), und scannt danach, wenn vorher Geräte da
+   waren. Log: `BUS  reconnecting in <n> s (attempt <i> of <k>)`. Fällt
+   der Bus wieder aus, bevor er 60 s gehalten hat
+   (`RECONNECT_SETTLED_S`), zählt das als nächster Versuch; nach dem
+   letzten gibt die Bench auf (`BUS  not reconnecting — …`). Ein
+   Verbinden, Trennen oder Adapterwechsel von Hand bricht ein wartendes
+   Neuverbinden ab. Ein abgebrochener Test oder Download startet nicht
+   von selbst neu.
 
 ## Timing und Timeouts
 
